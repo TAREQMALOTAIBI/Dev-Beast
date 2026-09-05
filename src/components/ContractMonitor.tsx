@@ -63,9 +63,28 @@ export const ContractMonitor: React.FC<ContractMonitorProps> = ({
             <span className="text-[10px] font-mono px-1.5 py-0.5 border border-[#333] bg-[#111] text-zinc-400">
               {contract.network}
             </span>
+            {contract.spread !== undefined && (
+              <span className={`text-[10px] font-mono px-1.5 py-0.5 border ${
+                contract.isIlliquid
+                  ? 'border-amber-500/40 bg-amber-500/10 text-amber-400'
+                  : 'border-[#00ff9d]/30 bg-[#00ff9d]/10 text-[#00ff9d]'
+              }`}>
+                السبريد: ${contract.spread.toFixed(3)}
+              </span>
+            )}
+            {contract.isIlliquid && (
+              <span className="text-[9px] font-mono px-1.5 py-0.5 border border-[#ff4d4d]/40 bg-[#ff4d4d]/10 text-[#ff4d4d]">
+                سيولة دفتر أوامر منخفضة
+              </span>
+            )}
           </div>
-          <p className="text-xs text-zinc-300 font-mono mt-1">
-            {contract.title}
+          <p className="text-xs text-zinc-300 font-mono mt-1 flex items-center gap-2">
+            <span>{contract.title}</span>
+            {contract.venueExchange && (
+              <span className="text-[9px] text-zinc-500 font-mono">
+                [CLOB: {contract.venueExchange.substring(0, 6)}...{contract.venueExchange.substring(contract.venueExchange.length - 4)}]
+              </span>
+            )}
           </p>
         </div>
 

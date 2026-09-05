@@ -58,6 +58,10 @@ export interface LimitlessContract {
   bestYesAsk?: number;
   bestNoBid?: number;
   bestNoAsk?: number;
+  spread?: number;
+  isIlliquid?: boolean;
+  venueExchange?: string;
+  tokens?: { yes: string; no: string };
   expiryTimestamp: number;
   cycleStartTimestamp: number;
   isPriceInRangeYes: boolean;       // $0.01 <= price <= $0.25

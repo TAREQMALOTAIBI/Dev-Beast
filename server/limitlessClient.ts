@@ -238,12 +238,63 @@ export class LimitlessClient {
     let strikePrice = Math.round(cycleOpenPrice);
     let yesPrice = 0.50;
     let noPrice = 0.50;
+    let bestYesBid: number | undefined;
+    let bestYesAsk: number | undefined;
+    let bestNoBid: number | undefined;
+    let bestNoAsk: number | undefined;
+    let spread: number | undefined;
+    let isIlliquid = false;
+    let venueExchange: string | undefined;
+    let tokens: { yes: string; no: string } | undefined;
     let contractId = `limitless-btc-15m-${expiryTimestamp}`;
     let contractTitle = `BTC 15 Min - Base Mainnet`;
 
     if (realMarket) {
       contractId = realMarket.slug || realMarket.id?.toString() || contractId;
       contractTitle = realMarket.title || `BTC Up or Down - 15 Min`;
+
+      // 2. Best Practice: Cache venue data & tokens using getMarket
+      try {
+        const fullMarket = await this.sdkClient.markets.getMarket(contractId);
+        if (fullMarket?.venue?.exchange) {
+          venueExchange = fullMarket.venue.exchange;
+        }
+        if (fullMarket?.tokens) {
+          tokens = fullMarket.tokens;
+        }
+      } catch {
+        // Fallback to realMarket object if single getMarket call fails
+        if (realMarket.venue?.exchange) venueExchange = realMarket.venue.exchange;
+        if (realMarket.tokens) tokens = realMarket.tokens;
+      }
+
+      // 3. Best Practice: Fetch live Orderbook for real bids, asks, spread & illiquidity check
+      try {
+        const orderbook = await this.sdkClient.markets.getOrderBook(contractId);
+        const hasBids = Array.isArray(orderbook?.bids) && orderbook.bids.length > 0;
+        const hasAsks = Array.isArray(orderbook?.asks) && orderbook.asks.length > 0;
+
+        if (hasBids && hasAsks) {
+          bestYesBid = parseFloat(orderbook.bids[0].price.toFixed(3));
+          bestYesAsk = parseFloat(orderbook.asks[0].price.toFixed(3));
+          spread = parseFloat((bestYesAsk - bestYesBid).toFixed(3));
+
+          // Detect wide spread / illiquid market (> $0.20 spread)
+          if (spread > 0.20) {
+            isIlliquid = true;
+          }
+
+          // Use real best ask for YES buy price, and opposite for NO
+          yesPrice = bestYesAsk;
+          noPrice = parseFloat((1 - yesPrice).toFixed(3));
+          bestNoAsk = parseFloat((1 - (bestYesBid || 0)).toFixed(3));
+          bestNoBid = parseFloat((1 - (bestYesAsk || 1)).toFixed(3));
+        } else {
+          isIlliquid = true;
+        }
+      } catch {
+        // Fallback to tradePrices or theoretical model
+      }
 
       // Extract real Chainlink TWAP open price if available
       if (realMarket.metadata?.openPrice) {
@@ -253,11 +304,11 @@ export class LimitlessClient {
         }
       }
 
-      // Extract real trade/market prices from SDK response
-      if (Array.isArray(realMarket.prices) && realMarket.prices.length >= 2) {
+      // Fallback prices if orderbook was empty
+      if (yesPrice === 0.50 && Array.isArray(realMarket.prices) && realMarket.prices.length >= 2) {
         yesPrice = parseFloat(Number(realMarket.prices[0]).toFixed(2));
         noPrice = parseFloat(Number(realMarket.prices[1]).toFixed(2));
-      } else if (realMarket.tradePrices?.buy?.market && Array.isArray(realMarket.tradePrices.buy.market)) {
+      } else if (yesPrice === 0.50 && realMarket.tradePrices?.buy?.market && Array.isArray(realMarket.tradePrices.buy.market)) {
         yesPrice = parseFloat(Number(realMarket.tradePrices.buy.market[0]).toFixed(2));
         noPrice = parseFloat(Number(realMarket.tradePrices.buy.market[1]).toFixed(2));
       }
@@ -286,10 +337,14 @@ export class LimitlessClient {
       targetStrikePrice: strikePrice,
       yesPrice,
       noPrice,
-      bestYesBid: parseFloat((yesPrice * 0.98).toFixed(2)),
-      bestYesAsk: parseFloat((yesPrice * 1.02).toFixed(2)),
-      bestNoBid: parseFloat((noPrice * 0.98).toFixed(2)),
-      bestNoAsk: parseFloat((noPrice * 1.02).toFixed(2)),
+      bestYesBid: bestYesBid ?? parseFloat((yesPrice * 0.98).toFixed(2)),
+      bestYesAsk: bestYesAsk ?? parseFloat((yesPrice * 1.02).toFixed(2)),
+      bestNoBid: bestNoBid ?? parseFloat((noPrice * 0.98).toFixed(2)),
+      bestNoAsk: bestNoAsk ?? parseFloat((noPrice * 1.02).toFixed(2)),
+      spread,
+      isIlliquid,
+      venueExchange,
+      tokens,
       expiryTimestamp: realMarket?.expirationTimestamp || expiryTimestamp,
       cycleStartTimestamp: cycleStartMs,
       // Strict rule: Target Contract Token Price MUST be <= $0.25 AND >= $0.01
@@ -329,6 +384,14 @@ export class LimitlessClient {
       return {
         success: false,
         error: `Price Cap/Floor Violation: ${side} price ($${tokenPrice.toFixed(2)}) is not within [$0.01, $0.25]. Order rejected.`,
+      };
+    }
+
+    // Filter 1.5: Illiquidity & Wide Spread Protection (> $0.20 spread)
+    if (!bypassPriceFilter && contract.isIlliquid) {
+      return {
+        success: false,
+        error: `Liquidity Filter: Order rejected due to wide spread ($${contract.spread?.toFixed(3) || '>0.20'}) or missing two-sided orderbook depth.`,
       };
     }
 
