@@ -1,12 +1,14 @@
 import crypto from 'crypto';
 import { LimitlessContract, Position, BotConfig } from '../src/types';
-import { Client, Side, computeHMACSignature, OrderClient, OrderType } from '@limitless-exchange/sdk';
+import { Client, Side, computeHMACSignature, OrderClient, OrderType, WebSocketClient } from '@limitless-exchange/sdk';
 import { ethers } from 'ethers';
 
 export class LimitlessClient {
   private sdkClient: Client;
+  private wsClient: WebSocketClient | null = null;
   private orderClient: OrderClient | null = null;
   private baseUrl: string = 'https://api.limitless.exchange';
+  private wsUrl: string = 'wss://ws.limitless.exchange';
   private tokenId: string = '';
   private tokenSecret: string = '';
   private privateKey: string = '';
@@ -23,6 +25,11 @@ export class LimitlessClient {
   private isConnected: boolean = false;
   private lastPingAt: number = 0;
   private latencyMs: number = 0;
+  
+  // Real-time market state from WebSocket
+  private marketSubscriptions = new Set<string>();
+  private latestOrderbooks = new Map<string, any>();
+  private realTimePositions: any[] = [];
 
   constructor(initialConfig?: Partial<BotConfig>) {
     this.tokenId = (initialConfig?.limitlessTokenId || process.env.LMTS_TOKEN_ID || process.env.LIMITLESS_API_TOKEN_ID || '').trim();
@@ -31,6 +38,9 @@ export class LimitlessClient {
     this.walletAddress = (initialConfig?.limitlessWalletAddress || process.env.LIMITLESS_WALLET_ADDRESS || '').trim();
 
     this.sdkClient = this.buildSdkClient();
+
+    // Initialize WebSocket
+    this.initWebSocket();
 
     // Initialize the EOA EIP-712 OrderClient if private key is provided
     if (this.privateKey) {
@@ -50,6 +60,100 @@ export class LimitlessClient {
 
     if (this.walletAddress) {
       this.fetchRealOnChainBalance().catch(() => {});
+    }
+  }
+
+  private initWebSocket() {
+    // Graceful disconnect old WS if updating config
+    if (this.wsClient) {
+      try {
+        this.wsClient.disconnect();
+      } catch (e) {}
+    }
+
+    const wsConfig: any = {
+      url: this.wsUrl,
+      autoReconnect: true,
+    };
+
+    if (this.tokenId && this.tokenSecret) {
+      wsConfig.hmacCredentials = {
+        tokenId: this.tokenId,
+        secret: this.tokenSecret,
+      };
+    }
+
+    this.wsClient = new WebSocketClient(wsConfig);
+
+    this.wsClient.on('connect', () => {
+      console.log('[LimitlessClient WS] Connected to Limitless WSS');
+      this.isConnected = true;
+      // Socket.io 'connect' event means the underlying socket is connected,
+      // but SDK's internal connected flag might take a microtick.
+      setTimeout(() => {
+        try {
+          this.resubscribeMarkets();
+          if (this.tokenId && this.tokenSecret) {
+            this.wsClient!.subscribe('subscribe_positions');
+          }
+        } catch (e: any) {
+           console.error('[LimitlessClient WS] Error on connect subscriptions:', e.message);
+        }
+      }, 100);
+    });
+
+    this.wsClient.on('disconnect', (reason: string) => {
+      console.log('[LimitlessClient WS] Disconnected:', reason);
+      this.isConnected = false;
+    });
+
+    this.wsClient.on('reconnect', () => {
+      console.log('[LimitlessClient WS] Reconnected, resubscribing...');
+      this.isConnected = true;
+      setTimeout(() => {
+        try {
+          this.resubscribeMarkets();
+          if (this.tokenId && this.tokenSecret) {
+            this.wsClient!.subscribe('subscribe_positions');
+          }
+        } catch (e: any) {
+          console.error('[LimitlessClient WS] Error on reconnect subscriptions:', e.message);
+        }
+      }, 100);
+    });
+
+    this.wsClient.on('orderbookUpdate', (data: any) => {
+      if (data && data.marketSlug && data.orderbook) {
+        this.latestOrderbooks.set(data.marketSlug, data.orderbook);
+      }
+    });
+
+    this.wsClient.on('positions', (data: any) => {
+      if (data && Array.isArray(data.clob)) {
+        this.realTimePositions = data.clob;
+      }
+    });
+    
+    // Optional debug if needed
+    // this.wsClient.onAny((eventName: string, ...args: unknown[]) => {
+    //  console.log(`[Limitless WS] ${eventName}`);
+    // });
+
+    try {
+      this.wsClient.connect();
+    } catch (e: any) {
+      console.error(`[LimitlessClient WS] Failed to connect: ${e.message}`);
+    }
+  }
+
+  private resubscribeMarkets() {
+    if (!this.wsClient || !this.isConnected || this.marketSubscriptions.size === 0) return;
+    
+    const marketSlugs = Array.from(this.marketSubscriptions);
+    try {
+      this.wsClient.subscribe('subscribe_market_prices', { marketSlugs });
+    } catch (e) {
+      console.error('[LimitlessClient WS] Failed to resubscribe markets');
     }
   }
 
@@ -206,6 +310,9 @@ export class LimitlessClient {
    * Get active CLOB positions from PortfolioFetcher
    */
   public async getPositions(): Promise<any[]> {
+    if (this.wsClient && this.isConnected && this.realTimePositions.length > 0) {
+      return this.realTimePositions;
+    }
     if (!this.sdkClient) return [];
     try {
       const positions = await this.sdkClient.portfolio.getCLOBPositions();
@@ -291,6 +398,11 @@ export class LimitlessClient {
       contractId = realMarket.slug || realMarket.id?.toString() || contractId;
       contractTitle = realMarket.title || `BTC Up or Down - 15 Min`;
 
+      if (!this.marketSubscriptions.has(contractId)) {
+        this.marketSubscriptions.add(contractId);
+        this.resubscribeMarkets();
+      }
+
       // 2. Best Practice: Cache venue data & tokens using getMarket
       try {
         const fullMarket = await this.sdkClient.markets.getMarket(contractId);
@@ -306,9 +418,15 @@ export class LimitlessClient {
         if (realMarket.tokens) tokens = realMarket.tokens;
       }
 
-      // 3. Best Practice: Fetch live Orderbook for real bids, asks, spread & illiquidity check
+      // 3. Best Practice: Fetch live Orderbook for real bids, asks, spread & illiquidity check (From WS if available)
       try {
-        const orderbook = await this.sdkClient.markets.getOrderBook(contractId);
+        let orderbook = this.latestOrderbooks.get(contractId);
+        
+        if (!orderbook) {
+           orderbook = await this.sdkClient.markets.getOrderBook(contractId);
+           if (orderbook) this.latestOrderbooks.set(contractId, orderbook);
+        }
+        
         const hasBids = Array.isArray(orderbook?.bids) && orderbook.bids.length > 0;
         const hasAsks = Array.isArray(orderbook?.asks) && orderbook.asks.length > 0;
 
