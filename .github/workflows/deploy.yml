@@ -1,0 +1,47 @@
+name: Deploy Trading Bot to GCP VM
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  deploy:
+    name: Deploy to Google Cloud VM
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USERNAME }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          port: 22
+          script: |
+            # Navigate to project directory
+            if [ ! -d "$HOME/trading-bot" ]; then
+              echo "Cloning repository for the first time..."
+              git clone https://github.com/${{ github.repository }}.git $HOME/trading-bot
+            fi
+
+            cd $HOME/trading-bot
+            echo "Pulling latest changes..."
+            git pull origin main || git pull origin master
+
+            echo "Installing dependencies..."
+            npm install
+
+            echo "Building application..."
+            npm run build
+
+            echo "Restarting application via PM2..."
+            if pm2 list | grep -q "trading-bot"; then
+              pm2 reload trading-bot --update-env
+            else
+              PORT=3000 pm2 start dist/server.cjs --name "trading-bot"
+              pm2 save
+            fi
+
+            echo "Deployment completed successfully!"

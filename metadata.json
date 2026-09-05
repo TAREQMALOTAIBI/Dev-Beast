@@ -1,6 +1,8 @@
 {
-  "name": "روبوت التداول الكمي لبيتكوين 15 دقيقة",
+  "name": "Dev Beast",
   "description": "روبوت تداول مؤسسي كمي لعقود توقع بيتكوين كل 15 دقيقة على منصة Limitless Exchange (شبكة Base) مع اتصال Binance فائق السرعة، ومؤشرات Z-Score، ورصد تصفيات الفائدة المفتوحة والتنفيذ بمحفظة مدمجة.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }
