@@ -102,6 +102,7 @@ export interface BotConfig {
   goldenWindowEndSec: number;       // 510 (08:30)
   limitlessTokenId: string;
   limitlessTokenSecret: string;
+  limitlessPrivateKey?: string;
   limitlessWalletAddress: string;
 }
 

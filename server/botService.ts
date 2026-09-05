@@ -291,7 +291,8 @@ export class BotService {
     await this.limitlessClient.updateCredentials(
       this.config.limitlessTokenId,
       this.config.limitlessTokenSecret,
-      this.config.limitlessWalletAddress
+      this.config.limitlessWalletAddress,
+      this.config.limitlessPrivateKey
     );
     this.addLog('INFO', `Bot configuration updated. Active: ${this.config.active}, Live Mode: ${this.config.liveMode}`);
   }

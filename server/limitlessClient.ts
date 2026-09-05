@@ -1,12 +1,15 @@
 import crypto from 'crypto';
 import { LimitlessContract, Position, BotConfig } from '../src/types';
-import { Client, Side, computeHMACSignature } from '@limitless-exchange/sdk';
+import { Client, Side, computeHMACSignature, OrderClient, OrderType } from '@limitless-exchange/sdk';
+import { ethers } from 'ethers';
 
 export class LimitlessClient {
   private sdkClient: Client;
+  private orderClient: OrderClient | null = null;
   private baseUrl: string = 'https://api.limitless.exchange';
   private tokenId: string = '';
   private tokenSecret: string = '';
+  private privateKey: string = '';
   private walletAddress: string = '';
   private profileId: number | null = null;
   private username: string = '';
@@ -24,12 +27,30 @@ export class LimitlessClient {
   constructor(initialConfig?: Partial<BotConfig>) {
     this.tokenId = (initialConfig?.limitlessTokenId || process.env.LMTS_TOKEN_ID || process.env.LIMITLESS_API_TOKEN_ID || '').trim();
     this.tokenSecret = (initialConfig?.limitlessTokenSecret || process.env.LMTS_TOKEN_SECRET || process.env.LIMITLESS_API_TOKEN_SECRET || '').trim();
-    this.walletAddress = (initialConfig?.limitlessWalletAddress || process.env.LIMITLESS_WALLET_ADDRESS || process.env.LIMITLESS_EMBEDDED_WALLET_ADDRESS || '').trim();
+    this.privateKey = (initialConfig?.limitlessPrivateKey || process.env.PRIVATE_KEY || process.env.LIMITLESS_PRIVATE_KEY || '').trim();
+    this.walletAddress = (initialConfig?.limitlessWalletAddress || process.env.LIMITLESS_WALLET_ADDRESS || '').trim();
 
     this.sdkClient = this.buildSdkClient();
 
-    // Auto-detect and initialize embedded smart wallet profile
-    this.initEmbeddedWallet().catch(() => {});
+    // Initialize the EOA EIP-712 OrderClient if private key is provided
+    if (this.privateKey) {
+      try {
+        const wallet = new ethers.Wallet(this.privateKey);
+        this.orderClient = new OrderClient({
+          // @ts-ignore - access internal http client
+          httpClient: this.sdkClient.httpClient || this.sdkClient.http,
+          wallet,
+          marketFetcher: this.sdkClient.markets,
+        });
+        this.walletAddress = wallet.address;
+      } catch (err) {
+        console.warn(`[LimitlessClient] Failed to init OrderClient: ${err}`);
+      }
+    }
+
+    if (this.walletAddress) {
+      this.fetchRealOnChainBalance().catch(() => {});
+    }
   }
 
   private buildSdkClient(): Client {
@@ -48,39 +69,38 @@ export class LimitlessClient {
     });
   }
 
-  /**
-   * Initializes the Embedded Smart Wallet via HMAC Authentication (No Private Key Needed)
-   */
-  public async initEmbeddedWallet(): Promise<void> {
-    if (this.tokenId && this.tokenSecret) {
+  public async updateCredentials(tokenId: string, tokenSecret: string, walletAddress?: string, privateKey?: string): Promise<void> {
+    this.tokenId = tokenId.trim();
+    this.tokenSecret = tokenSecret.trim();
+    
+    if (privateKey !== undefined) {
+      this.privateKey = privateKey.trim();
+    }
+    
+    if (walletAddress !== undefined) {
+      this.walletAddress = walletAddress.trim();
+    }
+    
+    this.sdkClient = this.buildSdkClient();
+
+    if (this.privateKey) {
       try {
-        const profile = (await this.sdkClient.portfolio.getProfile()) as any;
-        if (profile?.id) {
-          this.profileId = profile.id;
-          this.username = profile.username || '';
-          if (profile.smartWallet && /^0x[a-fA-F0-9]{40}$/.test(profile.smartWallet)) {
-            this.walletAddress = profile.smartWallet;
-          }
-          console.log(`[LimitlessClient] Embedded Smart Wallet verified: ${this.walletAddress} (User ID: ${this.profileId}, User: ${this.username})`);
-        }
-      } catch (e: any) {
-        console.warn(`[LimitlessClient] Profile resolution warning: ${e.message}`);
+        const wallet = new ethers.Wallet(this.privateKey);
+        this.orderClient = new OrderClient({
+          // @ts-ignore
+          httpClient: this.sdkClient.httpClient || this.sdkClient.http,
+          wallet,
+          marketFetcher: this.sdkClient.markets,
+        });
+        this.walletAddress = wallet.address;
+      } catch (err) {
+        console.warn(`[LimitlessClient] Failed to init OrderClient: ${err}`);
       }
     }
 
     if (this.walletAddress) {
       await this.fetchRealOnChainBalance();
     }
-  }
-
-  public async updateCredentials(tokenId: string, tokenSecret: string, walletAddress?: string): Promise<void> {
-    this.tokenId = tokenId.trim();
-    this.tokenSecret = tokenSecret.trim();
-    if (walletAddress !== undefined) {
-      this.walletAddress = walletAddress.trim();
-    }
-    this.sdkClient = this.buildSdkClient();
-    await this.initEmbeddedWallet();
   }
 
   /**
@@ -418,38 +438,38 @@ export class LimitlessClient {
 
     const actualCost = parseFloat((shares * tokenPrice).toFixed(2));
 
-    // Order execution for Embedded Smart Wallet using HMAC Scoped Tokens
+    // Order execution via OrderClient using the EOA Wallet
     let txHash: string | undefined;
-    if (isLiveMode && this.tokenId && this.tokenSecret) {
+    if (isLiveMode && this.orderClient) {
       try {
-        const orderBody = JSON.stringify({
+        if (!contract.tokens) {
+          throw new Error('Tokens missing from contract. Cannot place order.');
+        }
+        
+        const result = await this.orderClient.createOrder({
           marketSlug: contract.id,
-          outcome: side === 'YES' ? 0 : 1,
+          tokenId: side === 'YES' ? contract.tokens.yes : contract.tokens.no,
           side: Side.BUY,
           price: tokenPrice,
-          count: shares,
-          orderType: 'FAK',
+          size: shares,
+          orderType: OrderType.FAK,
         });
-        const headers = this.generateAuthHeaders('POST', '/orders', orderBody);
-
-        const response = await fetch(`${this.baseUrl}/orders`, {
-          method: 'POST',
-          headers,
-          body: orderBody,
-          signal: AbortSignal.timeout(4000),
-        }).catch(() => null);
-
-        if (response && response.ok) {
-          const resData = (await response.json()) as { txHash?: string; id?: string };
-          txHash = resData.txHash || resData.id || `0x${crypto.randomBytes(32).toString('hex')}`;
-        } else {
-          txHash = `0x${crypto.randomBytes(32).toString('hex')}`;
-        }
-      } catch {
-        txHash = `0x${crypto.randomBytes(32).toString('hex')}`;
+        
+        txHash = result.order?.id || `0x${crypto.randomBytes(32).toString('hex')}`;
+      } catch (err: any) {
+        return {
+          success: false,
+          error: `Order execution failed: ${err.message}`,
+        };
       }
     } else {
-      // Dry-run simulated execution
+      // Dry-run simulated execution or missing OrderClient
+      if (isLiveMode && !this.orderClient) {
+        return {
+          success: false,
+          error: `Live mode requires Private Key in EOA mode. OrderClient not initialized.`,
+        };
+      }
       txHash = `0x${crypto.randomBytes(32).toString('hex')}`;
     }
 

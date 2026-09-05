@@ -27,26 +27,27 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
   const [liveMode, setLiveMode] = useState(config.liveMode);
   const [tokenId, setTokenId] = useState(config.limitlessTokenId);
   const [tokenSecret, setTokenSecret] = useState(config.limitlessTokenSecret);
+  const [privateKey, setPrivateKey] = useState(config.limitlessPrivateKey || '');
   const [walletAddress, setWalletAddress] = useState(config.limitlessWalletAddress);
   const [isSaving, setIsSaving] = useState(false);
   const [isCheckingRpc, setIsCheckingRpc] = useState(false);
   const [rpcStatusMsg, setRpcStatusMsg] = useState<string | null>(null);
 
-  const isValidAddress = /^0x[a-fA-F0-9]{40}$/.test(walletAddress.trim());
+  const isWalletReady = privateKey && privateKey.length >= 64;
 
   const handleRefreshRpc = async () => {
-    if (!isValidAddress) {
-      setRpcStatusMsg('⚠️ يرجى إدخال عنوان محفظة Base صحيح أولاً (يبدأ بـ 0x بطول 42 حرف)');
+    if (!isWalletReady) {
+      setRpcStatusMsg('⚠️ يرجى إدخال مفتاح خاص (Private Key) صحيح للمحفظة الخارجية لتحديث الرصيد.');
       return;
     }
     setIsCheckingRpc(true);
     setRpcStatusMsg(null);
     try {
-      // Save the address first if changed
+      // Save the credentials first so the backend can derive the address
       await onSaveConfig({
-        limitlessWalletAddress: walletAddress.trim(),
         limitlessTokenId: tokenId.trim(),
         limitlessTokenSecret: tokenSecret.trim(),
+        limitlessPrivateKey: privateKey.trim(),
       });
       if (onRefreshBalance) {
         await onRefreshBalance();
@@ -70,6 +71,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
         liveMode,
         limitlessTokenId: tokenId.trim(),
         limitlessTokenSecret: tokenSecret.trim(),
+        limitlessPrivateKey: privateKey.trim(),
         limitlessWalletAddress: walletAddress.trim(),
       });
       onClose();
@@ -112,11 +114,11 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 <span>1. ربط محفظة Limitless الحقيقية (Base Mainnet)</span>
               </div>
               <span className={`text-[10px] font-bold px-2 py-0.5 border ${
-                isValidAddress
+                isWalletReady
                   ? 'bg-[#00ff9d]/10 text-[#00ff9d] border-[#00ff9d]/30'
                   : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
               }`}>
-                {isValidAddress ? '● المحفظة محددة' : '⚠️ غير مربوطة بعد'}
+                {isWalletReady ? '● المفتاح الخاص جاهز' : '⚠️ المفتاح الخاص غير مدخل'}
               </span>
             </div>
 
@@ -157,23 +159,6 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 </div>
               )}
 
-              {/* Wallet Address Input */}
-              <div>
-                <label className="block text-zinc-400 mb-1 text-[10px] uppercase tracking-tight">
-                  عنوان محفظة Limitless المضمنة (Embedded Privy Wallet Address)
-                </label>
-                <input
-                  type="text"
-                  placeholder="0x... (الصق عنوان محفظتك من منصة Limitless)"
-                  value={walletAddress}
-                  onChange={(e) => setWalletAddress(e.target.value)}
-                  className="w-full bg-[#0a0a0a] border border-[#333] px-2.5 py-2 text-white focus:outline-none focus:border-[#00ff9d] text-xs font-mono"
-                />
-                <p className="text-[10px] text-zinc-500 mt-1">
-                  * هذا هو عنوان المحفظة الذكية الخاصة بك على شبكة Base Mainnet، يتم قراءة رصيد الـ USDC الحقيقي منها بدون أي محاكاة.
-                </p>
-              </div>
-
               {/* Limitless API Token ID */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
                 <div>
@@ -191,7 +176,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
 
                 <div>
                   <label className="block text-zinc-400 mb-1 text-[10px] uppercase tracking-tight">
-                    سر التوقيع (Token Secret - HMAC Signer)
+                    سر التوقيع (Token Secret)
                   </label>
                   <input
                     type="password"
@@ -203,12 +188,32 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 </div>
               </div>
 
+              {/* Private Key for EOA API Trading */}
+              <div className="pt-2">
+                <label className="block text-zinc-400 mb-1 text-[10px] uppercase tracking-tight">
+                  المفتاح الخاص للمحفظة الخارجية (EOA Private Key) - إجباري للتداول
+                </label>
+                <input
+                  type="password"
+                  placeholder="0x... (لا تقم بمشاركته مع أحد)"
+                  value={privateKey}
+                  onChange={(e) => setPrivateKey(e.target.value)}
+                  className="w-full bg-[#0a0a0a] border border-amber-500/50 px-2.5 py-1.5 text-amber-400 focus:outline-none focus:border-amber-400 text-xs font-mono"
+                />
+                <p className="text-[10px] text-amber-500/70 mt-1 leading-relaxed">
+                  * ⚠️ <b>مطلوب:</b> يجب أن يكون حسابك في وضع <b>EOA Trading Mode</b>.
+                  سيتم استخدام هذا المفتاح لتوقيع الصفقات وإرسالها إلى دفتر الأوامر (CLOB) مباشرة عبر OrderClient.
+                  سيتم استخراج عنوان محفظتك تلقائياً من هذا المفتاح وقراءة رصيد USDC منها.
+                </p>
+              </div>
+
               {/* Quick instructions guide */}
               <div className="p-2.5 bg-[#141414] border border-[#222] text-[10px] text-zinc-400 space-y-1">
-                <div className="text-zinc-300 font-bold">خطوات الحصول على البيانات من Limitless:</div>
-                <div>1. افتح منصة <span className="text-[#00ff9d]">limitless.exchange</span> وسجل الدخول بحسابك.</div>
-                <div>2. انسخ عنوان محفظتك المضمنة (يبدأ بـ 0x) والصقه في الحقل أعلاه.</div>
-                <div>3. توجه إلى Profile ← API Tokens ← واضغط على Derive لاستخراج Token ID و Secret.</div>
+                <div className="text-zinc-300 font-bold">خطوات التداول الآلي (EOA Mode):</div>
+                <div>1. افتح منصة <span className="text-[#00ff9d]">limitless.exchange</span> وسجل الدخول باستخدام محفظتك الخارجية (MetaMask/Rabby).</div>
+                <div>2. من الإعدادات، تأكد من تحويل حسابك إلى <b>EOA Trading Mode</b> ليُسمح لك بالتوقيع الخارجي.</div>
+                <div>3. قم بعملية شراء يدوية بقيمة 1$ لمرة واحدة للموافقة (Approve USDC) للعقد الذكي.</div>
+                <div>4. توجه إلى Profile ← API Tokens واستخرج Token ID و Secret للتفويض.</div>
               </div>
             </div>
           </div>
