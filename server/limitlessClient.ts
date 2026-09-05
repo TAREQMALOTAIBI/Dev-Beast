@@ -6,7 +6,10 @@ export class LimitlessClient {
   private tokenId: string = '';
   private tokenSecret: string = '';
   private walletAddress: string = '';
-  private liveWalletBalance: number = 1000.00; // Default $1,000.00 USDC in embedded wallet
+  private liveWalletBalance: number = 0.00; // Real on-chain balance (strictly no fake default)
+  private isWalletConnected: boolean = false;
+  private ethGasBalance: number = 0.00;
+  private lastBalanceFetchAt: number = 0;
 
   private currentContract: LimitlessContract | null = null;
   private isConnected: boolean = false;
@@ -14,15 +17,99 @@ export class LimitlessClient {
   private latencyMs: number = 0;
 
   constructor(initialConfig?: Partial<BotConfig>) {
-    if (initialConfig?.limitlessTokenId) this.tokenId = initialConfig.limitlessTokenId;
-    if (initialConfig?.limitlessTokenSecret) this.tokenSecret = initialConfig.limitlessTokenSecret;
-    if (initialConfig?.limitlessWalletAddress) this.walletAddress = initialConfig.limitlessWalletAddress;
+    if (initialConfig?.limitlessTokenId) this.tokenId = initialConfig.limitlessTokenId.trim();
+    if (initialConfig?.limitlessTokenSecret) this.tokenSecret = initialConfig.limitlessTokenSecret.trim();
+    if (initialConfig?.limitlessWalletAddress) {
+      this.walletAddress = initialConfig.limitlessWalletAddress.trim();
+      this.fetchRealOnChainBalance().catch(() => {});
+    }
   }
 
-  public updateCredentials(tokenId: string, tokenSecret: string, walletAddress?: string): void {
+  public async updateCredentials(tokenId: string, tokenSecret: string, walletAddress?: string): Promise<void> {
     this.tokenId = tokenId.trim();
     this.tokenSecret = tokenSecret.trim();
-    if (walletAddress) this.walletAddress = walletAddress.trim();
+    if (walletAddress !== undefined) {
+      this.walletAddress = walletAddress.trim();
+    }
+    await this.fetchRealOnChainBalance();
+  }
+
+  /**
+   * Fetch real on-chain USDC balance from Base Mainnet RPC
+   * Base USDC Contract: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 (Decimals: 6)
+   */
+  public async fetchRealOnChainBalance(): Promise<{ usdc: number; eth: number; connected: boolean }> {
+    if (!this.walletAddress || !/^0x[a-fA-F0-9]{40}$/.test(this.walletAddress)) {
+      this.isWalletConnected = false;
+      this.liveWalletBalance = 0.00;
+      this.ethGasBalance = 0.00;
+      return { usdc: 0, eth: 0, connected: false };
+    }
+
+    try {
+      const cleanAddress = this.walletAddress.substring(2).toLowerCase();
+      const paddedAddress = cleanAddress.padStart(64, '0');
+      const data = `0x70a08231${paddedAddress}`; // ERC-20 balanceOf(address)
+
+      // Query Base Mainnet RPC for USDC Balance
+      const rpcResponse = await fetch('https://mainnet.base.org', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([
+          {
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'eth_call',
+            params: [
+              {
+                to: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+                data: data,
+              },
+              'latest',
+            ],
+          },
+          {
+            jsonrpc: '2.0',
+            id: 2,
+            method: 'eth_getBalance',
+            params: [this.walletAddress, 'latest'],
+          },
+        ]),
+        signal: AbortSignal.timeout(4000),
+      }).catch(() => null);
+
+      if (rpcResponse && rpcResponse.ok) {
+        const batchResults = (await rpcResponse.json()) as Array<{ id: number; result?: string }>;
+        const usdcRes = batchResults.find((r) => r.id === 1);
+        const ethRes = batchResults.find((r) => r.id === 2);
+
+        if (usdcRes?.result && usdcRes.result !== '0x') {
+          const rawUsdc = BigInt(usdcRes.result);
+          // USDC has 6 decimals on Base
+          this.liveWalletBalance = parseFloat((Number(rawUsdc) / 1e6).toFixed(2));
+        }
+
+        if (ethRes?.result && ethRes.result !== '0x') {
+          const rawEth = BigInt(ethRes.result);
+          // ETH has 18 decimals
+          this.ethGasBalance = parseFloat((Number(rawEth) / 1e18).toFixed(4));
+        }
+
+        this.isWalletConnected = true;
+        this.lastBalanceFetchAt = Date.now();
+      } else {
+        this.isWalletConnected = true;
+      }
+    } catch {
+      // In case of transient RPC failure, maintain connected status if address is valid
+      this.isWalletConnected = true;
+    }
+
+    return {
+      usdc: this.liveWalletBalance,
+      eth: this.ethGasBalance,
+      connected: this.isWalletConnected,
+    };
   }
 
   public setWalletBalance(balance: number): void {
@@ -33,6 +120,18 @@ export class LimitlessClient {
 
   public getWalletBalance(): number {
     return this.liveWalletBalance;
+  }
+
+  public getIsWalletConnected(): boolean {
+    return this.isWalletConnected;
+  }
+
+  public getWalletAddress(): string {
+    return this.walletAddress;
+  }
+
+  public getEthGasBalance(): number {
+    return this.ethGasBalance;
   }
 
   /**
@@ -290,10 +389,12 @@ export class LimitlessClient {
   public getStatus() {
     return {
       isConnected: this.isConnected,
+      isWalletConnected: this.isWalletConnected,
       latencyMs: this.latencyMs,
       lastPingAt: this.lastPingAt,
       hasCredentials: Boolean(this.tokenId && this.tokenSecret),
-      walletAddress: this.walletAddress || '0x498a...E32B (Limitless Privy)',
+      walletAddress: this.walletAddress,
+      ethGasBalance: this.ethGasBalance,
     };
   }
 }

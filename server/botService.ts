@@ -76,6 +76,15 @@ export class BotService {
       this.checkSettlements();
     }, 3000);
 
+    // Periodic check for real on-chain wallet balance every 30 seconds
+    setInterval(async () => {
+      try {
+        await this.limitlessClient.fetchRealOnChainBalance();
+      } catch {
+        // silent
+      }
+    }, 30000);
+
     // Broadcast SSE state update every 1 second
     this.sseBroadcastInterval = setInterval(() => {
       this.broadcastSse();
@@ -272,14 +281,14 @@ export class BotService {
     };
   }
 
-  public updateConfig(newConfig: Partial<BotConfig>): void {
+  public async updateConfig(newConfig: Partial<BotConfig>): Promise<void> {
     this.config = { ...this.config, ...newConfig };
     this.quantEngine.setConfig({
       zScoreThreshold: this.config.zScoreThreshold,
       momentumThreshold: this.config.momentumThreshold,
       oiDropThreshold: this.config.oiDropThreshold,
     });
-    this.limitlessClient.updateCredentials(
+    await this.limitlessClient.updateCredentials(
       this.config.limitlessTokenId,
       this.config.limitlessTokenSecret,
       this.config.limitlessWalletAddress
@@ -287,9 +296,15 @@ export class BotService {
     this.addLog('INFO', `Bot configuration updated. Active: ${this.config.active}, Live Mode: ${this.config.liveMode}`);
   }
 
+  public async refreshRealWalletBalance(): Promise<{ usdc: number; eth: number; connected: boolean }> {
+    const res = await this.limitlessClient.fetchRealOnChainBalance();
+    this.addLog('INFO', `On-chain wallet balance checked from Base Mainnet: $${res.usdc.toFixed(2)} USDC | Gas: ${res.eth} ETH | Connected: ${res.connected}`);
+    return res;
+  }
+
   public setWalletBalance(balance: number): void {
     this.limitlessClient.setWalletBalance(balance);
-    this.addLog('INFO', `Wallet balance manually updated to $${balance.toFixed(2)} USDC.`);
+    this.addLog('INFO', `Wallet balance updated to $${balance.toFixed(2)} USDC.`);
   }
 
   public addLog(
@@ -345,6 +360,7 @@ export class BotService {
       heapUsedMB: parseFloat((memUsage.heapUsed / 1024 / 1024).toFixed(1)),
       candleCount: candles.length,
       uptimeSeconds: Math.floor((now - this.startTime) / 1000),
+      isWalletConnected: limitlessStatus.isWalletConnected,
     };
 
     return {
@@ -354,6 +370,9 @@ export class BotService {
       window: windowState,
       contract,
       walletBalance: this.limitlessClient.getWalletBalance(),
+      isWalletConnected: limitlessStatus.isWalletConnected,
+      walletAddress: limitlessStatus.walletAddress,
+      ethGasBalance: limitlessStatus.ethGasBalance,
       positions: this.positions,
       logs: this.logs,
       candles: candles.slice(-50), // Return last 50 for frontend chart to save bandwidth

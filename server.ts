@@ -53,7 +53,7 @@ app.post('/api/bot/toggle', (req: Request, res: Response) => {
 });
 
 // Update Configuration (thresholds, API tokens, live mode)
-app.post('/api/bot/config', (req: Request, res: Response) => {
+app.post('/api/bot/config', async (req: Request, res: Response) => {
   const {
     liveMode,
     zScoreThreshold,
@@ -64,7 +64,7 @@ app.post('/api/bot/config', (req: Request, res: Response) => {
     limitlessWalletAddress,
   } = req.body;
 
-  botService.updateConfig({
+  await botService.updateConfig({
     ...(liveMode !== undefined && { liveMode: Boolean(liveMode) }),
     ...(zScoreThreshold !== undefined && { zScoreThreshold: Number(zScoreThreshold) }),
     ...(momentumThreshold !== undefined && { momentumThreshold: Number(momentumThreshold) }),
@@ -74,7 +74,17 @@ app.post('/api/bot/config', (req: Request, res: Response) => {
     ...(limitlessWalletAddress !== undefined && { limitlessWalletAddress: String(limitlessWalletAddress) }),
   });
 
-  res.json({ success: true, config: botService.getFullState().config });
+  res.json({ success: true, state: botService.getFullState() });
+});
+
+// Refresh on-chain balance from Base Mainnet RPC
+app.post('/api/bot/wallet-refresh', async (req: Request, res: Response) => {
+  try {
+    const result = await botService.refreshRealWalletBalance();
+    res.json({ success: true, ...result });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Failed to refresh on-chain balance' });
+  }
 });
 
 // Update Embedded Wallet Balance

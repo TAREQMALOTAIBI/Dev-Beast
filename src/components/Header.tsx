@@ -16,6 +16,10 @@ interface HeaderProps {
   config: BotConfig;
   health: SystemHealth;
   walletBalance: number;
+  isWalletConnected?: boolean;
+  walletAddress?: string;
+  ethGasBalance?: number;
+  onRefreshWallet?: () => Promise<void>;
   onToggleActive: (active: boolean) => void;
   onToggleLiveMode: (live: boolean) => void;
   onOpenConfig: () => void;
@@ -25,10 +29,28 @@ export const Header: React.FC<HeaderProps> = ({
   config,
   health,
   walletBalance,
+  isWalletConnected = false,
+  walletAddress = '',
+  ethGasBalance = 0,
+  onRefreshWallet,
   onToggleActive,
   onToggleLiveMode,
   onOpenConfig,
 }) => {
+  const [isRefreshing, setIsRefreshing] = React.useState(false);
+
+  const handleManualRefresh = async () => {
+    if (onRefreshWallet) {
+      setIsRefreshing(true);
+      try {
+        await onRefreshWallet();
+      } finally {
+        setIsRefreshing(false);
+      }
+    }
+  };
+
+  const hasRealWallet = Boolean(config.limitlessWalletAddress && /^0x[a-fA-F0-9]{40}$/.test(config.limitlessWalletAddress));
   return (
     <header
       id="app-header"
@@ -107,19 +129,44 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
 
-          {/* Embedded Wallet Balance */}
-          <div id="wallet-balance-badge" className="flex flex-col items-start md:items-end">
-            <span className="text-[10px] text-zinc-500 font-mono">
-              محفظة Limitless
-            </span>
-            <span className="text-sm font-mono text-[#00ff9d] font-bold tracking-tight">
-              ${walletBalance.toLocaleString('en-US', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}{' '}
-              <span className="text-zinc-500 text-[10px]">USDC</span>
-            </span>
-          </div>
+          {/* Real Embedded Wallet Balance & Status */}
+          {hasRealWallet ? (
+            <div id="wallet-balance-badge" className="flex items-center gap-2 bg-[#111] px-2.5 py-1 border border-[#222]">
+              <div className="flex flex-col items-start md:items-end">
+                <div className="flex items-center gap-1.5 text-[10px] text-zinc-400 font-mono">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#00ff9d]"></span>
+                  <span>محفظة Base الحقيقية ({config.limitlessWalletAddress.slice(0, 6)}...{config.limitlessWalletAddress.slice(-4)})</span>
+                </div>
+                <span className="text-sm font-mono text-[#00ff9d] font-bold tracking-tight">
+                  ${walletBalance.toLocaleString('en-US', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}{' '}
+                  <span className="text-zinc-500 text-[10px]">USDC</span>
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={handleManualRefresh}
+                disabled={isRefreshing}
+                title="تحديث الرصيد اللحظي من بلوكشين Base Mainnet"
+                className="p-1 text-zinc-400 hover:text-[#00ff9d] hover:bg-[#1a1a1a] transition-colors disabled:opacity-50"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin text-[#00ff9d]' : ''}`} />
+              </button>
+            </div>
+          ) : (
+            <button
+              id="btn-connect-real-wallet"
+              type="button"
+              onClick={onOpenConfig}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/40 text-amber-400 text-xs font-mono font-medium transition-colors"
+              title="اضغط لربط محفظة Limitless الحقيقية"
+            >
+              <Wallet className="h-3.5 w-3.5 animate-pulse text-amber-400" />
+              <span>ربط المحفظة الحقيقية</span>
+            </button>
+          )}
 
           {/* Live Order vs Dry Run Mode */}
           <button

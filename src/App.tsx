@@ -79,7 +79,10 @@ const INITIAL_STATE: FullBotState = {
     isPriceInRangeNo: false,
     network: 'Base Mainnet',
   },
-  walletBalance: 1000.0,
+  walletBalance: 0.0,
+  isWalletConnected: false,
+  walletAddress: '',
+  ethGasBalance: 0,
   positions: [],
   logs: [
     {
@@ -173,6 +176,12 @@ export default function App() {
   };
 
   const handleToggleLiveMode = async (liveMode: boolean) => {
+    // If user attempts to enable Live Mode without a valid wallet address, open config
+    if (liveMode && (!state.config.limitlessWalletAddress || !/^0x[a-fA-F0-9]{40}$/.test(state.config.limitlessWalletAddress))) {
+      setIsConfigOpen(true);
+      return;
+    }
+
     try {
       const res = await fetch('/api/bot/config', {
         method: 'POST',
@@ -190,6 +199,27 @@ export default function App() {
     }
   };
 
+  const handleRefreshWalletBalance = async () => {
+    try {
+      const res = await fetch('/api/bot/wallet-refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setState((prev) => ({
+          ...prev,
+          walletBalance: typeof data.usdc === 'number' ? data.usdc : prev.walletBalance,
+          isWalletConnected: data.connected !== undefined ? data.connected : prev.isWalletConnected,
+          ethGasBalance: typeof data.eth === 'number' ? data.eth : prev.ethGasBalance,
+          walletAddress: data.walletAddress || prev.walletAddress,
+        }));
+      }
+    } catch (e) {
+      console.error('Failed to refresh on-chain balance:', e);
+    }
+  };
+
   const handleSaveConfig = async (updated: Partial<BotConfig>) => {
     try {
       const res = await fetch('/api/bot/config', {
@@ -198,10 +228,15 @@ export default function App() {
         body: JSON.stringify(updated),
       });
       if (res.ok) {
-        setState((prev) => ({
-          ...prev,
-          config: { ...prev.config, ...updated },
-        }));
+        const data = await res.json();
+        if (data.state) {
+          setState(data.state);
+        } else {
+          setState((prev) => ({
+            ...prev,
+            config: { ...prev.config, ...updated },
+          }));
+        }
       }
     } catch (e) {
       console.error('Failed to save configuration:', e);
@@ -256,6 +291,10 @@ export default function App() {
         config={state.config}
         health={state.health}
         walletBalance={state.walletBalance}
+        isWalletConnected={state.isWalletConnected}
+        walletAddress={state.walletAddress || state.config.limitlessWalletAddress}
+        ethGasBalance={state.ethGasBalance}
+        onRefreshWallet={handleRefreshWalletBalance}
         onToggleActive={handleToggleActive}
         onToggleLiveMode={handleToggleLiveMode}
         onOpenConfig={() => setIsConfigOpen(true)}
@@ -315,9 +354,11 @@ export default function App() {
         <ConfigModal
           config={state.config}
           walletBalance={state.walletBalance}
+          isWalletConnected={state.isWalletConnected}
+          ethGasBalance={state.ethGasBalance}
           onClose={() => setIsConfigOpen(false)}
           onSaveConfig={handleSaveConfig}
-          onUpdateWalletBalance={handleUpdateWalletBalance}
+          onRefreshBalance={handleRefreshWalletBalance}
         />
       )}
     </div>

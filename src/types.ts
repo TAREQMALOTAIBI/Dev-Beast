@@ -110,6 +110,7 @@ export interface SystemHealth {
   heapUsedMB: number;
   candleCount: number;              // Exactly capped at 100
   uptimeSeconds: number;
+  isWalletConnected?: boolean;
 }
 
 export interface ExecutionLog {
@@ -127,6 +128,9 @@ export interface FullBotState {
   window: ContractWindow;
   contract: LimitlessContract;
   walletBalance: number;
+  isWalletConnected: boolean;
+  walletAddress: string;
+  ethGasBalance?: number;
   positions: Position[];
   logs: ExecutionLog[];
   candles: Candle[];
