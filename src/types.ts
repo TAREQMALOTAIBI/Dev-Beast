@@ -111,6 +111,7 @@ export interface SystemHealth {
   candleCount: number;              // Exactly capped at 100
   uptimeSeconds: number;
   isWalletConnected?: boolean;
+  binanceEndpoint?: string;
 }
 
 export interface ExecutionLog {

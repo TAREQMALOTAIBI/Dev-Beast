@@ -361,6 +361,7 @@ export class BotService {
       candleCount: candles.length,
       uptimeSeconds: Math.floor((now - this.startTime) / 1000),
       isWalletConnected: limitlessStatus.isWalletConnected,
+      binanceEndpoint: binanceHealth.endpoint,
     };
 
     return {

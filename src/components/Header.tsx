@@ -108,6 +108,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="hidden sm:flex items-center gap-2">
             <div
               id="status-binance-ws"
+              title={health.binanceEndpoint || 'بث Binance المباشر المتجاوز للحظر الأمريكي'}
               className="flex items-center gap-1.5 px-2 py-1 bg-[#111] border border-[#222] text-[10px] font-mono text-zinc-400"
             >
               <div
@@ -117,7 +118,13 @@ export const Header: React.FC<HeaderProps> = ({
                     : 'bg-[#ff4d4d]'
                 }`}
               />
-              <span>بث بينانس ({health.candleCount}/100)</span>
+              <span>
+                بث بينانس{' '}
+                <span className="text-[#00ff9d] font-bold text-[9px] bg-[#00ff9d]/10 px-1 py-0.2 border border-[#00ff9d]/20">
+                  US-Bypass
+                </span>{' '}
+                ({health.candleCount}/100)
+              </span>
             </div>
 
             <div
