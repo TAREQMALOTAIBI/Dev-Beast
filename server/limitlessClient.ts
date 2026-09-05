@@ -203,6 +203,20 @@ export class LimitlessClient {
   }
 
   /**
+   * Get active CLOB positions from PortfolioFetcher
+   */
+  public async getPositions(): Promise<any[]> {
+    if (!this.sdkClient) return [];
+    try {
+      const positions = await this.sdkClient.portfolio.getCLOBPositions();
+      return positions || [];
+    } catch (err: any) {
+      console.warn(`[LimitlessClient] Failed to fetch CLOB positions: ${err.message}`);
+      return [];
+    }
+  }
+
+  /**
    * Generates official Limitless HMAC-SHA256 Authentication Headers for API requests
    */
   public generateAuthHeaders(method: string, path: string, body: string = ''): Record<string, string> {
