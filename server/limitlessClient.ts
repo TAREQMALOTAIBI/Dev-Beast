@@ -16,6 +16,7 @@ export class LimitlessClient {
   private lastBalanceFetchAt: number = 0;
 
   private currentContract: LimitlessContract | null = null;
+  private cryptoPageId: string | null = null;
   private isConnected: boolean = false;
   private lastPingAt: number = 0;
   private latencyMs: number = 0;
@@ -215,20 +216,23 @@ export class LimitlessClient {
 
     let realMarket: any = null;
 
-    // 1. Query the official SDK markets API
+    // 1. Query the official SDK Market Navigation API (MarketPageFetcher)
     try {
-      const activeMarkets = await this.sdkClient.markets.getActiveMarkets({
-        limit: 15,
-        sortBy: 'newest',
-      });
+      if (!this.cryptoPageId) {
+        const page = await this.sdkClient.pages.getMarketPageByPath('/crypto');
+        if (page?.id) this.cryptoPageId = page.id;
+      }
 
-      if (activeMarkets?.data && Array.isArray(activeMarkets.data)) {
-        realMarket = activeMarkets.data.find(
-          (m: any) =>
-            m.slug?.includes('btc') &&
-            (m.slug?.includes('15-min') || m.title?.includes('15 Min') || m.categories?.includes('15 min')) &&
-            !m.expired
-        );
+      if (this.cryptoPageId) {
+        const activeMarkets = await this.sdkClient.pages.getMarkets(this.cryptoPageId, {
+          limit: 5,
+          sort: '-createdAt',
+          filters: { ticker: ['btc'], duration: ['15-min'] },
+        });
+
+        if (activeMarkets?.data && Array.isArray(activeMarkets.data)) {
+          realMarket = activeMarkets.data.find((m: any) => !m.expired);
+        }
       }
       this.isConnected = true;
     } catch {
