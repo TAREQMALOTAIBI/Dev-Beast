@@ -451,21 +451,21 @@ class LimitlessWeb3Client:
         try:
             target_slug = self.config.BTC_MARKET_SLUG
             if not target_slug:
-                # استخدام with_raw_response لفحص استجابة HTTP وترويسات معدل الطلبات (Rate-Limit Headers)
-                raw_active: HttpRawResponse = await self.market_fetcher.get_active_markets(
-                    {"limit": 15, "sortBy": "newest"},
-                    with_raw_response=True,
-                )
-                rate_remaining = raw_active.headers.get("x-ratelimit-remaining", "N/A")
-                logger.debug(f"📊 [HTTP RAW] Status: {raw_active.status} | API Remaining: {rate_remaining}")
-                
-                raw_data = raw_active.data.get("data", []) if isinstance(raw_active.data, dict) else []
-                for m in raw_data:
-                    title = m.get("title", "") if isinstance(m, dict) else getattr(m, "title", "")
-                    slug = m.get("slug", "") if isinstance(m, dict) else getattr(m, "slug", "")
-                    if "btc" in title.lower() or "bitcoin" in title.lower():
-                        target_slug = slug
-                        break
+                try:
+                    # جلب الأسواق النشطة
+                    active_markets = await self.market_fetcher.get_active_markets()
+                    data_list = getattr(active_markets, "data", active_markets)
+                    if isinstance(data_list, dict):
+                        data_list = data_list.get("data", [])
+                    if isinstance(data_list, list):
+                        for m in data_list:
+                            title = getattr(m, "title", "") or (m.get("title", "") if isinstance(m, dict) else "")
+                            slug = getattr(m, "slug", "") or (m.get("slug", "") if isinstance(m, dict) else "")
+                            if "btc" in title.lower() or "bitcoin" in title.lower():
+                                target_slug = slug
+                                break
+                except Exception as disc_err:
+                    logger.debug(f"Active markets discovery notice: {disc_err}")
             
             if target_slug:
                 logger.info(f"🎯 Discovering & caching venue for Limitless market: {target_slug}")
@@ -503,25 +503,38 @@ class LimitlessWeb3Client:
             target_slug = self.config.BTC_MARKET_SLUG or (self.current_market.slug if self.current_market else "btc-above-100k-march-2025")
             market_slugs = [target_slug]
 
-            @self.ws_client.on("connect")
-            async def on_connect():
-                logger.info("🟢 [LIMITLESS WS] Connected to Limitless Exchange streaming server.")
-                await self.ws_client.subscribe(
-                    "subscribe_market_prices",
-                    {"marketSlugs": market_slugs},
-                )
-                logger.info(f"📡 [LIMITLESS WS] Subscribed to market prices for: {market_slugs}")
-                
-                # الاشتراكات المصادق عليها (Authenticated subscriptions)
+            async def _safe_subscribe():
+                """الاشتراك الآمن بعد التأكد من اكتمال مصافحة WebSocket لتجنب أي استثناءات تزامنية"""
+                for attempt in range(15):
+                    # الانتظار حتى تكتمل حالة الاتصال الداخلية داخل SDK العميل
+                    if getattr(self.ws_client, "_connected", False) or getattr(self.ws_client, "is_connected", False):
+                        break
+                    await asyncio.sleep(0.2)
+
+                try:
+                    await self.ws_client.subscribe(
+                        "subscribe_market_prices",
+                        {"marketSlugs": market_slugs},
+                    )
+                    logger.info(f"📡 [LIMITLESS WS] Subscribed to real-time market prices for: {market_slugs}")
+                except Exception as sub_err:
+                    logger.debug(f"WS Market subscription note: {sub_err}")
+
                 try:
                     await self.ws_client.subscribe("subscribe_order_events")
                     await self.ws_client.subscribe(
                         "subscribe_positions",
                         {"marketSlugs": market_slugs},
                     )
-                    logger.info("🔐 [LIMITLESS WS] Subscribed to authenticated order events & positions.")
+                    logger.info("🔐 [LIMITLESS WS] Subscribed to authenticated order events & positions stream.")
                 except Exception as auth_sub_err:
-                    logger.warning(f"⚠️ [LIMITLESS WS] Authenticated subscription notice: {auth_sub_err}")
+                    logger.debug(f"WS Authenticated subscription note: {auth_sub_err}")
+
+            @self.ws_client.on("connect")
+            async def on_connect():
+                logger.info("🟢 [LIMITLESS WS] Connected to Limitless Exchange streaming server (WebSocket Pure Mode).")
+                # تشغيل الاشتراك في الخلفية لضمان عدم حجب معالج أحداث socketio
+                asyncio.create_task(_safe_subscribe())
 
             @self.ws_client.on("orderbookUpdate")
             async def on_orderbook(data):
@@ -529,7 +542,7 @@ class LimitlessWeb3Client:
                 self.live_orderbook[slug] = data
                 bids_cnt = len(data.get("bids", [])) if isinstance(data, dict) else len(getattr(data, "bids", []))
                 asks_cnt = len(data.get("asks", [])) if isinstance(data, dict) else len(getattr(data, "asks", []))
-                logger.debug(f"📖 [LIMITLESS WS] Orderbook update [{slug}]: {bids_cnt} bids, {asks_cnt} asks")
+                logger.info(f"📖 [LIMITLESS WS ORDERBOOK] Live Book Update [{slug}]: {bids_cnt} Bids, {asks_cnt} Asks (Zero Latency)")
 
             @self.ws_client.on("newPriceData")
             async def on_price(data):
@@ -540,7 +553,7 @@ class LimitlessWeb3Client:
                         self.latest_prices[slug] = float(price)
                     except ValueError:
                         pass
-                logger.debug(f"💲 [LIMITLESS WS] New price [{slug}]: {price}")
+                logger.info(f"💲 [LIMITLESS WS PRICE] Live Tick [{slug}]: ${price}")
 
             @self.ws_client.on("oraclePriceData")
             async def on_oracle(data):
@@ -564,9 +577,13 @@ class LimitlessWeb3Client:
             async def on_positions(data):
                 logger.info(f"📊 [LIMITLESS WS POSITIONS] Realtime position change received: {data}")
 
-            # الاتصال بدون حجب حلقة الأحداث (Non-blocking)
-            await self.ws_client.connect()
-            logger.info("🚀 Limitless WebSocket streaming client connected successfully.")
+            # بدء الاتصال بمقبس الويب
+            try:
+                await self.ws_client.connect()
+                logger.info("🚀 Limitless WebSocket streaming client connected successfully.")
+                asyncio.create_task(_safe_subscribe())
+            except Exception as conn_err:
+                logger.warning(f"⚠️ Limitless WS connect warning: {conn_err}. Streaming task active.")
 
         except Exception as ws_err:
             logger.warning(f"⚠️ Limitless WebSocket initialization notice: {ws_err}. Continuing with HTTP/Web3.")
@@ -698,18 +715,28 @@ class LimitlessWeb3Client:
                     return simulated_price
                 return None
 
-            # 1. فحص فائق السرعة عبر الذاكرة من خلال بث الـ WebSocket المباشر (Zero-latency in-memory book)
+            # 1. فحص فائق السرعة عبر الذاكرة من خلال بث الـ WebSocket المباشر (Zero-latency in-memory book & stream)
             target_slug = (self.current_market.slug if self.current_market else None) or self.config.BTC_MARKET_SLUG
-            if target_slug and target_slug in self.live_orderbook:
-                ws_book = self.live_orderbook[target_slug]
-                asks = ws_book.get("asks", []) if isinstance(ws_book, dict) else getattr(ws_book, "asks", [])
-                if asks:
-                    best_ask = float(asks[0].get("price", 1.0) if isinstance(asks[0], dict) else getattr(asks[0], "price", 1.0))
-                    logger.info(f"⚡ [WS FAST-PATH] In-memory Best Ask for {target_slug}: ${best_ask:.4f}")
-                    if best_ask <= self.config.MAX_ENTRY_PRICE:
-                        return best_ask
+            if target_slug:
+                if target_slug in self.live_orderbook:
+                    ws_book = self.live_orderbook[target_slug]
+                    asks = ws_book.get("asks", []) if isinstance(ws_book, dict) else getattr(ws_book, "asks", [])
+                    if asks:
+                        best_ask = float(asks[0].get("price", 1.0) if isinstance(asks[0], dict) else getattr(asks[0], "price", 1.0))
+                        logger.info(f"⚡ [WS FAST-PATH] In-memory Live Book Best Ask for {target_slug}: ${best_ask:.4f} (Zero Latency)")
+                        if best_ask <= self.config.MAX_ENTRY_PRICE:
+                            return best_ask
+                        else:
+                            logger.info(f"⏳ WS Ask ${best_ask:.4f} > ${self.config.MAX_ENTRY_PRICE:.2f}. Skipping.")
+                            return None
+                
+                if target_slug in self.latest_prices:
+                    ws_price = self.latest_prices[target_slug]
+                    logger.info(f"⚡ [WS FAST-PATH] Live Stream Price for {target_slug}: ${ws_price:.4f} (Zero Latency)")
+                    if ws_price <= self.config.MAX_ENTRY_PRICE:
+                        return ws_price
                     else:
-                        logger.info(f"⏳ WS Ask ${best_ask:.4f} > ${self.config.MAX_ENTRY_PRICE:.2f}. Skipping.")
+                        logger.info(f"⏳ WS Price ${ws_price:.4f} > ${self.config.MAX_ENTRY_PRICE:.2f}. Skipping.")
                         return None
 
             # 2. محاولة قراءة أفضل سعر بيع (Best Ask) من سجل أوامر Limitless SDK الرسمي عبر HTTP
