@@ -1,0 +1,6 @@
+{
+  "name": "Limitless MML بوت التداول الكمي",
+  "description": "بوت ومنصة تداول كمي فائق السرعة لاستغلال فجوة التأخير اللحظية (Micro-Momentum Lead-Lag) على أسواق تنبؤات BTC 5m على منصة Limitless عبر رصد انفجارات 2.5 سيغما على Binance والتنفيذ على شبكة Base.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
