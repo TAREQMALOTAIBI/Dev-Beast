@@ -93,8 +93,7 @@ class BotConfig:
     PRIVATE_KEY: str = os.getenv("PRIVATE_KEY", "")
     WALLET_ADDRESS: str = os.getenv("WALLET_ADDRESS", "")
     
-    # وضع التداول التجريبي (True = محاكاة بدون إرسال معاملات حقيقية، False = تداول حقيقي)
-    PAPER_TRADING: bool = os.getenv("PAPER_TRADING", "true").lower() == "true"
+    # وضع التداول التجريبي تم إزالته (التداول الحقيقي فقط)
     
     # إدارة المخاطر والانزلاق السعري
     RISK_PER_TRADE: float = float(os.getenv("RISK_PER_TRADE", "0.01"))  # 1% من الرصيد
@@ -606,9 +605,8 @@ class LimitlessWeb3Client:
 
     async def get_wallet_usdc_balance(self) -> float:
         """قراءة رصيد المحفظة من عملة USDC بالدولار"""
-        if self.config.PAPER_TRADING or not self.account:
-            # رصيد افتراضي للمحاكاة (1,000$)
-            return 1000.0
+        if not self.account:
+            return 0.0
 
         try:
             checksum_addr = self.w3.to_checksum_address(self.account.address)
@@ -626,7 +624,7 @@ class LimitlessWeb3Client:
         - موافقة USDC لعقد التبادل (Exchange).
         - موافقة Conditional Tokens (setApprovalForAll) لعقد التبادل (ولمحول NegRisk إن وجد).
         """
-        if self.config.PAPER_TRADING or not self.account:
+        if not self.account:
             return
 
         try:
@@ -708,13 +706,6 @@ class LimitlessWeb3Client:
         تصفية العقود التي تباع بسعر <= 0.10$ فقط (Out of the Money) عبر سجل أوامر الـ SDK أو العقد المباشر.
         """
         try:
-            if self.config.PAPER_TRADING:
-                # في وضع المحاكاة، نفترض عقداً حقيقياً عند 0.07$ (OTM)
-                simulated_price = 0.07
-                if simulated_price <= self.config.MAX_ENTRY_PRICE:
-                    return simulated_price
-                return None
-
             # 1. فحص فائق السرعة عبر الذاكرة من خلال بث الـ WebSocket المباشر (Zero-latency in-memory book & stream)
             target_slug = (self.current_market.slug if self.current_market else None) or self.config.BTC_MARKET_SLUG
             if target_slug:
@@ -771,8 +762,8 @@ class LimitlessWeb3Client:
                 )
                 return None
         except Exception as e:
-            logger.warning(f"⚠️ Could not fetch market spot price: {e}. Simulating fallback.")
-            return 0.08 if self.config.PAPER_TRADING else None
+            logger.warning(f"⚠️ Could not fetch market spot price: {e}.")
+            return None
 
     async def execute_market_buy(
         self, outcome_index: int, entry_price: float, usdc_amount: float
@@ -788,19 +779,6 @@ class LimitlessWeb3Client:
 
         max_allowed_price = min(entry_price + self.config.MAX_SLIPPAGE, self.config.MAX_ENTRY_PRICE)
         min_tokens_expected = (usdc_amount / max_allowed_price) * 0.95  # 5% safety buffer
-
-        if self.config.PAPER_TRADING:
-            simulated_tx = {
-                "status": "SUCCESS (PAPER)",
-                "tx_hash": f"0xsimulated_{int(time.time() * 1000):x}",
-                "outcome_index": outcome_index,
-                "entry_price": entry_price,
-                "amount_usd": usdc_amount,
-                "tokens_bought": usdc_amount / entry_price,
-                "timestamp": time.time(),
-            }
-            logger.info(f"✅ [PAPER TRADE EXECUTED] Tx: {simulated_tx['tx_hash']}")
-            return simulated_tx
 
         if not self.account:
             logger.error("❌ Cannot execute live trade: No private key provided!")
@@ -948,13 +926,6 @@ class LimitlessWeb3Client:
             f"Entry: ${entry_price:.4f} | Profit: +{profit_percent:.1f}% (>= {position.get('target_profit', 300)}%)"
         )
 
-        if self.config.PAPER_TRADING:
-            logger.info(
-                f"💰 [PAPER FLIP SUCCESS] Sold {tokens_to_sell:.2f} shares at ${current_price:.4f}. "
-                f"Realized Profit: +${(current_price - entry_price) * tokens_to_sell:.2f} (+{profit_percent:.1f}%)"
-            )
-            return True
-
         if not self.account:
             return False
 
@@ -1039,7 +1010,7 @@ class LeadLagExploitOrchestrator:
         """بدء تشغيل كافة المهام المتزامنة وغير المتزامنة في بيئة asyncio واحدة"""
         logger.info("=" * 70)
         logger.info("⚡ Starting Limitless MML Quant Trading Bot (BTC 5m Lead-Lag Exploit)")
-        logger.info(f"🛠️ Execution Mode: {'PAPER TRADING (Safe Simulation)' if self.config.PAPER_TRADING else 'LIVE PRODUCTION TRADING'}")
+        logger.info("🛠️ Execution Mode: LIVE PRODUCTION TRADING (PAPER TRADING DISABLED)")
         logger.info(f"📊 Anomaly Spike Threshold: {self.config.SIGMA_THRESHOLD}σ")
         logger.info(f"🛡️ Risk Per Trade: {self.config.RISK_PER_TRADE * 100:.1f}% of wallet")
         logger.info(f"🎯 Dynamic Flip Target: +{self.config.DYNAMIC_FLIP_PROFIT * 100:.0f}%")
@@ -1069,7 +1040,6 @@ class LeadLagExploitOrchestrator:
                     "bot_enabled": self.config.BOT_ENABLED,
                     "cvd": round(self.momentum_engine.cvd, 2),
                     "active_positions": len(self.active_positions),
-                    "paper_trading": self.config.PAPER_TRADING,
                 }, headers={"Access-Control-Allow-Origin": "*"})
 
             async def handle_portfolio(request):
@@ -1238,15 +1208,6 @@ class LeadLagExploitOrchestrator:
 
     async def _get_current_market_price(self, position: dict) -> float:
         """قراءة السعر الفعلي أو محاكاته للتحقق من شرط الخروج"""
-        if self.config.PAPER_TRADING:
-            # محاكاة إعادة تسعير عقد الـ AMM بعد انفجار حركة البيتكوين (تأثير Lead-Lag)
-            # بعد بضع ثوانٍ يقفز السعر من 0.07$ إلى 0.28$ - 0.35$ محققاً شرط الـ 300%
-            elapsed = time.time() - position["timestamp"]
-            if elapsed > 4.0:
-                # قفزة السعر بعد استجابة السوق
-                return position["entry_price"] * 4.2  # 320% profit simulation
-            return position["entry_price"] * 1.1
-
         try:
             spot_raw = await self.web3_client.market_contract.functions.getSpotPrice(
                 position["outcome_index"]

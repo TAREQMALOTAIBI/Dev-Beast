@@ -2,7 +2,6 @@ export interface BotConfigState {
   rpcUrl: string;
   walletAddress: string;
   privateKey: string;
-  paperTrading: boolean;
   isBotRunning: boolean; // Controls automated execution
   riskPerTrade: number; // e.g. 0.01 (1%)
   maxEntryPrice: number; // e.g. 0.10 ($0.10)

@@ -13,8 +13,7 @@ const DEFAULT_CONFIG: BotConfigState = {
   rpcUrl: 'https://base-mainnet.g.alchemy.com/v2/alch_JNomeBEeTF4e_R2LFweN6',
   walletAddress: '0x7b819231Df2665D0d5a6e91d8f4D55B395298C9A',
   privateKey: '0xd5e837bde21ca239c1546b847fcacdc7210cd1f214e227a371bd58c778a6108f',
-  paperTrading: true,
-  isBotRunning: true, // Bot is active by default
+  isBotRunning: false, // Bot is stopped by default
   riskPerTrade: 0.01, // 1% of wallet
   maxEntryPrice: 0.10, // <= $0.10 OTM
   maxSlippage: 0.10, // Max slippage $0.10

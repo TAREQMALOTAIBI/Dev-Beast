@@ -23,7 +23,6 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, setConfig, onR
 RPC_URL=${config.rpcUrl}
 WALLET_ADDRESS=${config.walletAddress}
 PRIVATE_KEY=${config.privateKey || '0xYOUR_PRIVATE_KEY'}
-PAPER_TRADING=${config.paperTrading ? 'true' : 'false'}
 
 # Risk Management
 RISK_PER_TRADE=${config.riskPerTrade}
@@ -116,26 +115,6 @@ PROXY_URL=${config.proxyUrl || ''}
             >
               <span className={`w-2 h-2 rounded-full ${config.isBotRunning ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`} />
               <span>{config.isBotRunning ? 'قيد التشغيل (نشط)' : 'إيقاف مؤقت (معطّل)'}</span>
-            </button>
-          </div>
-
-          {/* Paper Trading Switch */}
-          <div className="flex items-center justify-between p-3.5 rounded-xl bg-zinc-950 border border-zinc-800">
-            <div>
-              <span className="text-xs font-semibold text-white block">وضع التداول التجريبي (Paper Trading)</span>
-              <span className="text-[11px] text-zinc-400 block">
-                محاكاة الصفقات والتنفيذ دون إرسال معاملات حقيقية إلى شبكة Base
-              </span>
-            </div>
-            <button
-              onClick={() => handleChange('paperTrading', !config.paperTrading)}
-              className={`px-3 py-1 rounded-full text-xs font-bold transition-all ${
-                config.paperTrading
-                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-                  : 'bg-rose-500/20 text-rose-400 border border-rose-500/40'
-              }`}
-            >
-              {config.paperTrading ? 'مُفعّل (وضع آمن)' : 'تنفيذ حقيقي مباشر'}
             </button>
           </div>
 
