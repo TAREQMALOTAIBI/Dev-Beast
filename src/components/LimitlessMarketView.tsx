@@ -19,7 +19,7 @@ export const LimitlessMarketView: React.FC<LimitlessMarketViewProps> = ({
   const [yesPrice, setYesPrice] = useState<number>(0.07); // OTM <= 0.10
   const [noPrice, setNoPrice] = useState<number>(0.93);
   const [expiryCountdown, setExpiryCountdown] = useState<number>(185); // 3m 05s remaining
-  const [walletUsdc, setWalletUsdc] = useState<number>(1000.0);
+  const walletUsdc = config.walletBalance || 0.0;
   const [positionsTab, setPositionsTab] = useState<'local' | 'sdk_portfolio'>('local');
   const [isSyncingPortfolio, setIsSyncingPortfolio] = useState<boolean>(false);
   const [portfolioData, setPortfolioData] = useState<LivePortfolioData>({

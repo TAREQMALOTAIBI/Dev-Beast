@@ -68,6 +68,30 @@ export default function App() {
     },
   ]);
 
+  useEffect(() => {
+    fetch('/api/config')
+      .then((res) => res.json())
+      .then((data) => {
+        if (!data.error) {
+          setConfig((prev) => ({
+            ...prev,
+            walletAddress: data.walletAddress || prev.walletAddress,
+            walletBalance: data.balanceUsdc ?? prev.walletBalance,
+            riskPerTrade: data.riskPerTrade || prev.riskPerTrade,
+            maxEntryPrice: data.maxEntryPrice || prev.maxEntryPrice,
+            dynamicFlipProfit: data.dynamicFlipProfit || prev.dynamicFlipProfit,
+            sigmaThreshold: data.sigmaThreshold || prev.sigmaThreshold,
+            isBotRunning: data.isConfigured ? prev.isBotRunning : false, // Don't run if not configured
+          }));
+          
+          if (data.walletAddress) {
+            addLog('WEB3', `تم جلب الإعدادات الحقيقية من السيرفر. المحفظة: ${data.walletAddress} | الرصيد المتاح: $${data.balanceUsdc} USDC`);
+          }
+        }
+      })
+      .catch((err) => console.error('Failed to fetch config', err));
+  }, []);
+
   const addLog = (level: TerminalLog['level'], message: string) => {
     const newLog: TerminalLog = {
       id: `log-${Date.now()}-${Math.random()}`,
@@ -160,7 +184,7 @@ export default function App() {
     }
 
     // 1% Risk Sizing
-    const walletBalance = 1000.0;
+    const walletBalance = config.walletBalance || 1000.0;
     const tradeSizeUsd = walletBalance * config.riskPerTrade;
     const shares = tradeSizeUsd / mockEntryPrice;
     const targetPrice = mockEntryPrice * (1 + config.dynamicFlipProfit);
@@ -215,7 +239,8 @@ export default function App() {
 
   // Manual trade execution from the Limitless view
   const handleExecuteManualTrade = (outcomeIndex: number, outcomeLabel: string, entryPrice: number) => {
-    const tradeSizeUsd = 1000.0 * config.riskPerTrade;
+    const walletBalance = config.walletBalance || 1000.0;
+    const tradeSizeUsd = walletBalance * config.riskPerTrade;
     const shares = tradeSizeUsd / entryPrice;
     const targetPrice = entryPrice * (1 + config.dynamicFlipProfit);
 
