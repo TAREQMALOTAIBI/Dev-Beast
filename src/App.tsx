@@ -14,7 +14,7 @@ const DEFAULT_CONFIG: BotConfigState = {
   walletAddress: '0x7b819231Df2665D0d5a6e91d8f4D55B395298C9A',
   privateKey: '0xd5e837bde21ca239c1546b847fcacdc7210cd1f214e227a371bd58c778a6108f',
   isBotRunning: false, // Bot is stopped by default
-  riskPerTrade: 0.01, // 1% of wallet
+  riskPerTrade: 0.005, // 0.50% of wallet
   maxEntryPrice: 0.10, // <= $0.10 OTM
   maxSlippage: 0.10, // Max slippage $0.10
   dynamicFlipProfit: 3.00, // 300% profit target
@@ -196,7 +196,7 @@ export default function App() {
     const tradeSizeUsd = walletBalance * config.riskPerTrade;
     addLog(
       'EXEC',
-      `⚡ [استغلال فجوة التأخير اللحظية] إرسال أمر شراء ماركت حقيقي على Base L2! القيمة: $${tradeSizeUsd.toFixed(2)} USDC (مخاطرة 1%) | العقد: ${outcomeLabel} بسعر $${entryPrice.toFixed(4)}`
+      `⚡ [استغلال فجوة التأخير اللحظية] إرسال أمر شراء ماركت حقيقي على Base L2! القيمة: $${tradeSizeUsd.toFixed(2)} USDC (مخاطرة ${(config.riskPerTrade * 100).toFixed(2)}%) | العقد: ${outcomeLabel} بسعر $${entryPrice.toFixed(4)}`
     );
 
     try {
@@ -419,7 +419,7 @@ export default function App() {
             <span>&bull;</span>
             <span className="text-amber-400">الخروج التلقائي: &ge; 300%</span>
             <span>&bull;</span>
-            <span className="text-blue-400">المخاطرة: 1%</span>
+            <span className="text-blue-400">المخاطرة: {(config.riskPerTrade * 100).toFixed(2)}%</span>
           </div>
         </div>
       </footer>

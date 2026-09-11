@@ -212,7 +212,7 @@ export const LimitlessMarketView: React.FC<LimitlessMarketViewProps> = ({
 
           <div className="p-3 rounded-lg bg-zinc-950/80 border border-zinc-800/80">
             <div className="text-zinc-400 text-[10px] mb-1">الخطوة 3 &bull; التنفيذ فائق السرعة</div>
-            <div className="text-blue-400 font-bold mb-1">شراء ماركت (1% مخاطرة)</div>
+            <div className="text-blue-400 font-bold mb-1">شراء ماركت ({(config.riskPerTrade * 100).toFixed(2)}% مخاطرة)</div>
             <div className="text-[11px] text-zinc-400 leading-relaxed">
               بث معاملة EIP-1559 موثقة بالمفتاح الخاص على Base قبل وصول الأوراكل
             </div>
@@ -294,7 +294,7 @@ export const LimitlessMarketView: React.FC<LimitlessMarketViewProps> = ({
               <Zap className="w-4 h-4" />
               <span>
                 {isYesOtm
-                  ? `تنفيذ الشراء السريع ماركت ($${riskAmount} USDC &bull; مخاطرة 1%)`
+                  ? `تنفيذ الشراء السريع ماركت ($${riskAmount} USDC &bull; مخاطرة ${(config.riskPerTrade * 100).toFixed(2)}%)`
                   : `السعر يتجاوز سقف الدخول ($${config.maxEntryPrice.toFixed(2)})`}
               </span>
             </button>

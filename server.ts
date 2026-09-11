@@ -77,7 +77,7 @@ async function startServer() {
       res.json({
         walletAddress: walletAddress || null,
         balanceUsdc,
-        riskPerTrade: parseFloat(process.env.RISK_PER_TRADE || '0.01'),
+        riskPerTrade: parseFloat(process.env.RISK_PER_TRADE || '0.005'),
         maxEntryPrice: parseFloat(process.env.MAX_ENTRY_PRICE || '0.10'),
         dynamicFlipProfit: parseFloat(process.env.DYNAMIC_FLIP_PROFIT || '3.00'),
         sigmaThreshold: parseFloat(process.env.SIGMA_THRESHOLD || '2.5'),

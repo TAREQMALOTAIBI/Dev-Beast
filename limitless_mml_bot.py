@@ -7,7 +7,7 @@
               and Limitless 5-minute Prediction Markets on Base chain (Lag).
   - Triggers: Volume Velocity & CVD anomaly spike exceeding 2.5 Sigma (+2.5σ or -2.5σ).
   - Target: Out-Of-The-Money (OTM) binary prediction contracts priced at <= $0.10.
-  - Risk Management: 1% wallet balance risk per trade, max slippage <= $0.10.
+  - Risk Management: 0.50% wallet balance risk per trade, max slippage <= $0.10.
   - Exit Strategy: Dynamic Flip taking instant profit at >= 300% gain (4x entry).
   - Architecture: Ultra-low latency asynchronous execution with asyncio, websockets & web3.py.
 ========================================================================================
@@ -96,7 +96,7 @@ class BotConfig:
     # وضع التداول التجريبي تم إزالته (التداول الحقيقي فقط)
     
     # إدارة المخاطر والانزلاق السعري
-    RISK_PER_TRADE: float = float(os.getenv("RISK_PER_TRADE", "0.01"))  # 1% من الرصيد
+    RISK_PER_TRADE: float = float(os.getenv("RISK_PER_TRADE", "0.005"))  # 0.50% من الرصيد
     MAX_ENTRY_PRICE: float = float(os.getenv("MAX_ENTRY_PRICE", "0.10"))  # أقصى سعر للدخول (<= 0.10$)
     MAX_SLIPPAGE: float = float(os.getenv("MAX_SLIPPAGE", "0.10"))  # أقصى انزلاق سعري 0.10$
     DYNAMIC_FLIP_PROFIT: float = float(os.getenv("DYNAMIC_FLIP_PROFIT", "3.00"))  # 300% ربح للخروج
@@ -992,7 +992,7 @@ class LeadLagExploitOrchestrator:
     المنسق العام للاستراتيجية:
     1. يتصل بـ Binance Futures WebSocket لحساب CVD ورصد طفرات 2.5 Sigma.
     2. يستغل فارق التوقيت (Lead-Lag Latency Window) قبل أن يعدل صانع سوق Limitless أسعاره.
-    3. يحسب حجم الصفقة بدقة 1% من رصيد المحفظة.
+    3. يحسب حجم الصفقة بدقة 0.50% من رصيد المحفظة.
     4. يراقب المراكز المفتوحة ويطبق الخروج التلقائي Dynamic Flip عند تحقيق >= 300%.
     """
 
@@ -1012,7 +1012,7 @@ class LeadLagExploitOrchestrator:
         logger.info("⚡ Starting Limitless MML Quant Trading Bot (BTC 5m Lead-Lag Exploit)")
         logger.info("🛠️ Execution Mode: LIVE PRODUCTION TRADING (BASE L2 DIRECT ON-CHAIN & LIMITLESS SDK)")
         logger.info(f"📊 Anomaly Spike Threshold: {self.config.SIGMA_THRESHOLD}σ")
-        logger.info(f"🛡️ Risk Per Trade: {self.config.RISK_PER_TRADE * 100:.1f}% of wallet")
+        logger.info(f"🛡️ Risk Per Trade: {self.config.RISK_PER_TRADE * 100:.2f}% of wallet")
         logger.info(f"🎯 Dynamic Flip Target: +{self.config.DYNAMIC_FLIP_PROFIT * 100:.0f}%")
         logger.info(f"🛑 Max Entry Price (OTM): <= ${self.config.MAX_ENTRY_PRICE:.2f}")
         logger.info("=" * 70)
@@ -1180,7 +1180,7 @@ class LeadLagExploitOrchestrator:
         معالجة إشارة الانفجار الحجمي:
         - تحديد الخيار المطلوب (0 = YES/UP إذا كانت الإشارة صاعدة، 1 = NO/DOWN إذا كانت هابطة).
         - استعلام عقد Limitless والتحقق من أن العقد ما زال رخيصاً (OTM <= 0.10$).
-        - حساب حجم الصفقة (1% من رصيد المحفظة).
+        - حساب حجم الصفقة (0.50% من رصيد المحفظة).
         - تنفيذ الشراء الفوري قبل تلاشي فجوة التأخير (Lead-Lag Window).
         """
         outcome_index = 0 if direction == "BUY_UP" else 1
@@ -1194,7 +1194,7 @@ class LeadLagExploitOrchestrator:
             logger.info(f"⏩ Contract price ({otm_price}) not eligible for OTM exploit. Skipping.")
             return
 
-        # 2. حساب حجم الصفقة بناءً على 1% من رصيد المحفظة
+        # 2. حساب حجم الصفقة بناءً على نسبة المخاطرة من رصيد المحفظة
         wallet_balance = await self.web3_client.get_wallet_usdc_balance()
         if wallet_balance <= 0:
             logger.warning("⚠️ Insufficient USDC balance to trade.")
@@ -1205,7 +1205,7 @@ class LeadLagExploitOrchestrator:
         trade_amount_usd = max(trade_amount_usd, 5.0)
 
         logger.info(
-            f"💼 Risk Sizing: 1% of ${wallet_balance:,.2f} = ${trade_amount_usd:.2f} USDC allocation"
+            f"💼 Risk Sizing: {self.config.RISK_PER_TRADE * 100:.2f}% of ${wallet_balance:,.2f} = ${trade_amount_usd:.2f} USDC allocation"
         )
 
         # 3. إرسال المعاملة الموقعة إلى العقد الذكي على Base

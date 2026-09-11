@@ -99,7 +99,7 @@ export const ArchitectureGuide: React.FC = () => {
           </div>
           <div className="space-y-2 font-sans text-right">
             <p className="leading-relaxed">
-              <strong>حجم الصفقة 1% فقط:</strong> مهما بلغ حجم السيولة المتاحة في المحفظة، لا يتجاوز رأس المال المخاطر به في أي صفقة مفردة 1% لحماية الحساب من أي تقلبات معاكسة.
+              <strong>حجم الصفقة 0.50% فقط:</strong> مهما بلغ حجم السيولة المتاحة في المحفظة، لا يتجاوز رأس المال المخاطر به في أي صفقة مفردة 0.50% لحماية الحساب من أي تقلبات معاكسة.
             </p>
             <p className="leading-relaxed">
               <strong>حماية الانزلاق السعري (Max Slippage &le; $0.10):</strong> العقد لن ينفذ إذا ارتفع السعر المطلوب فوق سقف الدخول الأقصى.

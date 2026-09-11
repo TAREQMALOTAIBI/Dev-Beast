@@ -118,23 +118,23 @@ PROXY_URL=${config.proxyUrl || ''}
             </button>
           </div>
 
-          {/* Risk Per Trade (1%) */}
+          {/* Risk Per Trade (0.50%) */}
           <div>
             <div className="flex items-center justify-between text-xs font-mono mb-1">
               <span className="text-zinc-300">نسبة المخاطرة لكل صفقة:</span>
-              <span className="text-emerald-400 font-bold">{(config.riskPerTrade * 100).toFixed(1)}% من المحفظة</span>
+              <span className="text-emerald-400 font-bold">{(config.riskPerTrade * 100).toFixed(2)}% من المحفظة</span>
             </div>
             <input
               type="range"
-              min="0.005"
+              min="0.001"
               max="0.05"
-              step="0.005"
+              step="0.001"
               value={config.riskPerTrade}
               onChange={(e) => handleChange('riskPerTrade', parseFloat(e.target.value))}
               className="w-full accent-emerald-500 bg-zinc-800 h-2 rounded-lg cursor-pointer"
             />
             <span className="text-[10px] text-zinc-400 block mt-1">
-              حماية رأس المال من تقلبات السوق (المعيار المطلوب: 1% محددة بدقة)
+              حماية رأس المال من تقلبات السوق (المعيار المطلوب: 0.50% محددة بدقة)
             </span>
           </div>
 

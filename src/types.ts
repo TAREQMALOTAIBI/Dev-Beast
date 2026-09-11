@@ -4,7 +4,7 @@ export interface BotConfigState {
   walletBalance?: number;
   privateKey: string;
   isBotRunning: boolean; // Controls automated execution
-  riskPerTrade: number; // e.g. 0.01 (1%)
+  riskPerTrade: number; // e.g. 0.005 (0.50%)
   maxEntryPrice: number; // e.g. 0.10 ($0.10)
   maxSlippage: number; // e.g. 0.10 ($0.10)
   dynamicFlipProfit: number; // e.g. 3.00 (300%)
