@@ -24,7 +24,6 @@ export const CvdTerminal: React.FC<CvdTerminalProps> = ({
   const [cvdHistory, setCvdHistory] = useState<{ time: number; cvd: number; price: number; zScore: number }[]>([]);
   const [spikesList, setSpikesList] = useState<MomentumSpike[]>([]);
   const [isConnected, setIsConnected] = useState<boolean>(false);
-  const [isSimulating, setIsSimulating] = useState<boolean>(false);
 
   // Internal rolling window for math calculations
   const deltasRef = useRef<number[]>([]);
@@ -101,14 +100,20 @@ export const CvdTerminal: React.FC<CvdTerminalProps> = ({
     }
   };
 
-  // Connect to Binance aggTrade WebSocket with automatic fallback
+  // Connect to Binance aggTrade WebSocket with strictly live streams
   useEffect(() => {
     let active = true;
-    let fallbackInterval: any = null;
+    let reconnectTimeout: any = null;
+    let endpointIdx = 0;
+    const endpoints = [
+      'wss://fstream.binance.com/ws/btcusdt@aggTrade',
+      'wss://data-stream.binance.vision/ws/btcusdt@aggTrade',
+    ];
 
     const connectWs = () => {
+      if (!active) return;
       try {
-        const wsUrl = 'wss://fstream.binance.com/ws/btcusdt@aggTrade';
+        const wsUrl = endpoints[endpointIdx % endpoints.length];
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
 
@@ -128,48 +133,32 @@ export const CvdTerminal: React.FC<CvdTerminalProps> = ({
               const isBuyerMaker = data.m;
               processTick(price, qty, isBuyerMaker, data.T);
             }
-          } catch (err) {
+          } catch {
             // ignore JSON errors
           }
         };
 
         ws.onerror = () => {
-          // If Binance WS blocked by geo-firewall, fallback to simulated realistic tick stream
           if (!active) return;
           setIsConnected(false);
           onWsStatusChange(false);
-          startFallbackSimulation();
         };
 
         ws.onclose = () => {
           if (!active) return;
           setIsConnected(false);
           onWsStatusChange(false);
-          // Retry after delay or run fallback
-          setTimeout(() => {
-            if (active && !isConnected) connectWs();
-          }, 3000);
+          endpointIdx++;
+          reconnectTimeout = setTimeout(() => {
+            if (active) connectWs();
+          }, 2500);
         };
-      } catch (err) {
-        startFallbackSimulation();
+      } catch {
+        endpointIdx++;
+        reconnectTimeout = setTimeout(() => {
+          if (active) connectWs();
+        }, 3000);
       }
-    };
-
-    const startFallbackSimulation = () => {
-      if (fallbackInterval) return;
-      setIsConnected(true);
-      onWsStatusChange(true);
-      setIsSimulating(true);
-
-      let mockPrice = 91450.0;
-      fallbackInterval = setInterval(() => {
-        if (!active) return;
-        const priceDrift = (Math.random() - 0.49) * 2.5;
-        mockPrice = Math.max(90000, mockPrice + priceDrift);
-        const qty = parseFloat((Math.random() * 1.5 + 0.05).toFixed(3));
-        const isBuyerMaker = Math.random() > 0.52;
-        processTick(mockPrice, qty, isBuyerMaker, Date.now());
-      }, 400);
     };
 
     connectWs();
@@ -179,24 +168,11 @@ export const CvdTerminal: React.FC<CvdTerminalProps> = ({
       if (wsRef.current) {
         wsRef.current.close();
       }
-      if (fallbackInterval) {
-        clearInterval(fallbackInterval);
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
       }
     };
   }, [config.rollingWindowSize, config.sigmaThreshold]);
-
-  // Manual Trigger for Anomaly Simulation
-  const triggerManualSpike = (direction: 'BUY_UP' | 'BUY_DOWN') => {
-    const isUp = direction === 'BUY_UP';
-    const fakePrice = isUp ? currentPrice + 45 : currentPrice - 45;
-    const fakeQty = 8.5; // Huge volume explosion
-    const fakeIsBuyerMaker = !isUp; // Taker buy if Up, taker sell if Down
-
-    // Force high z-score
-    for (let i = 0; i < 5; i++) {
-      processTick(fakePrice, fakeQty, fakeIsBuyerMaker, Date.now());
-    }
-  };
 
   // Min and max for CVD SVG rendering
   const minCvd = Math.min(...cvdHistory.map((p) => p.cvd), cvd - 5);
@@ -302,7 +278,7 @@ export const CvdTerminal: React.FC<CvdTerminalProps> = ({
             <span className="text-xs font-mono text-zinc-400">عقود دائمة</span>
           </div>
           <p className="text-[11px] text-zinc-400 mt-1">
-            {isSimulating ? 'تغذية احتياطية فائقة السرعة نشطة' : 'اتصال مباشر عبر Binance Futures WebSocket'}
+            {isConnected ? 'اتصال مباشر حي عبر Binance Futures WebSocket (CEX Lead)' : 'جاري الاتصال المباشر ببث بينانس...'}
           </p>
         </div>
 
@@ -459,31 +435,20 @@ export const CvdTerminal: React.FC<CvdTerminalProps> = ({
             </div>
           </div>
 
-          {/* Anomaly Test Trigger Bar */}
+          {/* Real Live Production Execution Status Bar */}
           <div className="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div>
-              <span className="text-xs font-semibold text-zinc-200 block">
-                محاكاة واختبار طفرة السيولة (Lead-Lag Injection)
+              <span className="text-xs font-semibold text-emerald-400 flex items-center space-x-1.5 rtl:space-x-reverse">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>نظام التداول الحقيقي المباشر (Live Production Engine Active)</span>
               </span>
-              <span className="text-[11px] text-zinc-400 block">
-                حقن صفقة مسح مفاجئة (Taker Sweep) بمقدار 3.0σ+ لاختبار استجابة البوت وتنفيذه على Limitless
+              <span className="text-[11px] text-zinc-400 block mt-0.5">
+                يتم رصد طفرات السيولة الحقيقية على بينانس وإرسال الصفقات المؤكدة مباشرة إلى شبكة Base L2 بدون أي محاكاة.
               </span>
             </div>
-            <div className="flex items-center space-x-2 rtl:space-x-reverse w-full sm:w-auto">
-              <button
-                onClick={() => triggerManualSpike('BUY_UP')}
-                className="flex-1 sm:flex-none px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/40 text-xs font-medium transition-colors flex items-center justify-center space-x-1 rtl:space-x-reverse"
-              >
-                <ArrowUpRight className="w-3.5 h-3.5" />
-                <span>طفرة شراء صاعدة +3.2σ</span>
-              </button>
-              <button
-                onClick={() => triggerManualSpike('BUY_DOWN')}
-                className="flex-1 sm:flex-none px-3 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 border border-rose-500/40 text-xs font-medium transition-colors flex items-center justify-center space-x-1 rtl:space-x-reverse"
-              >
-                <ArrowDownRight className="w-3.5 h-3.5" />
-                <span>طفرة بيع هابطة -3.0σ</span>
-              </button>
+            <div className="flex items-center space-x-2 rtl:space-x-reverse w-full sm:w-auto text-xs font-mono text-zinc-300 bg-zinc-900 px-3 py-1.5 rounded-lg border border-zinc-800">
+              <span className="text-zinc-400">عتبة الانحراف الفعلي:</span>
+              <span className="font-bold text-amber-400">{config.sigmaThreshold}σ</span>
             </div>
           </div>
         </div>

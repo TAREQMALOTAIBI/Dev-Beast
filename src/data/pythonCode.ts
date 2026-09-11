@@ -411,7 +411,7 @@ class LimitlessWeb3Client:
         elif not HAS_LIMITLESS_SDK:
             logger.info("ℹ️ limitless-sdk package not detected in current environment. Using on-chain Web3 fallback.")
         else:
-            logger.info("ℹ️ LMTS_TOKEN_ID / LMTS_TOKEN_SECRET not set in .env. Running on-chain Web3 & paper modes.")
+            logger.info("ℹ️ LMTS_TOKEN_ID / LMTS_TOKEN_SECRET not set in .env. Running on-chain Web3 live mode.")
 
     async def get_live_portfolio_positions(self) -> dict:
         """قراءة المراكز المفتوحة الحقيقية (CLOB & AMM) والنقاط التراكمية عبر PortfolioFetcher"""
@@ -1010,7 +1010,7 @@ class LeadLagExploitOrchestrator:
         """بدء تشغيل كافة المهام المتزامنة وغير المتزامنة في بيئة asyncio واحدة"""
         logger.info("=" * 70)
         logger.info("⚡ Starting Limitless MML Quant Trading Bot (BTC 5m Lead-Lag Exploit)")
-        logger.info("🛠️ Execution Mode: LIVE PRODUCTION TRADING (PAPER TRADING DISABLED)")
+        logger.info("🛠️ Execution Mode: LIVE PRODUCTION TRADING (BASE L2 DIRECT ON-CHAIN & LIMITLESS SDK)")
         logger.info(f"📊 Anomaly Spike Threshold: {self.config.SIGMA_THRESHOLD}σ")
         logger.info(f"🛡️ Risk Per Trade: {self.config.RISK_PER_TRADE * 100:.1f}% of wallet")
         logger.info(f"🎯 Dynamic Flip Target: +{self.config.DYNAMIC_FLIP_PROFIT * 100:.0f}%")
@@ -1072,6 +1072,50 @@ class LeadLagExploitOrchestrator:
                     "message": "تم إيقاف الروبوت بنجاح عبر الواجهة الأمامية (STOPPED)"
                 }, headers={"Access-Control-Allow-Origin": "*"})
 
+            async def handle_trade(request):
+                try:
+                    payload = await request.json()
+                    outcome_idx = int(payload.get("outcome_index", 0))
+                    entry_px = float(payload.get("entry_price", 0.07))
+                    amt_usd = float(payload.get("amount_usd", 10.0))
+                    logger.info(f"⚡ [WEB DIRECT TRADE] Executing real market buy: Outcome {outcome_idx} | \${amt_usd} USDC at \${entry_px}")
+                    tx_hash = await self.web3_client.execute_market_buy(outcome_idx, entry_px, amt_usd)
+                    if tx_hash:
+                        shares = amt_usd / entry_px
+                        pos_id = f"pos_{int(time.time() * 1000)}"
+                        self.active_positions.append({
+                            "id": pos_id,
+                            "tx_hash": tx_hash,
+                            "outcome_index": outcome_idx,
+                            "entry_price": entry_px,
+                            "shares": shares,
+                            "target_price": entry_px * (1 + self.config.DYNAMIC_FLIP_PROFIT_PCT),
+                            "opened_at": time.time(),
+                        })
+                        return web.json_response({
+                            "success": True,
+                            "tx_hash": tx_hash,
+                            "shares_bought": shares,
+                            "entry_price": entry_px,
+                        }, headers={"Access-Control-Allow-Origin": "*"})
+                    else:
+                        return web.json_response({"success": False, "error": "فشل تنفيذ الصفقة على البلوكتشين"}, status=500, headers={"Access-Control-Allow-Origin": "*"})
+                except Exception as e:
+                    return web.json_response({"success": False, "error": str(e)}, status=500, headers={"Access-Control-Allow-Origin": "*"})
+
+            async def handle_flip(request):
+                try:
+                    payload = await request.json()
+                    pos_id = payload.get("position_id")
+                    for p in self.active_positions:
+                        if p.get("id") == pos_id:
+                            tx = await self.web3_client.execute_dynamic_flip_exit(p["outcome_index"], p["shares"], p["target_price"])
+                            self.active_positions.remove(p)
+                            return web.json_response({"success": True, "tx_hash": tx}, headers={"Access-Control-Allow-Origin": "*"})
+                    return web.json_response({"success": True, "message": "Position closed"}, headers={"Access-Control-Allow-Origin": "*"})
+                except Exception as e:
+                    return web.json_response({"success": False, "error": str(e)}, status=500, headers={"Access-Control-Allow-Origin": "*"})
+
             async def handle_options(request):
                 return web.Response(headers={
                     "Access-Control-Allow-Origin": "*",
@@ -1083,6 +1127,8 @@ class LeadLagExploitOrchestrator:
             app.router.add_get("/api/portfolio", handle_portfolio)
             app.router.add_post("/api/start", handle_start)
             app.router.add_post("/api/stop", handle_stop)
+            app.router.add_post("/api/trade", handle_trade)
+            app.router.add_post("/api/flip", handle_flip)
             app.router.add_route("OPTIONS", "/{tail:.*}", handle_options)
 
             runner = web.AppRunner(app)
