@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { createPublicClient, createWalletClient, http, formatUnits, parseUnits } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
@@ -7,6 +8,21 @@ import { base } from 'viem/chains';
 import dotenv from 'dotenv';
 
 dotenv.config();
+
+// Helper to dynamically read the freshest values from .env on disk
+function getDynamicEnv(): Record<string, string | undefined> {
+  const envPath = path.join(process.cwd(), '.env');
+  if (fs.existsSync(envPath)) {
+    try {
+      const raw = fs.readFileSync(envPath, 'utf8');
+      const parsed = dotenv.parse(raw);
+      return { ...process.env, ...parsed };
+    } catch (e) {
+      return process.env;
+    }
+  }
+  return process.env;
+}
 
 const app = express();
 const PORT = 3000;
@@ -55,13 +71,15 @@ async function startServer() {
   // 1. Get Live Config & Real USDC Balance
   app.get('/api/config', async (req, res) => {
     try {
-      const walletAddress = process.env.WALLET_ADDRESS || process.env.VITE_WALLET_ADDRESS;
+      const liveEnv = getDynamicEnv();
+      const walletAddress = liveEnv.WALLET_ADDRESS || liveEnv.VITE_WALLET_ADDRESS;
+      const currentRpc = liveEnv.RPC_URL || liveEnv.VITE_BASE_RPC_URL || rpcUrl;
       let balanceUsdc = 0;
 
       if (walletAddress) {
         const publicClient = createPublicClient({
           chain: base,
-          transport: http(rpcUrl),
+          transport: http(currentRpc),
         });
 
         const balanceWei = await publicClient.readContract({
@@ -77,11 +95,11 @@ async function startServer() {
       res.json({
         walletAddress: walletAddress || null,
         balanceUsdc,
-        riskPerTrade: parseFloat(process.env.RISK_PER_TRADE || '0.005'),
-        maxEntryPrice: parseFloat(process.env.MAX_ENTRY_PRICE || '0.10'),
-        dynamicFlipProfit: parseFloat(process.env.DYNAMIC_FLIP_PROFIT || '3.00'),
-        sigmaThreshold: parseFloat(process.env.SIGMA_THRESHOLD || '2.5'),
-        isConfigured: !!process.env.PRIVATE_KEY,
+        riskPerTrade: parseFloat(liveEnv.RISK_PER_TRADE || '0.005'),
+        maxEntryPrice: parseFloat(liveEnv.MAX_ENTRY_PRICE || '0.10'),
+        dynamicFlipProfit: parseFloat(liveEnv.DYNAMIC_FLIP_PROFIT || '3.00'),
+        sigmaThreshold: parseFloat(liveEnv.SIGMA_THRESHOLD || '2.5'),
+        isConfigured: !!liveEnv.PRIVATE_KEY,
         isLiveTradingOnly: true,
       });
     } catch (error) {
@@ -94,8 +112,10 @@ async function startServer() {
   app.post('/api/trade/buy', async (req, res) => {
     try {
       const { outcomeIndex, outcomeLabel, entryPrice, amountUsd } = req.body;
-      const privateKey = process.env.PRIVATE_KEY;
-      const walletAddress = process.env.WALLET_ADDRESS;
+      const liveEnv = getDynamicEnv();
+      const privateKey = liveEnv.PRIVATE_KEY;
+      const walletAddress = liveEnv.WALLET_ADDRESS;
+      const currentRpc = liveEnv.RPC_URL || liveEnv.VITE_BASE_RPC_URL || rpcUrl;
 
       if (!privateKey) {
         return res.status(400).json({
@@ -106,7 +126,7 @@ async function startServer() {
       // Check real on-chain balance first
       const publicClient = createPublicClient({
         chain: base,
-        transport: http(rpcUrl),
+        transport: http(currentRpc),
       });
 
       const userAddr = (walletAddress || privateKeyToAccount(privateKey as `0x${string}`).address) as `0x${string}`;
