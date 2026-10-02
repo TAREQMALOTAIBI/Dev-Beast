@@ -74,7 +74,7 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
 
       {/* Log Feed */}
       <div className="p-3.5 font-mono text-xs max-h-64 overflow-y-auto space-y-1.5 scrollbar-thin scrollbar-thumb-zinc-800">
-        {logs.map((log) => {
+        {logs.map((log, idx) => {
           let badgeColor = 'text-zinc-400 bg-zinc-900 border-zinc-800';
           let textColor = 'text-zinc-300';
 
@@ -93,7 +93,7 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
           }
 
           return (
-            <div key={log.id} className="flex items-start space-x-2 rtl:space-x-reverse leading-relaxed">
+            <div key={`${log.id}-${idx}`} className="flex items-start space-x-2 rtl:space-x-reverse leading-relaxed">
               <span className="text-zinc-400 text-[10px] shrink-0 pt-0.5">{log.timestamp}</span>
               <span className={`px-1.5 py-0.2 text-[10px] rounded border ${badgeColor} shrink-0`}>
                 [{log.level}]

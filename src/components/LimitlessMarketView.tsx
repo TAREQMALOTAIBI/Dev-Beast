@@ -444,10 +444,10 @@ export const LimitlessMarketView: React.FC<LimitlessMarketViewProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800/60">
-                {positions.map((pos) => {
+                {positions.map((pos, idx) => {
                   const isTargetReached = pos.currentProfitPercent >= pos.targetProfitPercent;
                   return (
-                    <tr key={pos.id} className="hover:bg-zinc-800/30 transition-colors">
+                    <tr key={`${pos.id}-${idx}`} className="hover:bg-zinc-800/30 transition-colors">
                       <td className="py-3 font-semibold text-white">
                         {pos.outcomeLabel}
                         <span className="block text-[10px] text-zinc-400">{pos.marketTitle}</span>

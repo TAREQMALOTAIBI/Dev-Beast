@@ -30,6 +30,8 @@ export const CvdTerminal: React.FC<CvdTerminalProps> = ({
   const cvdRef = useRef<number>(0);
   const lastTimeRef = useRef<number>(Date.now());
   const wsRef = useRef<WebSocket | null>(null);
+  const spikeCounterRef = useRef<number>(0);
+  const lastSpikeTimeRef = useRef<number>(0);
 
   // Function to process tick and check for 2.5 Sigma
   const processTick = (price: number, qty: number, isBuyerMaker: boolean, timestamp: number) => {
@@ -84,9 +86,15 @@ export const CvdTerminal: React.FC<CvdTerminalProps> = ({
     setCvdHistory((prev) => [...prev.slice(-49), { time: timestamp, cvd: newCvd, price, zScore }]);
 
     // Trigger Anomaly Spike if |zScore| >= config.sigmaThreshold (2.5σ)
-    if (Math.abs(zScore) >= config.sigmaThreshold) {
+    // Cooldown of 2000ms ensures burst micro-trades don't fire duplicate spikes
+    const now = Date.now();
+    if (Math.abs(zScore) >= config.sigmaThreshold && now - lastSpikeTimeRef.current >= 2000) {
+      lastSpikeTimeRef.current = now;
+      spikeCounterRef.current += 1;
+      const uniqueSpikeId = `spike-${now}-${spikeCounterRef.current}-${Math.random().toString(36).slice(2, 7)}`;
+
       const spike: MomentumSpike = {
-        id: `spike-${Date.now()}`,
+        id: uniqueSpikeId,
         timestamp,
         direction: zScore > 0 ? 'BUY_UP' : 'BUY_DOWN',
         zScore,
@@ -95,7 +103,7 @@ export const CvdTerminal: React.FC<CvdTerminalProps> = ({
         cvd: newCvd,
       };
 
-      setSpikesList((prev) => [spike, ...prev.slice(0, 9)]);
+      setSpikesList((prev) => [spike, ...prev.filter((s) => s.id !== uniqueSpikeId).slice(0, 9)]);
       onSpikeDetected(spike);
     }
   };
@@ -505,9 +513,9 @@ export const CvdTerminal: React.FC<CvdTerminalProps> = ({
               سجل الطفرات المرصودة ({spikesList.length})
             </span>
             <div className="space-y-1 max-h-24 overflow-y-auto">
-              {spikesList.slice(0, 3).map((sp) => (
+              {spikesList.slice(0, 3).map((sp, idx) => (
                 <div
-                  key={sp.id}
+                  key={`${sp.id}-${idx}`}
                   className="flex items-center justify-between text-[11px] font-mono p-1.5 rounded bg-zinc-950 border border-zinc-800"
                 >
                   <span
