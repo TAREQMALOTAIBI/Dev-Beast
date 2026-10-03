@@ -6,9 +6,10 @@ interface ConfigPanelProps {
   config: BotConfigState;
   setConfig: React.Dispatch<React.SetStateAction<BotConfigState>>;
   onResetDefaults: () => void;
+  onToggleBot?: () => void;
 }
 
-export const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, setConfig, onResetDefaults }) => {
+export const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, setConfig, onResetDefaults, onToggleBot }) => {
   const [copiedEnv, setCopiedEnv] = useState(false);
   const [showPrivateKey, setShowPrivateKey] = useState(false);
 
@@ -106,7 +107,13 @@ PROXY_URL=${config.proxyUrl || ''}
               </span>
             </div>
             <button
-              onClick={() => handleChange('isBotRunning', !config.isBotRunning)}
+              onClick={() => {
+                if (onToggleBot) {
+                  onToggleBot();
+                } else {
+                  handleChange('isBotRunning', !config.isBotRunning);
+                }
+              }}
               className={`px-3 py-1 rounded-full text-xs font-bold transition-all flex items-center space-x-1.5 rtl:space-x-reverse cursor-pointer ${
                 config.isBotRunning
                   ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/50'

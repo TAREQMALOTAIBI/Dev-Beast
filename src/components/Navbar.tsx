@@ -133,7 +133,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   config.isBotRunning ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'
                 }`}
               />
-              <span>{config.isBotRunning ? 'الروبوت: نشط' : 'الروبوت: متوقف'}</span>
+              <span>{config.isBotRunning ? 'الروبوت: نشط (24/7)' : 'الروبوت: متوقف'}</span>
             </div>
 
             {/* BOT START / STOP PRIMARY BUTTON */}

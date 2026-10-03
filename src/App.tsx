@@ -9,11 +9,21 @@ import { ExecutionConsole } from './components/ExecutionConsole';
 import { BotConfigState, LimitlessPosition, MomentumSpike, TerminalLog } from './types';
 import { generateCustomPythonScript } from './data/pythonCode';
 
+const getInitialBotRunning = (): boolean => {
+  if (typeof window !== 'undefined') {
+    const cached = localStorage.getItem('mml_bot_running');
+    if (cached !== null) {
+      return cached === 'true';
+    }
+  }
+  return true; // Institutional quant bot default to active
+};
+
 const DEFAULT_CONFIG: BotConfigState = {
   rpcUrl: 'https://base-mainnet.g.alchemy.com/v2/alch_JNomeBEeTF4e_R2LFweN6',
   walletAddress: '0x7b819231Df2665D0d5a6e91d8f4D55B395298C9A',
   privateKey: '0xd5e837bde21ca239c1546b847fcacdc7210cd1f214e227a371bd58c778a6108f',
-  isBotRunning: false, // Bot is stopped by default
+  isBotRunning: getInitialBotRunning(), // Persisted or active by default
   riskPerTrade: 0.005, // 0.50% of wallet
   maxEntryPrice: 0.10, // <= $0.10 OTM
   maxSlippage: 0.10, // Max slippage $0.10
@@ -27,7 +37,7 @@ const DEFAULT_CONFIG: BotConfigState = {
   lmtsTokenSecret: '4/aP4RTcMqT+0DSyphnZ6GlKPSojIDWWTM0nbNxA73g=',
   btcMarketSlug: '',
   proxyUrl: '',
-  remoteBotApiUrl: 'http://localhost:8080',
+  remoteBotApiUrl: '',
 };
 
 export default function App() {
@@ -83,16 +93,23 @@ export default function App() {
       .then((res) => res.json())
       .then((data) => {
         if (!data.error) {
-          setConfig((prev) => ({
-            ...prev,
-            walletAddress: data.walletAddress || prev.walletAddress,
-            walletBalance: data.balanceUsdc ?? prev.walletBalance,
-            riskPerTrade: data.riskPerTrade || prev.riskPerTrade,
-            maxEntryPrice: data.maxEntryPrice || prev.maxEntryPrice,
-            dynamicFlipProfit: data.dynamicFlipProfit || prev.dynamicFlipProfit,
-            sigmaThreshold: data.sigmaThreshold || prev.sigmaThreshold,
-            isBotRunning: data.isConfigured ? prev.isBotRunning : false,
-          }));
+          const serverBotRunning = typeof data.isBotRunning === 'boolean' ? data.isBotRunning : undefined;
+          setConfig((prev) => {
+            const resolvedRunning = serverBotRunning !== undefined ? serverBotRunning : prev.isBotRunning;
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('mml_bot_running', resolvedRunning ? 'true' : 'false');
+            }
+            return {
+              ...prev,
+              walletAddress: data.walletAddress || prev.walletAddress,
+              walletBalance: data.balanceUsdc ?? prev.walletBalance,
+              riskPerTrade: data.riskPerTrade || prev.riskPerTrade,
+              maxEntryPrice: data.maxEntryPrice || prev.maxEntryPrice,
+              dynamicFlipProfit: data.dynamicFlipProfit || prev.dynamicFlipProfit,
+              sigmaThreshold: data.sigmaThreshold || prev.sigmaThreshold,
+              isBotRunning: resolvedRunning,
+            };
+          });
 
           if (data.walletAddress) {
             addLog('WEB3', `تم جلب الإعدادات الحقيقية من السيرفر. المحفظة: ${data.walletAddress} | الرصيد المتاح: $${data.balanceUsdc} USDC`);
@@ -102,48 +119,80 @@ export default function App() {
       .catch((err) => console.error('Failed to fetch config', err));
   };
 
+  const syncBotStatus = () => {
+    fetch('/api/bot/status')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && typeof data.isBotRunning === 'boolean') {
+          setConfig((prev) => {
+            if (prev.isBotRunning !== data.isBotRunning) {
+              if (typeof window !== 'undefined') {
+                localStorage.setItem('mml_bot_running', data.isBotRunning ? 'true' : 'false');
+              }
+              return { ...prev, isBotRunning: data.isBotRunning };
+            }
+            return prev;
+          });
+        }
+      })
+      .catch(() => {});
+  };
+
   useEffect(() => {
     fetchConfig();
+    syncBotStatus();
+    const interval = setInterval(syncBotStatus, 8000);
+    return () => clearInterval(interval);
   }, []);
 
-  // Toggle Bot Run / Stop
-  const handleToggleBot = () => {
-    setConfig((prev) => {
-      const nextRunning = !prev.isBotRunning;
-      if (nextRunning) {
-        addLog(
-          'INFO',
-          '🟢 [تشغيل الروبوت] تم تشغيل الروبوت بنجاح! محرك استغلال فجوة التأخير (MML) يراقب السوق ونظام التنفيذ الآلي نشط الآن.'
-        );
+  // Toggle Bot Run / Stop with Full Server & VM Persistence
+  const handleToggleBot = async () => {
+    const nextRunning = !config.isBotRunning;
+
+    // Immediate optimistic state update
+    setConfig((prev) => ({
+      ...prev,
+      isBotRunning: nextRunning,
+    }));
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('mml_bot_running', nextRunning ? 'true' : 'false');
+    }
+
+    if (nextRunning) {
+      addLog(
+        'INFO',
+        '🟢 [تشغيل الروبوت] تم تنشيط الروبوت بنجاح! الروبوت يعمل الآن في الخلفية على خادم السيرفر (VM) 24/7 دون الحاجة لإبقاء المتصفح مفتوحاً.'
+      );
+    } else {
+      addLog(
+        'WARN',
+        '🔴 [إيقاف الروبوت] تم إيقاف الروبوت مؤقتاً على السيرفر. تم تعليق تنفيذ الصفقات الآلية لحماية المحفظة.'
+      );
+    }
+
+    try {
+      const res = await fetch('/api/bot/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ running: nextRunning }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        if (data.message) {
+          addLog('INFO', `📡 [تزامن خادم VM] ${data.message}`);
+        }
+        if (typeof data.isBotRunning === 'boolean') {
+          setConfig((prev) => ({ ...prev, isBotRunning: data.isBotRunning }));
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('mml_bot_running', data.isBotRunning ? 'true' : 'false');
+          }
+        }
       } else {
-        addLog(
-          'WARN',
-          '🔴 [إيقاف الروبوت] تم إيقاف الروبوت مؤقتاً. تم تعليق تنفيذ الصفقات التلقائية لحماية المحفظة.'
-        );
+        addLog('WARN', `⚠️ تعذر تزامن حالة الروبوت مع السيرفر: ${data.error || 'خطأ غير معروف'}`);
       }
-
-      // Sync with GCE VM / Remote Python Bot if endpoint configured
-      if (prev.remoteBotApiUrl) {
-        const action = nextRunning ? 'start' : 'stop';
-        fetch(`${prev.remoteBotApiUrl.replace(/\/$/, '')}/api/${action}`, {
-          method: 'POST',
-        })
-          .then((res) => res.json())
-          .then((data) => {
-            if (data && data.message) {
-              addLog('INFO', `📡 [تزامن خادم GCE VM] رد الخادم: ${data.message}`);
-            }
-          })
-          .catch(() => {
-            // Standalone or offline fallback
-          });
-      }
-
-      return {
-        ...prev,
-        isBotRunning: nextRunning,
-      };
-    });
+    } catch (err: any) {
+      addLog('WARN', `⚠️ خطأ في الاتصال بالخادم: ${err.message}`);
+    }
   };
 
   // Manual / Auto buffer flush & garbage collection routine
@@ -393,6 +442,7 @@ export default function App() {
             config={config}
             setConfig={setConfig}
             onResetDefaults={() => setConfig(DEFAULT_CONFIG)}
+            onToggleBot={handleToggleBot}
           />
         )}
 

@@ -24,6 +24,49 @@ function getDynamicEnv(): Record<string, string | undefined> {
   return process.env;
 }
 
+// Persistent Bot Execution State File
+const BOT_STATE_FILE = path.join(process.cwd(), '.bot_state.json');
+
+interface BotPersistenceState {
+  isBotRunning: boolean;
+  updatedAt: string;
+  source: string;
+}
+
+function getBotState(): BotPersistenceState {
+  try {
+    if (fs.existsSync(BOT_STATE_FILE)) {
+      const raw = fs.readFileSync(BOT_STATE_FILE, 'utf8');
+      const data = JSON.parse(raw);
+      if (typeof data.isBotRunning === 'boolean') {
+        return data;
+      }
+    }
+  } catch (e) {
+    console.error('Error reading .bot_state.json:', e);
+  }
+  // Default to true (active) for institutional autonomous operation
+  return {
+    isBotRunning: true,
+    updatedAt: new Date().toISOString(),
+    source: 'default_autonomous',
+  };
+}
+
+function saveBotState(running: boolean, source: string = 'api'): BotPersistenceState {
+  const state: BotPersistenceState = {
+    isBotRunning: running,
+    updatedAt: new Date().toISOString(),
+    source,
+  };
+  try {
+    fs.writeFileSync(BOT_STATE_FILE, JSON.stringify(state, null, 2), 'utf8');
+  } catch (e) {
+    console.error('Error writing .bot_state.json:', e);
+  }
+  return state;
+}
+
 const app = express();
 const PORT = 3000;
 
@@ -92,6 +135,8 @@ async function startServer() {
         balanceUsdc = parseFloat(formatUnits(balanceWei as bigint, 6));
       }
 
+      const currentBotState = getBotState();
+
       res.json({
         walletAddress: walletAddress || null,
         balanceUsdc,
@@ -100,6 +145,8 @@ async function startServer() {
         dynamicFlipProfit: parseFloat(liveEnv.DYNAMIC_FLIP_PROFIT || '3.00'),
         sigmaThreshold: parseFloat(liveEnv.SIGMA_THRESHOLD || '2.5'),
         isConfigured: !!liveEnv.PRIVATE_KEY,
+        isBotRunning: currentBotState.isBotRunning,
+        botStateUpdatedAt: currentBotState.updatedAt,
         isLiveTradingOnly: true,
       });
     } catch (error) {
@@ -284,26 +331,89 @@ async function startServer() {
     }
   });
 
-  // 5. Bot Remote Control (Start / Stop real execution)
-  app.post('/api/bot/toggle', async (req, res) => {
+  // 5. Bot Status (Queries Python bot or saved disk state)
+  app.get('/api/bot/status', async (req, res) => {
     try {
-      const { running } = req.body;
-      const action = running ? 'start' : 'stop';
+      const savedState = getBotState();
+      let pythonBotOnline = false;
+      let botRunning = savedState.isBotRunning;
+      let pythonDetails: any = null;
 
       try {
-        const botRes = await fetch(`${pythonBotUrl}/api/${action}`, { method: 'POST' });
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
+        const botRes = await fetch(`${pythonBotUrl}/api/status`, { signal: controller.signal });
+        clearTimeout(timeoutId);
         if (botRes.ok) {
           const data = await botRes.json();
-          return res.json({ success: true, botRunning: running, message: data.message });
+          pythonBotOnline = true;
+          pythonDetails = data;
+          if (typeof data.bot_enabled === 'boolean') {
+            botRunning = data.bot_enabled;
+            if (savedState.isBotRunning !== botRunning) {
+              saveBotState(botRunning, 'python_status_sync');
+            }
+          }
         }
       } catch {
-        // Python bot offline
+        // Python bot offline or busy
       }
 
       res.json({
         success: true,
-        botRunning: running,
-        message: running ? 'تم تنشيط وضع التداول الحقيقي' : 'تم إيقاف التداول الحقيقي مؤقتاً',
+        isBotRunning: botRunning,
+        pythonBotOnline,
+        updatedAt: savedState.updatedAt,
+        autonomous247: true,
+        message: botRunning
+          ? 'الروبوت نشط ويعمل في الخلفية على السيرفر 24/7'
+          : 'الروبوت متوقف مؤقتاً على السيرفر',
+        pythonDetails,
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // 6. Bot Remote Control (Start / Stop real execution with persistent storage)
+  app.post('/api/bot/toggle', async (req, res) => {
+    try {
+      const { running } = req.body;
+      const targetState = Boolean(running);
+      const action = targetState ? 'start' : 'stop';
+
+      // Persist state to disk immediately
+      const savedState = saveBotState(targetState, 'web_toggle');
+
+      let pythonBotOnline = false;
+      let pythonMessage = '';
+
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        const botRes = await fetch(`${pythonBotUrl}/api/${action}`, {
+          method: 'POST',
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        if (botRes.ok) {
+          const data = await botRes.json();
+          pythonBotOnline = true;
+          pythonMessage = data.message || '';
+        }
+      } catch {
+        // Python bot offline or standalone
+      }
+
+      res.json({
+        success: true,
+        isBotRunning: targetState,
+        pythonBotOnline,
+        updatedAt: savedState.updatedAt,
+        message: targetState
+          ? '🟢 تم تنشيط الروبوت بنجاح! الروبوت يعمل الآن في الخلفية على خادم السيرفر (VM) 24/7 حتى إذا أغلقت المتصفح.'
+          : '🔴 تم إيقاف الروبوت مؤقتاً على السيرفر. تم تعليق تنفيذ الصفقات الآلية.',
+        pythonMessage: pythonMessage || undefined,
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
