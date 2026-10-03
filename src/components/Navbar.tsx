@@ -1,13 +1,12 @@
 import React from 'react';
-import { Activity, ShieldCheck, Download, Code2, Terminal, Zap, SlidersHorizontal, BookOpen, Play, Square } from 'lucide-react';
+import { Activity, Terminal, Zap, SlidersHorizontal, BookOpen, Play, Square } from 'lucide-react';
 import { BotConfigState } from '../types';
 
 interface NavbarProps {
-  activeTab: 'terminal' | 'market' | 'code' | 'config' | 'guide';
-  setActiveTab: (tab: 'terminal' | 'market' | 'code' | 'config' | 'guide') => void;
+  activeTab: 'terminal' | 'market' | 'config' | 'guide';
+  setActiveTab: (tab: 'terminal' | 'market' | 'config' | 'guide') => void;
   config: BotConfigState;
   wsConnected: boolean;
-  onDownloadScript: () => void;
   onToggleBot?: () => void;
 }
 
@@ -16,7 +15,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   setActiveTab,
   config,
   wsConnected,
-  onDownloadScript,
   onToggleBot,
 }) => {
   return (
@@ -67,18 +65,6 @@ export const Navbar: React.FC<NavbarProps> = ({
             >
               <Terminal className="w-3.5 h-3.5" />
               <span>سوق Limitless 5m</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('code')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center space-x-1.5 rtl:space-x-reverse ${
-                activeTab === 'code'
-                  ? 'bg-zinc-800 text-emerald-400 shadow-sm font-semibold'
-                  : 'text-zinc-400 hover:text-zinc-200'
-              }`}
-            >
-              <Code2 className="w-3.5 h-3.5" />
-              <span>كود بايثون Python</span>
             </button>
 
             <button
@@ -160,17 +146,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                 )}
               </button>
             )}
-
-            {/* Download Python File CTA */}
-            <button
-              onClick={onDownloadScript}
-              className="inline-flex items-center space-x-1.5 rtl:space-x-reverse px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white border border-zinc-700 text-xs font-semibold transition-colors shadow-sm"
-              title="تحميل ملف البوت limitless_mml_bot.py"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">تحميل كود .py</span>
-              <span className="sm:hidden">الكود</span>
-            </button>
           </div>
         </div>
 
@@ -191,14 +166,6 @@ export const Navbar: React.FC<NavbarProps> = ({
             }`}
           >
             سوق Limitless 5m
-          </button>
-          <button
-            onClick={() => setActiveTab('code')}
-            className={`px-2.5 py-1 rounded-md text-xs whitespace-nowrap ${
-              activeTab === 'code' ? 'bg-zinc-800 text-emerald-400 font-semibold' : 'text-zinc-400'
-            }`}
-          >
-            كود بايثون
           </button>
           <button
             onClick={() => setActiveTab('config')}

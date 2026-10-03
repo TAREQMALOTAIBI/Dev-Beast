@@ -16,6 +16,7 @@ export interface BotConfigState {
   lmtsTokenId?: string;
   lmtsTokenSecret?: string;
   btcMarketSlug?: string;
+  btcTimeframe?: '5m';
   proxyUrl: string;
   remoteBotApiUrl: string;
 }

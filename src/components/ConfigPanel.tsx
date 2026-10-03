@@ -64,7 +64,7 @@ PROXY_URL=${config.proxyUrl || ''}
           <div>
             <h2 className="text-base font-bold text-white">مصفوفة إعدادات وإدارة مخاطر البوت</h2>
             <p className="text-xs text-zinc-400">
-              التحكم في معلمات استراتيجية MML وتحديث كود بايثون البرمجي تلقائياً
+              التحكم في معلمات استراتيجية MML وإدارة المخاطر والتنفيذ اللحظي
             </p>
           </div>
         </div>
@@ -73,10 +73,10 @@ PROXY_URL=${config.proxyUrl || ''}
           <button
             onClick={handleCopyEnv}
             className="px-3 py-1.5 rounded-lg bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 border border-purple-500/40 text-xs font-medium transition-colors flex items-center space-x-1.5 rtl:space-x-reverse cursor-pointer"
-            title="نسخ ملف .env الكامل المجهز لتشغيله على Google Cloud VM"
+            title="نسخ ملف إعدادات .env"
           >
             {copiedEnv ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <FileText className="w-3.5 h-3.5" />}
-            <span>{copiedEnv ? 'تم نسخ ملف .env بنجاح!' : 'نسخ ملف .env للـ VM'}</span>
+            <span>{copiedEnv ? 'تم نسخ الإعدادات بنجاح!' : 'نسخ ملف .env'}</span>
           </button>
 
           <button
@@ -327,6 +327,24 @@ PROXY_URL=${config.proxyUrl || ''}
 
             <div>
               <label className="text-xs text-zinc-300 block mb-1">
+                الإطار الزمني لصفقات البيتكوين (BTC Timeframe Focus)
+              </label>
+              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between">
+                <div className="flex items-center space-x-2 rtl:space-x-reverse">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />
+                  <span className="text-xs font-bold text-amber-300">عقود 5 دقائق حصرياً (5-Minute Binary Options Only)</span>
+                </div>
+                <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-200 border border-amber-500/40 font-mono font-bold">
+                  5M LOCKED
+                </span>
+              </div>
+              <span className="text-[10px] text-zinc-400 block mt-1">
+                تم تثبيت تركيز الروبوت واكتشاف العقود حصرياً على شمعة الـ 5 دقائق المتجددة على منصة Limitless.
+              </span>
+            </div>
+
+            <div>
+              <label className="text-xs text-zinc-300 block mb-1">
                 معرف السوق المستهدف (BTC_MARKET_SLUG)
               </label>
               <input
@@ -334,7 +352,7 @@ PROXY_URL=${config.proxyUrl || ''}
                 value={config.btcMarketSlug || ''}
                 onChange={(e) => handleChange('btcMarketSlug', e.target.value)}
                 className="w-full px-3 py-2 rounded-lg bg-zinc-950 border border-zinc-800 text-xs font-mono text-zinc-200 focus:border-purple-500 focus:outline-none"
-                placeholder="اتركه فارغاً للاكتشاف التلقائي لأسواق BTC النشطة"
+                placeholder="اتركه فارغاً للاكتشاف التلقائي الحصري لعقد الـ 5 دقائق"
               />
             </div>
           </div>
@@ -385,7 +403,7 @@ PROXY_URL=${config.proxyUrl || ''}
           <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800/80">
             <span className="text-xs font-bold text-emerald-400 block mb-1">1. تدوير الذاكرة الحلقي (Ring Buffer)</span>
             <p className="text-[11px] text-zinc-400 leading-normal">
-              استخدام <code className="text-emerald-300 font-mono">deque(maxlen=120)</code> في بايثون: إخراج الصفقات القديمة آلياً في زمن <code className="text-zinc-300 font-mono">O(1)</code> فور وصول صفقة جديدة بدون أي تراكم في الذاكرة.
+              استخدام بنية بيانات تدوير الذاكرة السريعة: إخراج الصفقات القديمة آلياً في زمن <code className="text-zinc-300 font-mono">O(1)</code> فور وصول صفقة جديدة بدون أي تراكم في الذاكرة.
             </p>
           </div>
           <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800/80">

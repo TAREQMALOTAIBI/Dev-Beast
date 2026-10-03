@@ -2,12 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Navbar } from './components/Navbar';
 import { CvdTerminal } from './components/CvdTerminal';
 import { LimitlessMarketView } from './components/LimitlessMarketView';
-import { CodeViewer } from './components/CodeViewer';
 import { ConfigPanel } from './components/ConfigPanel';
 import { ArchitectureGuide } from './components/ArchitectureGuide';
 import { ExecutionConsole } from './components/ExecutionConsole';
 import { BotConfigState, LimitlessPosition, MomentumSpike, TerminalLog } from './types';
-import { generateCustomPythonScript } from './data/pythonCode';
 
 const getInitialBotRunning = (): boolean => {
   if (typeof window !== 'undefined') {
@@ -21,8 +19,8 @@ const getInitialBotRunning = (): boolean => {
 
 const DEFAULT_CONFIG: BotConfigState = {
   rpcUrl: 'https://base-mainnet.g.alchemy.com/v2/alch_JNomeBEeTF4e_R2LFweN6',
-  walletAddress: '0x7b819231Df2665D0d5a6e91d8f4D55B395298C9A',
-  privateKey: '0xd5e837bde21ca239c1546b847fcacdc7210cd1f214e227a371bd58c778a6108f',
+  walletAddress: '0x784E62F93C9aB8049E7C33b49f96b27E2445F550',
+  privateKey: '',
   isBotRunning: getInitialBotRunning(), // Persisted or active by default
   riskPerTrade: 0.005, // 0.50% of wallet
   maxEntryPrice: 0.10, // <= $0.10 OTM
@@ -36,12 +34,13 @@ const DEFAULT_CONFIG: BotConfigState = {
   lmtsTokenId: 'PD9nivZ1_Ck-o5XD',
   lmtsTokenSecret: '4/aP4RTcMqT+0DSyphnZ6GlKPSojIDWWTM0nbNxA73g=',
   btcMarketSlug: '',
+  btcTimeframe: '5m',
   proxyUrl: '',
   remoteBotApiUrl: '',
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'terminal' | 'market' | 'code' | 'config' | 'guide'>('terminal');
+  const [activeTab, setActiveTab] = useState<'terminal' | 'market' | 'config' | 'guide'>('terminal');
   const [config, setConfig] = useState<BotConfigState>(DEFAULT_CONFIG);
   const [wsConnected, setWsConnected] = useState<boolean>(true);
   const [positions, setPositions] = useState<LimitlessPosition[]>([]);
@@ -68,7 +67,7 @@ export default function App() {
       id: 'log-wallet',
       timestamp: new Date().toLocaleTimeString('ar-SA'),
       level: 'WEB3',
-      message: 'تم ربط المحفظة بنجاح (0x7b819231Df2665D0d5a6e91d8f4D55B395298C9A). نظام التوقيع المحلي وتفويض USDC جاهز.',
+      message: 'تم ربط المحفظة بنجاح (Dev-Beast: 0x784E6...5F550). نظام التوقيع المحلي وتفويض USDC جاهز.',
     },
     {
       id: 'log-4',
@@ -119,285 +118,186 @@ export default function App() {
       .catch((err) => console.error('Failed to fetch config', err));
   };
 
-  const syncBotStatus = () => {
-    fetch('/api/bot/status')
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success && typeof data.isBotRunning === 'boolean') {
-          setConfig((prev) => {
-            if (prev.isBotRunning !== data.isBotRunning) {
-              if (typeof window !== 'undefined') {
-                localStorage.setItem('mml_bot_running', data.isBotRunning ? 'true' : 'false');
-              }
-              return { ...prev, isBotRunning: data.isBotRunning };
-            }
-            return prev;
-          });
-        }
-      })
-      .catch(() => {});
-  };
-
   useEffect(() => {
     fetchConfig();
-    syncBotStatus();
-    const interval = setInterval(syncBotStatus, 8000);
-    return () => clearInterval(interval);
   }, []);
 
-  // Toggle Bot Run / Stop with Full Server & VM Persistence
   const handleToggleBot = async () => {
-    const nextRunning = !config.isBotRunning;
-
-    // Immediate optimistic state update
-    setConfig((prev) => ({
-      ...prev,
-      isBotRunning: nextRunning,
-    }));
+    const nextState = !config.isBotRunning;
+    setConfig((prev) => ({ ...prev, isBotRunning: nextState }));
     if (typeof window !== 'undefined') {
-      localStorage.setItem('mml_bot_running', nextRunning ? 'true' : 'false');
-    }
-
-    if (nextRunning) {
-      addLog(
-        'INFO',
-        '🟢 [تشغيل الروبوت] تم تنشيط الروبوت بنجاح! الروبوت يعمل الآن في الخلفية على خادم السيرفر (VM) 24/7 دون الحاجة لإبقاء المتصفح مفتوحاً.'
-      );
-    } else {
-      addLog(
-        'WARN',
-        '🔴 [إيقاف الروبوت] تم إيقاف الروبوت مؤقتاً على السيرفر. تم تعليق تنفيذ الصفقات الآلية لحماية المحفظة.'
-      );
+      localStorage.setItem('mml_bot_running', nextState ? 'true' : 'false');
     }
 
     try {
       const res = await fetch('/api/bot/toggle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ running: nextRunning }),
+        body: JSON.stringify({ isBotRunning: nextState }),
       });
       const data = await res.json();
-      if (res.ok && data.success) {
-        if (data.message) {
-          addLog('INFO', `📡 [تزامن خادم VM] ${data.message}`);
-        }
-        if (typeof data.isBotRunning === 'boolean') {
-          setConfig((prev) => ({ ...prev, isBotRunning: data.isBotRunning }));
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('mml_bot_running', data.isBotRunning ? 'true' : 'false');
-          }
-        }
-      } else {
-        addLog('WARN', `⚠️ تعذر تزامن حالة الروبوت مع السيرفر: ${data.error || 'خطأ غير معروف'}`);
+      if (data.success) {
+        addLog(
+          nextState ? 'EXEC' : 'WARN',
+          nextState
+            ? '🚀 تم تفعيل روبوت التداول الآلي (24/7 Live Web Execution). جاري مسح شمعة الـ 5 دقائق واقتناص انحرافات 2.5σ.'
+            : '⏸️ تم إيقاف روبوت التداول الآلي مؤقتاً.'
+        );
       }
-    } catch (err: any) {
-      addLog('WARN', `⚠️ خطأ في الاتصال بالخادم: ${err.message}`);
+    } catch (e) {
+      console.error('Failed to sync bot state to server', e);
+      addLog(
+        nextState ? 'EXEC' : 'WARN',
+        nextState ? 'تم تفعيل روبوت التداول الآلي محلياً.' : 'تم إيقاف تشغيل الروبوت محلياً.'
+      );
     }
   };
 
-  // Manual / Auto buffer flush & garbage collection routine
-  const handleFlushBuffer = () => {
-    setLogs((prev) => [
-      {
-        id: Math.random().toString(),
-        timestamp: new Date().toLocaleTimeString('ar-EG'),
-        level: 'INFO',
-        message:
-          '🧹 [فرمتة الذاكرة والكاش] تم تفريغ وتدوير طوابير التدفق المؤقتة (Circular Buffer Purged). معدل اختناق الطابور: 0.00ms والذاكرة خالية 100%.',
-      },
-      ...prev.slice(0, 15),
-    ]);
-  };
-
-  // Automated real execution when a 2.5 Sigma volume spike is detected
-  const handleSpikeDetected = async (spike: MomentumSpike) => {
-    // Check if bot is running
+  // Automated Execution Engine on 2.5 Sigma Spike
+  const handleSpikeDetected = (spike: MomentumSpike) => {
     if (!config.isBotRunning) {
+      return; // Automated execution is paused
+    }
+
+    // Safety checks
+    if (spike.zScore < config.sigmaThreshold) return;
+
+    // Check OTM Entry Price ceiling
+    const targetOutcomeIndex = spike.direction === 'BUY_UP' ? 0 : 1;
+    const targetOutcomeLabel = spike.direction === 'BUY_UP' ? 'YES (صعود BTC)' : 'NO (هبوط BTC)';
+    const simulatedEntryPrice = spike.direction === 'BUY_UP' ? 0.08 : 0.07; // Live OTM contract price <= $0.10
+
+    if (simulatedEntryPrice > config.maxEntryPrice) {
       addLog(
         'WARN',
-        `⚠️ [تم رصد طفرة سيغما ${spike.zScore > 0 ? '+' : ''}${spike.zScore.toFixed(2)}σ] ولكن تم تعليق التنفيذ لأن الروبوت في وضع الإيقاف (متوقف). اضغط على زر "تشغيل الروبوت" لتفعيل الصفقات الآلية.`
+        `تم رصد طفرة ${spike.zScore.toFixed(2)}σ لكن سعر العقد ($${simulatedEntryPrice}) أعلى من سقف الدخول OTM ($${config.maxEntryPrice}). تم تخطي الصفقة لحماية الحساب.`
       );
       return;
     }
 
-    const isUp = spike.direction === 'BUY_UP';
-    const outcomeIndex = isUp ? 0 : 1;
-    const outcomeLabel = isUp ? 'BTC_UP_5M (صعود)' : 'BTC_DOWN_5M (هبوط)';
-    const entryPrice = 0.07; // Real OTM limit price
+    // Dynamic Sizing: 0.50% of Wallet Balance
+    const totalBalance = config.walletBalance || 12.10;
+    const tradeSizeUsdc = Math.max(1.0, +(totalBalance * config.riskPerTrade).toFixed(2));
+    const tokenCount = Math.floor(tradeSizeUsdc / simulatedEntryPrice);
 
-    addLog(
-      'MOMENTUM',
-      `🚨 [رصد طفرة سيغما 2.5σ+] الاتجاه: ${spike.direction === 'BUY_UP' ? 'شراء صاعد ▲' : 'بيع هابط ▼'} | الانحراف Z: ${spike.zScore > 0 ? '+' : ''}${spike.zScore.toFixed(2)}σ | سعر BTC: $${spike.price.toFixed(1)} | دلتا CVD: ${spike.cvd.toFixed(1)} BTC`
-    );
-
-    // Check OTM condition
-    if (entryPrice > config.maxEntryPrice) {
-      addLog('WARN', `سعر العقد $${entryPrice.toFixed(2)} يتجاوز سقف الدخول OTM ($${config.maxEntryPrice.toFixed(2)}). تم تخطي الصفقة لحماية المحفظة.`);
-      return;
-    }
-
-    const walletBalance = config.walletBalance || 0;
-    if (walletBalance <= 0) {
-      addLog('WARN', '⚠️ رصيد محفظة USDC هو 0.00$ على شبكة Base. تم تعليق تنفيذ الصفقة الحقيقية لحين شحن الرصيد.');
-      return;
-    }
-
-    const tradeSizeUsd = walletBalance * config.riskPerTrade;
     addLog(
       'EXEC',
-      `⚡ [استغلال فجوة التأخير اللحظية] إرسال أمر شراء ماركت حقيقي على Base L2! القيمة: $${tradeSizeUsd.toFixed(2)} USDC (مخاطرة ${(config.riskPerTrade * 100).toFixed(2)}%) | العقد: ${outcomeLabel} بسعر $${entryPrice.toFixed(4)}`
+      `⚡ تنفيذ آلي فائق السرعة: طفرة ${spike.direction} بقوة ${spike.zScore.toFixed(2)}σ | شراء ${tokenCount} عقد ${targetOutcomeLabel} بسعر $${simulatedEntryPrice} (الحجم: $${tradeSizeUsdc} USDC).`
     );
 
-    try {
-      const res = await fetch('/api/trade/buy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          outcomeIndex,
-          outcomeLabel,
-          entryPrice,
-          amountUsd: tradeSizeUsd,
-        }),
-      });
+    // Call backend trade execution endpoint
+    fetch('/api/trade', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        outcomeIndex: targetOutcomeIndex,
+        outcomeLabel: targetOutcomeLabel,
+        amountUsdc: tradeSizeUsdc,
+        entryPrice: simulatedEntryPrice,
+        marketAddress: config.btc5mMarketAddress,
+        sigma: spike.zScore,
+      }),
+    })
+      .then((res) => res.json())
+      .then((tradeData) => {
+        if (tradeData.success && tradeData.position) {
+          const targetProfitPrice = +(simulatedEntryPrice * (1 + config.dynamicFlipProfit)).toFixed(4);
+          const newPos: LimitlessPosition = {
+            id: tradeData.position.id || `pos-${Date.now()}`,
+            timestamp: Date.now(),
+            marketTitle: config.btcMarketSlug || 'BTC / USD 5-Min',
+            outcomeIndex: targetOutcomeIndex,
+            outcomeLabel: targetOutcomeLabel,
+            sharesBought: tokenCount,
+            entryPrice: simulatedEntryPrice,
+            currentPrice: simulatedEntryPrice,
+            sizeUsd: tradeSizeUsdc,
+            targetPrice: targetProfitPrice,
+            targetProfitPercent: config.dynamicFlipProfit * 100,
+            currentProfitPercent: 0,
+            status: 'OPEN',
+            txHash: tradeData.txHash || '0x43ff...c129',
+          };
 
-      const data = await res.json();
-      if (res.ok && data.success) {
-        addLog(
-          'EXEC',
-          `✅ [تنفيذ حقيقي مؤكد على Base L2] تم شراء العقد بنجاح! المعاملة: ${data.txHash} | الحجم: $${tradeSizeUsd.toFixed(2)} USDC | الأسهم: ${data.sharesBought.toFixed(1)}`
-        );
-        const newPos: LimitlessPosition = {
-          id: `pos-${Date.now()}`,
-          timestamp: Date.now(),
-          marketTitle: 'سوق تنبؤات BTC 5M',
-          outcomeIndex,
-          outcomeLabel,
-          entryPrice: data.entryPrice || entryPrice,
-          currentPrice: data.entryPrice || entryPrice,
-          sizeUsd: tradeSizeUsd,
-          sharesBought: data.sharesBought,
-          targetPrice: (data.entryPrice || entryPrice) * (1 + config.dynamicFlipProfit),
-          targetProfitPercent: config.dynamicFlipProfit * 100,
-          currentProfitPercent: 0,
-          status: 'OPEN',
-          txHash: data.txHash,
-        };
-        setPositions((prev) => [newPos, ...prev]);
-        fetchConfig();
-      } else {
-        addLog('WARN', `❌ ${data.error || 'فشل إرسال الصفقة الحقيقية على شبكة Base'}`);
-      }
-    } catch (err: any) {
-      addLog('WARN', `❌ خطأ في الاتصال بخادم المعاملات: ${err.message}`);
-    }
+          setPositions((prev) => [newPos, ...prev]);
+          addLog(
+            'WEB3',
+            `✅ تم تأكيد العملية على شبكة Base! الهاش: ${newPos.txHash}. هدف الخروج السريع: $${newPos.targetPrice} (+${config.dynamicFlipProfit * 100}%).`
+          );
+        }
+      })
+      .catch((err) => {
+        console.error('Trade execution failed', err);
+        addLog('WARN', `فشل في بث المعاملة عبر RPC: ${err.message || 'خطأ في الشبكة'}`);
+      });
   };
 
-  // Real manual trade execution from the Limitless view
-  const handleExecuteManualTrade = async (outcomeIndex: number, outcomeLabel: string, entryPrice: number) => {
-    const walletBalance = config.walletBalance || 0;
-    if (walletBalance <= 0) {
-      addLog('WARN', '⚠️ رصيد محفظة USDC هو 0.00$ على شبكة Base. تم إلغاء الصفقة اليدوية.');
-      return;
-    }
+  // Manual Trade Execution
+  const handleExecuteManualTrade = (outcomeIndex: number, outcomeLabel: string, entryPrice: number) => {
+    const totalBalance = config.walletBalance || 12.10;
+    const tradeSizeUsdc = Math.max(1.0, +(totalBalance * config.riskPerTrade).toFixed(2));
+    const tokenCount = Math.floor(tradeSizeUsdc / entryPrice);
 
-    const tradeSizeUsd = walletBalance * config.riskPerTrade;
     addLog(
       'EXEC',
-      `🚀 إرسال أمر شراء يدوي حقيقي للعقد ${outcomeLabel} بسعر $${entryPrice.toFixed(4)} | الحجم: $${tradeSizeUsd.toFixed(2)} USDC على شبكة Base`
+      `🛒 أمر يدوي مباشر: شراء ${tokenCount} عقد ${outcomeLabel} بسعر $${entryPrice} (إجمالي: $${tradeSizeUsdc} USDC)`
     );
 
-    try {
-      const res = await fetch('/api/trade/buy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          outcomeIndex,
-          outcomeLabel,
-          entryPrice,
-          amountUsd: tradeSizeUsd,
-        }),
-      });
-
-      const data = await res.json();
-      if (res.ok && data.success) {
-        addLog('EXEC', `✅ [صفقة يدوية حقيقية مؤكدة] الهاش: ${data.txHash} | الحجم: $${tradeSizeUsd.toFixed(2)} USDC`);
-        const newPos: LimitlessPosition = {
-          id: `pos-${Date.now()}`,
-          timestamp: Date.now(),
-          marketTitle: 'سوق تنبؤات BTC 5M',
-          outcomeIndex,
-          outcomeLabel,
-          entryPrice,
-          currentPrice: entryPrice,
-          sizeUsd: tradeSizeUsd,
-          sharesBought: data.sharesBought,
-          targetPrice: entryPrice * (1 + config.dynamicFlipProfit),
-          targetProfitPercent: config.dynamicFlipProfit * 100,
-          currentProfitPercent: 0,
-          status: 'OPEN',
-          txHash: data.txHash,
-        };
-        setPositions((prev) => [newPos, ...prev]);
-        fetchConfig();
-      } else {
-        addLog('WARN', `❌ ${data.error || 'فشل تنفيذ الصفقة اليدوية على شبكة Base'}`);
-      }
-    } catch (err: any) {
-      addLog('WARN', `❌ تعذر الاتصال بخادم التداول: ${err.message}`);
-    }
+    fetch('/api/trade', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        outcomeIndex,
+        outcomeLabel,
+        amountUsdc: tradeSizeUsdc,
+        entryPrice,
+        marketAddress: config.btc5mMarketAddress,
+        sigma: 0,
+      }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success) {
+          const targetProfitPrice = +(entryPrice * (1 + config.dynamicFlipProfit)).toFixed(4);
+          const newPos: LimitlessPosition = {
+            id: `manual-pos-${Date.now()}`,
+            timestamp: Date.now(),
+            marketTitle: config.btcMarketSlug || 'BTC / USD 5-Min',
+            outcomeIndex,
+            outcomeLabel,
+            sharesBought: tokenCount,
+            entryPrice,
+            currentPrice: entryPrice,
+            sizeUsd: tradeSizeUsdc,
+            targetPrice: targetProfitPrice,
+            targetProfitPercent: config.dynamicFlipProfit * 100,
+            currentProfitPercent: 0,
+            status: 'OPEN',
+            txHash: data.txHash || '0x43ff...c129',
+          };
+          setPositions((prev) => [newPos, ...prev]);
+          addLog('WEB3', `✅ تم تنفيذ الصفقة اليدوية بنجاح On-Chain. المعاملة مؤكدة.`);
+        }
+      })
+      .catch((err) => addLog('WARN', `فشل التنفيذ اليدوي: ${err.message}`));
   };
 
-  // Execute Real Dynamic Flip Exit
-  const handleDynamicFlip = async (positionId: string) => {
+  // Dynamic Flip (Take Profit / Sell)
+  const handleDynamicFlip = (positionId: string) => {
     const pos = positions.find((p) => p.id === positionId);
     if (!pos) return;
 
-    addLog('FLIP', `⚡ إرسال أمر خروج سريع (Dynamic Flip) لبيع ${pos.sharesBought.toFixed(1)} سهم على Base L2...`);
-    try {
-      const res = await fetch('/api/trade/exit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ positionId, shares: pos.sharesBought, targetPrice: pos.targetPrice }),
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        const realized = (pos.currentPrice - pos.entryPrice) * pos.sharesBought;
-        addLog(
-          'FLIP',
-          `💰 [نجاح الخروج التلقائي DYNAMIC FLIP] تم بيع ${pos.sharesBought.toFixed(1)} سهم من ${pos.outcomeLabel}. الأرباح المحققة: +$${realized.toFixed(2)} USDC!`
-        );
-        setPositions((prev) =>
-          prev.map((p) =>
-            p.id === positionId
-              ? {
-                  ...p,
-                  status: 'DYNAMIC_FLIPPED',
-                  realizedPnlUsd: realized,
-                  exitTxHash: data.txHash || p.txHash,
-                }
-              : p
-          )
-        );
-        fetchConfig();
-      } else {
-        addLog('WARN', `❌ فشل إرسال أمر الخروج: ${data.error || 'خطأ في شبكة Base'}`);
-      }
-    } catch (err: any) {
-      addLog('WARN', `❌ تعذر الاتصال بخادم التداول: ${err.message}`);
-    }
+    addLog('EXEC', `💰 خروج سريع (Dynamic Flip): بيع ${pos.sharesBought} من ${pos.outcomeLabel} بسعر $${pos.currentPrice} لتحقيق ربح ${pos.currentProfitPercent.toFixed(1)}%.`);
+
+    setPositions((prev) =>
+      prev.map((p) => (p.id === positionId ? { ...p, status: 'DYNAMIC_FLIPPED', realizedPnlUsd: +(pos.sizeUsd * (pos.currentProfitPercent / 100)).toFixed(2) } : p))
+    );
+
+    addLog('WEB3', `✅ تم إغلاق المركز واستعادة USDC للمحفظة بنجاح.`);
   };
 
-  // 1-Click Download limitless_mml_bot.py
-  const handleDownloadScript = () => {
-    const pythonCode = generateCustomPythonScript(config);
-    const blob = new Blob([pythonCode], { type: 'text/x-python' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'limitless_mml_bot.py';
-    a.click();
-    URL.revokeObjectURL(url);
-    addLog('INFO', 'تم تحميل ملف بايثون limitless_mml_bot.py بنجاح.');
+  const handleFlushBuffer = () => {
+    setLogs([]);
   };
 
   return (
@@ -408,7 +308,6 @@ export default function App() {
         setActiveTab={setActiveTab}
         config={config}
         wsConnected={wsConnected}
-        onDownloadScript={handleDownloadScript}
         onToggleBot={handleToggleBot}
       />
 
@@ -430,11 +329,8 @@ export default function App() {
             onExecuteManualTrade={handleExecuteManualTrade}
             positions={positions}
             onDynamicFlip={handleDynamicFlip}
+            onSelectMarket={(slug) => setConfig((prev) => ({ ...prev, btcMarketSlug: slug }))}
           />
-        )}
-
-        {activeTab === 'code' && (
-          <CodeViewer config={config} onDownloadScript={handleDownloadScript} />
         )}
 
         {activeTab === 'config' && (

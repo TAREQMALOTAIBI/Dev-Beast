@@ -6,8 +6,16 @@ import { createPublicClient, createWalletClient, http, formatUnits, parseUnits }
 import { privateKeyToAccount } from 'viem/accounts';
 import { base } from 'viem/chains';
 import dotenv from 'dotenv';
+import { HttpClient, MarketFetcher, MarketPageFetcher } from '@limitless-exchange/sdk';
 
 dotenv.config();
+
+// Initialize official Limitless Exchange SDK
+const limitlessHttpClient = new HttpClient({
+  baseURL: 'https://api.limitless.exchange',
+});
+const limitlessMarketFetcher = new MarketFetcher(limitlessHttpClient);
+const limitlessPageFetcher = new MarketPageFetcher(limitlessHttpClient);
 
 // Helper to dynamically read the freshest values from .env on disk
 function getDynamicEnv(): Record<string, string | undefined> {
@@ -72,9 +80,51 @@ const PORT = 3000;
 
 app.use(express.json());
 
-// USDC Contract on Base Mainnet
+// USDC Contracts on Base Mainnet
 const USDC_ADDRESS = (process.env.USDC_ADDRESS || '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913') as `0x${string}`;
+const USDBC_ADDRESS = '0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA' as `0x${string}`;
 const LIMITLESS_ROUTER = (process.env.LIMITLESS_ROUTER || '0xD729221C3D6176378411D048b0C7c77d5b1B3736') as `0x${string}`;
+
+// Helper to persist environment updates to .env file
+function updateEnvFile(updates: Record<string, string>): void {
+  const envPath = path.join(process.cwd(), '.env');
+  let currentLines: string[] = [];
+  if (fs.existsSync(envPath)) {
+    try {
+      currentLines = fs.readFileSync(envPath, 'utf8').split('\n');
+    } catch {
+      currentLines = [];
+    }
+  }
+
+  const keysToUpdate = new Set(Object.keys(updates));
+  const newLines = currentLines.map((line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) return line;
+    const eqIdx = line.indexOf('=');
+    if (eqIdx !== -1) {
+      const key = line.slice(0, eqIdx).trim();
+      if (keysToUpdate.has(key)) {
+        keysToUpdate.delete(key);
+        return `${key}=${updates[key]}`;
+      }
+    }
+    return line;
+  });
+
+  for (const key of keysToUpdate) {
+    newLines.push(`${key}=${updates[key]}`);
+  }
+
+  try {
+    fs.writeFileSync(envPath, newLines.join('\n'), 'utf8');
+    for (const [k, v] of Object.entries(updates)) {
+      process.env[k] = v;
+    }
+  } catch (err) {
+    console.error('Error writing .env file:', err);
+  }
+}
 
 // ERC20 ABI (Minimal)
 const erc20Abi = [
@@ -118,6 +168,8 @@ async function startServer() {
       const walletAddress = liveEnv.WALLET_ADDRESS || liveEnv.VITE_WALLET_ADDRESS;
       const currentRpc = liveEnv.RPC_URL || liveEnv.VITE_BASE_RPC_URL || rpcUrl;
       let balanceUsdc = 0;
+      let bridgedUsdc = 0;
+      let ethBalance = 0;
 
       if (walletAddress) {
         const publicClient = createPublicClient({
@@ -125,14 +177,29 @@ async function startServer() {
           transport: http(currentRpc),
         });
 
+        // 1. Native Circle USDC (Limitless Standard)
         const balanceWei = await publicClient.readContract({
           address: USDC_ADDRESS,
           abi: erc20Abi,
           functionName: 'balanceOf',
           args: [walletAddress as `0x${string}`],
-        } as any);
-        
+        } as any).catch(() => 0n);
         balanceUsdc = parseFloat(formatUnits(balanceWei as bigint, 6));
+
+        // 2. Bridged USDbC
+        const bridgedWei = await publicClient.readContract({
+          address: USDBC_ADDRESS,
+          abi: erc20Abi,
+          functionName: 'balanceOf',
+          args: [walletAddress as `0x${string}`],
+        } as any).catch(() => 0n);
+        bridgedUsdc = parseFloat(formatUnits(bridgedWei as bigint, 6));
+
+        // 3. ETH on Base for gas
+        const ethWei = await publicClient.getBalance({
+          address: walletAddress as `0x${string}`,
+        }).catch(() => 0n);
+        ethBalance = parseFloat(formatUnits(ethWei, 18));
       }
 
       const currentBotState = getBotState();
@@ -140,6 +207,10 @@ async function startServer() {
       res.json({
         walletAddress: walletAddress || null,
         balanceUsdc,
+        nativeUsdc: balanceUsdc,
+        bridgedUsdc,
+        totalUsdc: balanceUsdc + bridgedUsdc,
+        ethBalance,
         riskPerTrade: parseFloat(liveEnv.RISK_PER_TRADE || '0.005'),
         maxEntryPrice: parseFloat(liveEnv.MAX_ENTRY_PRICE || '0.10'),
         dynamicFlipProfit: parseFloat(liveEnv.DYNAMIC_FLIP_PROFIT || '3.00'),
@@ -152,6 +223,103 @@ async function startServer() {
     } catch (error) {
       console.error('Error reading config/balance:', error);
       res.status(500).json({ error: 'Failed to read config or balance from Base blockchain' });
+    }
+  });
+
+  // 1.1 Direct On-Chain Balance Query for any address on Base
+  app.get('/api/wallet/balance', async (req, res) => {
+    try {
+      const address = (req.query.address as string)?.trim();
+      if (!address || !/^0x[a-fA-F0-9]{40}$/i.test(address)) {
+        return res.status(400).json({ error: 'عنوان المحفظة غير صالح (0x...)' });
+      }
+
+      const liveEnv = getDynamicEnv();
+      const currentRpc = liveEnv.RPC_URL || liveEnv.VITE_BASE_RPC_URL || rpcUrl;
+      const publicClient = createPublicClient({
+        chain: base,
+        transport: http(currentRpc),
+      });
+
+      // Query Native USDC (Limitless standard)
+      const nativeBalanceWei = await publicClient.readContract({
+        address: USDC_ADDRESS,
+        abi: erc20Abi,
+        functionName: 'balanceOf',
+        args: [address as `0x${string}`],
+      } as any).catch(() => 0n);
+
+      // Query Bridged USDbC
+      const bridgedBalanceWei = await publicClient.readContract({
+        address: USDBC_ADDRESS,
+        abi: erc20Abi,
+        functionName: 'balanceOf',
+        args: [address as `0x${string}`],
+      } as any).catch(() => 0n);
+
+      // Query Base ETH for gas
+      const ethWei = await publicClient.getBalance({
+        address: address as `0x${string}`,
+      }).catch(() => 0n);
+
+      const nativeUsdc = parseFloat(formatUnits(nativeBalanceWei as bigint, 6));
+      const bridgedUsdc = parseFloat(formatUnits(bridgedBalanceWei as bigint, 6));
+      const ethBalance = parseFloat(formatUnits(ethWei, 18));
+
+      res.json({
+        success: true,
+        address,
+        nativeUsdc,
+        bridgedUsdc,
+        totalUsdc: nativeUsdc + bridgedUsdc,
+        ethBalance,
+        formattedEth: `${ethBalance.toFixed(5)} ETH`,
+        hasSufficientGas: ethBalance > 0.0001,
+        network: 'Base Mainnet (8453)',
+      });
+    } catch (error: any) {
+      console.error('Error fetching on-chain balance:', error);
+      res.status(500).json({ error: error.message || 'فشل فحص الرصيد على شبكة Base' });
+    }
+  });
+
+  // 1.2 Update Wallet Address from MetaMask / UI and persist
+  app.post('/api/config/wallet', async (req, res) => {
+    try {
+      const { walletAddress } = req.body;
+      if (!walletAddress || !/^0x[a-fA-F0-9]{40}$/i.test(walletAddress)) {
+        return res.status(400).json({ error: 'عنوان المحفظة غير صالح (يجب أن يبدأ بـ 0x وبطول 42 حرفاً)' });
+      }
+
+      updateEnvFile({
+        WALLET_ADDRESS: walletAddress,
+        VITE_WALLET_ADDRESS: walletAddress,
+      });
+
+      const liveEnv = getDynamicEnv();
+      const currentRpc = liveEnv.RPC_URL || liveEnv.VITE_BASE_RPC_URL || rpcUrl;
+      const publicClient = createPublicClient({
+        chain: base,
+        transport: http(currentRpc),
+      });
+
+      const nativeBalanceWei = await publicClient.readContract({
+        address: USDC_ADDRESS,
+        abi: erc20Abi,
+        functionName: 'balanceOf',
+        args: [walletAddress as `0x${string}`],
+      } as any).catch(() => 0n);
+
+      const nativeUsdc = parseFloat(formatUnits(nativeBalanceWei as bigint, 6));
+
+      res.json({
+        success: true,
+        walletAddress,
+        balanceUsdc: nativeUsdc,
+        message: 'تم ربط وتحديث محفظة MetaMask بنجاح وحفظها في إعدادات النظام',
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || 'فشل حفظ عنوان المحفظة' });
     }
   });
 
@@ -328,6 +496,187 @@ async function startServer() {
       });
     } catch (error) {
       res.status(500).json({ error: 'Failed to fetch real portfolio' });
+    }
+  });
+
+  // 4b. Limitless Official SDK Market Discovery, Navigation & Orderbook
+  app.get('/api/limitless/markets', async (req, res) => {
+    try {
+      const limit = Math.min(parseInt((req.query.limit as string) || '25', 10), 25);
+      const page = parseInt((req.query.page as string) || '1', 10);
+      const sortBy = ((req.query.sortBy as string) || 'newest') as any;
+      const filter = (req.query.filter as string) || '';
+
+      const { data: markets, totalMarketsCount } = await limitlessMarketFetcher.getActiveMarkets({
+        limit,
+        page,
+        sortBy,
+      });
+
+      let filteredMarkets = markets || [];
+      if (filter) {
+        filteredMarkets = filteredMarkets.filter((m: any) =>
+          (m.title && m.title.toLowerCase().includes(filter.toLowerCase())) ||
+          (m.slug && m.slug.toLowerCase().includes(filter.toLowerCase()))
+        );
+      }
+
+      res.json({
+        data: filteredMarkets,
+        totalMarketsCount: totalMarketsCount || filteredMarkets.length,
+      });
+    } catch (e: any) {
+      console.warn('MarketFetcher fallback to raw API:', e.message);
+      try {
+        const limit = Math.min(parseInt((req.query.limit as string) || '25', 10), 25);
+        const page = parseInt((req.query.page as string) || '1', 10);
+        const sortBy = (req.query.sortBy as string) || 'newest';
+        const filter = (req.query.filter as string) || '';
+
+        const apiRes = await fetch(`https://api.limitless.exchange/markets/active?limit=${limit}&page=${page}&sortBy=${sortBy}`, {
+          headers: { 'Accept': 'application/json' },
+        });
+        const json: any = await apiRes.json();
+        let markets = json.data || [];
+        if (filter) {
+          markets = markets.filter((m: any) =>
+            (m.title && m.title.toLowerCase().includes(filter.toLowerCase())) ||
+            (m.slug && m.slug.toLowerCase().includes(filter.toLowerCase()))
+          );
+        }
+        res.json({
+          data: markets,
+          totalMarketsCount: json.totalMarketsCount || markets.length,
+        });
+      } catch (fallbackErr: any) {
+        res.status(500).json({ error: fallbackErr.message || 'Failed to fetch Limitless markets' });
+      }
+    }
+  });
+
+  app.get('/api/limitless/market/:slug', async (req, res) => {
+    try {
+      const { slug } = req.params;
+      const market = await limitlessMarketFetcher.getMarket(slug);
+      res.json(market);
+    } catch (e: any) {
+      try {
+        const { slug } = req.params;
+        const apiRes = await fetch(`https://api.limitless.exchange/markets/${slug}`, {
+          headers: { 'Accept': 'application/json' },
+        });
+        if (!apiRes.ok) {
+          return res.status(apiRes.status).json({ error: `Market not found: ${slug}` });
+        }
+        const data = await apiRes.json();
+        res.json(data);
+      } catch (err: any) {
+        res.status(500).json({ error: err.message || 'Failed to fetch Limitless market' });
+      }
+    }
+  });
+
+  app.get('/api/limitless/orderbook/:slug', async (req, res) => {
+    try {
+      const { slug } = req.params;
+      const orderbook = await limitlessMarketFetcher.getOrderBook(slug);
+      
+      const bids = orderbook.bids || [];
+      const asks = orderbook.asks || [];
+      const hasBids = bids.length > 0;
+      const hasAsks = asks.length > 0;
+      const bestBid = hasBids ? bids[0].price : null;
+      const bestAsk = hasAsks ? asks[0].price : null;
+      const spread = (bestAsk !== null && bestBid !== null) ? +(bestAsk - bestBid).toFixed(4) : null;
+      const isIlliquid = !hasBids || !hasAsks || (spread !== null && spread > 0.20);
+
+      res.json({
+        ...orderbook,
+        bestBid,
+        bestAsk,
+        spread,
+        isIlliquid,
+      });
+    } catch (e: any) {
+      try {
+        const { slug } = req.params;
+        const apiRes = await fetch(`https://api.limitless.exchange/markets/${slug}/orderbook`, {
+          headers: { 'Accept': 'application/json' },
+        });
+        if (!apiRes.ok) {
+          return res.status(apiRes.status).json({ error: `Orderbook not found: ${slug}` });
+        }
+        const data: any = await apiRes.json();
+        const bids = data.bids || [];
+        const asks = data.asks || [];
+        const hasBids = bids.length > 0;
+        const hasAsks = asks.length > 0;
+        const bestBid = hasBids ? bids[0].price : null;
+        const bestAsk = hasAsks ? asks[0].price : null;
+        const spread = (bestAsk !== null && bestBid !== null) ? +(bestAsk - bestBid).toFixed(4) : null;
+        const isIlliquid = !hasBids || !hasAsks || (spread !== null && spread > 0.20);
+
+        res.json({
+          ...data,
+          bestBid,
+          bestAsk,
+          spread,
+          isIlliquid,
+        });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message || 'Failed to fetch Limitless orderbook' });
+      }
+    }
+  });
+
+  // Navigation API from MarketPageFetcher
+  app.get('/api/limitless/navigation', async (req, res) => {
+    try {
+      const navigation = await limitlessPageFetcher.getNavigation();
+      res.json(navigation);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to fetch navigation tree' });
+    }
+  });
+
+  // Category Page API from MarketPageFetcher
+  app.get('/api/limitless/page', async (req, res) => {
+    try {
+      const pathParam = (req.query.path as string) || '/crypto';
+      const page = await limitlessPageFetcher.getMarketPageByPath(pathParam);
+      res.json(page);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to fetch market page' });
+    }
+  });
+
+  // Filtered Markets by Category Page ID
+  app.get('/api/limitless/page-markets', async (req, res) => {
+    try {
+      const pageId = req.query.pageId as string;
+      if (!pageId) {
+        return res.status(400).json({ error: 'Missing pageId parameter' });
+      }
+      const pageNum = parseInt((req.query.page as string) || '1', 10);
+      const limit = Math.min(parseInt((req.query.limit as string) || '20', 10), 100);
+      const sort = (req.query.sort as string) || '-updatedAt';
+      
+      const ticker = req.query.ticker as string;
+      const duration = req.query.duration as string;
+      const filters: Record<string, any> = {};
+      if (ticker) filters.ticker = ticker.includes(',') ? ticker.split(',') : ticker;
+      if (duration) filters.duration = duration;
+
+      const result = await limitlessPageFetcher.getMarkets(pageId, {
+        page: pageNum,
+        limit,
+        sort: sort as any,
+        filters: Object.keys(filters).length > 0 ? filters : undefined,
+      });
+
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || 'Failed to fetch page markets' });
     }
   });
 

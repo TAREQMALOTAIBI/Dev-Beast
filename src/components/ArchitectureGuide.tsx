@@ -1,5 +1,5 @@
 import React from 'react';
-import { BookOpen, Zap, Target, ShieldCheck, Cpu, Code2, ArrowRight, Server, Terminal, CheckCircle2 } from 'lucide-react';
+import { BookOpen, Zap, Target, ShieldCheck, Cpu, Code2, Server, Terminal, CheckCircle2 } from 'lucide-react';
 
 export const ArchitectureGuide: React.FC = () => {
   return (
@@ -81,7 +81,7 @@ export const ArchitectureGuide: React.FC = () => {
               <Target className="w-4 h-4 text-blue-400 mt-1 shrink-0" />
             </li>
             <li className="flex items-start justify-end space-x-2 rtl:space-x-reverse">
-              <span><strong>التوقيع المحلي للمعاملات:</strong> يتم بناء معاملة الشراء السريع `market.buy(investmentAmount, outcomeIndex, minTokens)` وتوقيعها محلياً بالمفتاح الخاص لتفادي أي تأخير زمني.</span>
+              <span><strong>التوقيع المحلي للمعاملات:</strong> يتم بناء معاملة الشراء السريع `market.buy(investmentAmount, outcomeIndex, minTokens)` وتوقيعها محلياً لتفادي أي تأخير زمني.</span>
               <ShieldCheck className="w-4 h-4 text-blue-400 mt-1 shrink-0" />
             </li>
             <li className="flex items-start justify-end space-x-2 rtl:space-x-reverse">
@@ -111,20 +111,20 @@ export const ArchitectureGuide: React.FC = () => {
         </div>
       </div>
 
-      {/* Section 5: Google Compute Engine (GCE) VM Deployment Guide */}
+      {/* Section 5: Real-Time Web Engine Architecture */}
       <div className="p-6 rounded-2xl bg-gradient-to-br from-zinc-900 via-zinc-900/90 to-zinc-950 border border-emerald-500/30 space-y-4 shadow-xl">
         <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
           <div className="flex items-center space-x-2 rtl:space-x-reverse text-emerald-400 font-bold text-sm">
             <Server className="w-5 h-5" />
-            <span>5. دليل تشغيل ونشر البوت على Google Compute Engine (GCE VM) مع Python SDK</span>
+            <span>5. معمارية محرك التداول الآلي على الويب (Web Real-Time Engine)</span>
           </div>
           <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-            أعلى استقرار &bull; تشغيل 24/7 دون انقطاع
+            تداول فوري متكامل 100% من المتصفح
           </span>
         </div>
 
         <p className="leading-relaxed font-sans text-right text-zinc-300">
-          تعتبر بيئة <strong>Google Compute Engine (GCE VM)</strong> بنظام Linux (Ubuntu 22.04 LTS) هي البيئة النموذجية والأقوى عالمياً لتشغيل بوتات الـ HFT ومحركات المراجحة بلغة <strong>Python</strong>، بفضل شبكة Google Cloud العالمية فائقة السرعة (Tier-1 Premium Network) وزمن الوصول المنخفض جداً إلى خوادم Binance وشبكة Base.
+          يعمل التطبيق بمحرك كمي متكامل مبني بلغة <strong>TypeScript &amp; React</strong> مع خادم <strong>Node.js</strong>، ليتيح لك تشغيل وإدارة ومراقبة التداول الآلي واليدوي لعقود الـ 5 دقائق مباشرة من المتصفح دون الحاجة لتثبيت أي برمجيات أو سكريبتات إضافية.
         </p>
 
         {/* Step-by-step setup cards */}
@@ -132,35 +132,30 @@ export const ArchitectureGuide: React.FC = () => {
           <div className="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 space-y-2">
             <span className="text-xs font-bold text-cyan-400 flex items-center space-x-1.5 rtl:space-x-reverse">
               <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>أ. إعداد الخادم في Google Cloud</span>
+              <span>أ. البث المباشر (Direct WebSockets)</span>
             </span>
-            <ul className="text-[11px] text-zinc-400 space-y-1 font-sans list-disc list-inside">
-              <li>النوع الموصى به: <code className="text-zinc-200">e2-standard-2</code> (2 vCPU, 8GB RAM).</li>
-              <li>نظام التشغيل: <strong>Ubuntu 22.04 LTS</strong>.</li>
-              <li>المنطقة (Region): <code className="text-zinc-200">europe-west3</code> (فرانكفورت) أو <code className="text-zinc-200">asia-northeast1</code> (طوكيو) للاتصال المباشر بـ Binance بدون حظر إقليمي.</li>
-            </ul>
+            <p className="text-[11px] text-zinc-400 font-sans leading-relaxed text-right">
+              اتصال حي ودائم بقنوات Binance Aggregated Trades وبث أسعار Limitless لضمان تحديث الـ CVD في أجزاء من الميلي ثانية.
+            </p>
           </div>
 
           <div className="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 space-y-2">
             <span className="text-xs font-bold text-emerald-400 flex items-center space-x-1.5 rtl:space-x-reverse">
               <Terminal className="w-3.5 h-3.5" />
-              <span>ب. أوامر التثبيت في الطرفية (SSH)</span>
+              <span>ب. التنفيذ الآلي بنقرة واحدة</span>
             </span>
-            <div className="p-2 rounded bg-zinc-900 border border-zinc-800 text-[10px] font-mono text-zinc-300 overflow-x-auto space-y-1 dir-ltr text-left">
-              <div>sudo apt update &amp;&amp; sudo apt install -y python3-pip python3-venv git</div>
-              <div>python3 -m venv venv</div>
-              <div>source venv/bin/activate</div>
-              <div>pip install web3 websockets aiohttp python-dotenv eth-account</div>
-            </div>
+            <p className="text-[11px] text-zinc-400 font-sans leading-relaxed text-right">
+              تفعيل زر <strong>[ تشغيل الروبوت ]</strong> يطلق خوارزمية المسح التلقائي لعقود الـ 5 دقائق واقتناص طفرات 2.5σ فوراً.
+            </p>
           </div>
 
           <div className="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 space-y-2">
             <span className="text-xs font-bold text-amber-400 flex items-center space-x-1.5 rtl:space-x-reverse">
               <Zap className="w-3.5 h-3.5" />
-              <span>ج. التشغيل كخدمة دائمة (Systemd)</span>
+              <span>ج. إدارة المراكز والخروج التلقائي</span>
             </span>
-            <p className="text-[11px] text-zinc-400 font-sans">
-              إنشاء خدمة <code className="text-zinc-200">/etc/systemd/system/limitless-bot.service</code> مع <code className="text-amber-300">Restart=always</code>، مما يضمن استمرار البوت على مدار الساعة وإعادة تشغيله ذاتياً فوراً في حال حدوث أي طارئ.
+            <p className="text-[11px] text-zinc-400 font-sans leading-relaxed text-right">
+              لوحة حية لمتابعة الصفقات المفتوحة مع خاصية Dynamic Flip للخروج السريع فور تحقيق مستهدف الأرباح (+300%).
             </p>
           </div>
         </div>
@@ -171,62 +166,56 @@ export const ArchitectureGuide: React.FC = () => {
         <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
           <div className="flex items-center space-x-2 rtl:space-x-reverse text-purple-400 font-bold text-sm">
             <ShieldCheck className="w-5 h-5" />
-            <span>6. هندسة معالجة الأخطاء وإعادة المحاولة التلقائية (Official Error Handling &amp; Retry)</span>
+            <span>6. هندسة معالجة الأخطاء وإعادة المحاولة التلقائية (Web Resilience Standard)</span>
           </div>
           <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono bg-purple-500/20 text-purple-300 border border-purple-500/40">
-            Limitless SDK Resilience Standard
+            مستقر 24/7
           </span>
         </div>
 
         <p className="leading-relaxed font-sans text-right text-zinc-300">
-          تم تزويد البوت بهندسة دفاعية متكاملة وفق أحدث ممارسات التوثيق الرسمي لـ <strong>Limitless Exchange</strong> لحماية رأس المال وضمان استمرارية التداول دون انقطاع:
+          تم تزويد محرك الويب بهندسة دفاعية متكاملة وفق أحدث ممارسات التوثيق الرسمي لـ <strong>Limitless Exchange</strong> لحماية رأس المال وضمان استمرارية التداول دون انقطاع:
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 space-y-2">
             <div className="text-xs font-bold text-purple-300 flex items-center justify-between">
-              <span>تغليف العميل بكائن RetryableClient</span>
-              <code className="text-[10px] text-zinc-400">RetryConfig</code>
+              <span>إعادة الاتصال التلقائي بـ WebSockets</span>
+              <code className="text-[10px] text-zinc-400">Auto-Reconnect</code>
             </div>
             <p className="text-[11px] text-zinc-400 font-sans leading-relaxed text-right">
-              بدلاً من تكرار محاولات الاتصال يدوياً، يتم تغليف عميل الـ HTTP بـ <code className="text-emerald-300">RetryableClient</code> ليطبق تراجعاً أسياً (<code className="text-zinc-300">[1s, 2s, 4s]</code>) تلقائياً عند تلقي <code className="text-amber-300">429 (Rate Limit)</code> أو أخطاء الخادم <code className="text-amber-300">500, 502, 503</code>.
+              إعادة بناء الاتصال ببث بينانس وLimitless تلقائياً في حال حدوث أي انقطاع مؤقت في الشبكة.
             </p>
           </div>
 
           <div className="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 space-y-2">
             <div className="text-xs font-bold text-cyan-300 flex items-center justify-between">
-              <span>فحص الاستجابة الخام ومعدل الطلبات</span>
-              <code className="text-[10px] text-zinc-400">with_raw_response=True</code>
+              <span>حماية وتصفية العقود منتهية الصلاحية</span>
+              <code className="text-[10px] text-zinc-400">Expiry Guard</code>
             </div>
             <p className="text-[11px] text-zinc-400 font-sans leading-relaxed text-right">
-              قراءة ترويسات <code className="text-cyan-300">x-ratelimit-remaining</code> عبر كائن <code className="text-zinc-200">HttpRawResponse</code> لمراقبة استهلاك الحصة السوقية بدقة لحظية وتفادي تجاوز السقف المسموح.
+              فحص لحظي لوقت شمعة الـ 5 دقائق لمنع الدخول في الثواني الأخيرة قبل التسوية لضمان اكتمال حركة السعر.
             </p>
           </div>
 
           <div className="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 space-y-2">
             <div className="text-xs font-bold text-amber-300 flex items-center justify-between">
-              <span>تصنيف استثناءات APIError الدقيقة</span>
-              <code className="text-[10px] text-zinc-400">HTTP Status Codes</code>
+              <span>سقف الانزلاق السعري الصارم</span>
+              <code className="text-[10px] text-zinc-400">Max Slippage</code>
             </div>
-            <ul className="text-[11px] text-zinc-400 space-y-1 font-sans text-right">
-              <li><strong className="text-zinc-200">400 Bad Request:</strong> معاملات أمر خاطئة أو انتهاء السوق.</li>
-              <li><strong className="text-zinc-200">401/403 Auth:</strong> خطأ في بيانات HMAC أو قيود جغرافية.</li>
-              <li><strong className="text-zinc-200">425 Too Early:</strong> خطأ في نافذة الاستقبال (Receive-window).</li>
-              <li><strong className="text-emerald-300">Fallback On-chain:</strong> تحويل فوري للتنفيذ عبر عقود Base الذكية.</li>
-            </ul>
+            <p className="text-[11px] text-zinc-400 font-sans leading-relaxed text-right">
+              إلغاء تنفيذ أي صفقة إذا قفز سعر العقد فوق سقف الـ OTM المسموح ($0.10).
+            </p>
           </div>
 
           <div className="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 space-y-2">
             <div className="text-xs font-bold text-emerald-300 flex items-center justify-between">
-              <span>ترقيع عيب الـ SDK الرسمي (NoOpLogger Patch)</span>
-              <code className="text-[10px] text-zinc-400">NoOpLogger.warning Bug</code>
+              <span>حماية إدارة رأس المال (0.50% Max Risk)</span>
+              <code className="text-[10px] text-zinc-400">Risk Perimeter</code>
             </div>
             <p className="text-[11px] text-zinc-400 font-sans leading-relaxed text-right">
-              تطبيق ترقيع برمجي استباقي لمنع تعطل المحرك بسبب استدعاء الـ SDK الرسمي للدالة <code className="text-red-300">.warning()</code> غير المعرفة في واجهة التسجيل الأصلية:
+              حساب حجم الصفقات تلقائياً بما يضمن عدم تجاوز نسبة المخاطرة المحددة في الإعدادات.
             </p>
-            <div className="p-1.5 rounded bg-zinc-900 text-[10px] font-mono text-emerald-400 dir-ltr text-left">
-              NoOpLogger.warning = lambda self, msg, context=None: None
-            </div>
           </div>
         </div>
       </div>
