@@ -133,14 +133,14 @@ export default function App() {
       const res = await fetch('/api/bot/toggle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isBotRunning: nextState }),
+        body: JSON.stringify({ isBotRunning: nextState, running: nextState }),
       });
       const data = await res.json();
       if (data.success) {
         addLog(
           nextState ? 'EXEC' : 'WARN',
           nextState
-            ? '🚀 تم تفعيل روبوت التداول الآلي (24/7 Live Web Execution). جاري مسح شمعة الـ 5 دقائق واقتناص انحرافات 2.5σ.'
+            ? '🚀 تم تفعيل روبوت التداول الآلي (24/7 Live Web Execution). الروبوت يعمل الآن باستقلالية على السيرفر.'
             : '⏸️ تم إيقاف روبوت التداول الآلي مؤقتاً.'
         );
       }

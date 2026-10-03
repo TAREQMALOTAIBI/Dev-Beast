@@ -727,7 +727,9 @@ async function startServer() {
   // 6. Bot Remote Control (Start / Stop real execution with persistent storage)
   app.post('/api/bot/toggle', async (req, res) => {
     try {
-      const { running } = req.body;
+      const running = req.body.isBotRunning !== undefined 
+        ? req.body.isBotRunning 
+        : (req.body.running !== undefined ? req.body.running : true);
       const targetState = Boolean(running);
       const action = targetState ? 'start' : 'stop';
 
