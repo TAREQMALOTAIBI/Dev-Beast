@@ -1,0 +1,6 @@
+{
+  "name": "Limitless Quant - Asymmetric Mean Reversion Bot",
+  "description": "Production TypeScript trading bot and simulation terminal for Limitless Exchange prediction markets, featuring Bollinger Bands & RSI asymmetric mean reversion strategy.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
