@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Coins,
   ShieldCheck,
+  AlertTriangle,
 } from 'lucide-react';
 import type { ClobPosition, TradeHistoryEntry, UserProfile } from '../bot/types';
 import { LimitlessExchangeSDK } from '../bot/limitlessSdk';
@@ -38,6 +39,9 @@ export const PortfolioViewer: React.FC<PortfolioViewerProps> = ({
     eth: '0.0000',
   });
 
+  const [detectedChains, setDetectedChains] = useState<Array<{ chain: string; balance: string; asset: string }>>([]);
+  const [limitlessCollateral, setLimitlessCollateral] = useState<string>('0.00');
+
   const loadPortfolioData = async () => {
     setLoading(true);
     try {
@@ -55,6 +59,12 @@ export const PortfolioViewer: React.FC<PortfolioViewerProps> = ({
               usdc: walletData.usdcBalance,
               eth: walletData.ethBalance,
             });
+            if (walletData.otherChainsFound) {
+              setDetectedChains(walletData.otherChainsFound);
+            }
+            if (walletData.limitlessCollateral) {
+              setLimitlessCollateral(walletData.limitlessCollateral);
+            }
           }
         }
       } catch {
@@ -129,9 +139,16 @@ export const PortfolioViewer: React.FC<PortfolioViewerProps> = ({
                 Base Mainnet (8453)
               </span>
               {activeAddr && (
-                <span className="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-cyan-300 font-mono border border-slate-700">
-                  {activeAddr.substring(0, 6)}...{activeAddr.substring(activeAddr.length - 4)}
-                </span>
+                <a
+                  href={`https://basescan.org/address/${activeAddr}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1 px-2.5 py-0.5 rounded text-[10px] bg-slate-800 hover:bg-slate-700 text-cyan-300 font-mono border border-slate-700 transition-all cursor-pointer"
+                  title="فحص المحفظة على BaseScan"
+                >
+                  <span>{activeAddr.substring(0, 6)}...{activeAddr.substring(activeAddr.length - 4)}</span>
+                  <ExternalLink className="w-3 h-3 text-slate-400" />
+                </a>
               )}
             </div>
             <p className="text-xs text-slate-400">
@@ -149,6 +166,26 @@ export const PortfolioViewer: React.FC<PortfolioViewerProps> = ({
           <span>تحديث المحفظة</span>
         </button>
       </div>
+
+      {/* تنبيه اكتشاف أرصدة على شبكات أخرى */}
+      {detectedChains.length > 0 && (
+        <div className="p-4 rounded-xl bg-amber-950/40 border border-amber-500/40 text-amber-200 text-xs space-y-2.5">
+          <div className="flex items-center gap-2 font-bold">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>تم اكتشاف رصيد لمحفظتك على شبكات بلوكتشين أخرى:</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {detectedChains.map((c, i) => (
+              <span key={i} className="px-2.5 py-1 rounded-lg bg-slate-900 border border-amber-500/30 text-white font-mono text-xs">
+                {c.chain}: <strong className="text-amber-400">{c.balance} {c.asset}</strong>
+              </span>
+            ))}
+          </div>
+          <p className="text-[11px] text-slate-300">
+            ⚠️ <strong>تنبيه:</strong> عقود منصة Limitless تعمل حصرياً على شبكة <strong>Base Mainnet</strong>. لتتمكن من التداول بها، يرجى تحويل/جسر (Bridge) هذا الرصيد إلى شبكة Base.
+          </p>
+        </div>
+      )}
 
       {/* Profile & KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

@@ -51,7 +51,13 @@ app.get('/api/wallet', async (req, res) => {
       }
     }
 
-    if (!serverWallet) {
+    let address = serverWallet ? serverWallet.address : null;
+    const explicitAddress = process.env.WALLET_ADDRESS?.trim();
+    if (explicitAddress && ethers.isAddress(explicitAddress)) {
+      address = explicitAddress;
+    }
+
+    if (!address) {
       return res.json({
         configured: false,
         address: null,
@@ -61,34 +67,108 @@ app.get('/api/wallet', async (req, res) => {
       });
     }
 
-    const provider = new ethers.JsonRpcProvider(BASE_RPC_URL);
-    const address = serverWallet.address;
+    const rpcUrls = [
+      process.env.BASE_RPC_URL,
+      'https://mainnet.base.org',
+      'https://base.llamarpc.com',
+      'https://base-rpc.publicnode.com',
+      'https://1rpc.io/base',
+    ].filter(Boolean) as string[];
 
-    // استعلام رصيد ETH الحقيقي
     let ethBalance = '0.0000';
-    try {
-      const rawEth = await provider.getBalance(address);
-      ethBalance = parseFloat(ethers.formatEther(rawEth)).toFixed(4);
-    } catch (err: any) {
-      console.warn('خطأ في جلب رصيد ETH:', err.message);
+    let nativeUsdc = 0;
+    let bridgedUsdc = 0;
+    let limitlessCollateral = '0.00';
+    const otherChainsFound: Array<{ chain: string; balance: string; asset: string }> = [];
+
+    // 1. استعلام شبكة Base
+    for (const rpc of rpcUrls) {
+      try {
+        const provider = new ethers.JsonRpcProvider(rpc, 8453, { staticNetwork: true });
+        
+        // ETH
+        const rawEth = await provider.getBalance(address);
+        ethBalance = parseFloat(ethers.formatEther(rawEth)).toFixed(4);
+
+        // Native USDC
+        const usdcAbi = ['function balanceOf(address account) external view returns (uint256)'];
+        const nativeContract = new ethers.Contract(USDC_BASE_ADDRESS, usdcAbi, provider);
+        const rawNative = await nativeContract.balanceOf(address);
+        nativeUsdc = parseFloat(ethers.formatUnits(rawNative, 6));
+
+        // Bridged USDbC
+        try {
+          const bridgedContract = new ethers.Contract('0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA', usdcAbi, provider);
+          const rawBridged = await bridgedContract.balanceOf(address);
+          bridgedUsdc = parseFloat(ethers.formatUnits(rawBridged, 6));
+        } catch {}
+
+        // USDT on Base (0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2)
+        try {
+          const usdtContract = new ethers.Contract('0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2', usdcAbi, provider);
+          const rawUsdt = await usdtContract.balanceOf(address);
+          const usdtVal = parseFloat(ethers.formatUnits(rawUsdt, 6));
+          if (usdtVal > 0) {
+            nativeUsdc += usdtVal;
+          }
+        } catch {}
+
+        break;
+      } catch (rpcErr: any) {
+        console.warn(`فشل الاتصال بـ Base RPC (${rpc}):`, rpcErr.message);
+      }
     }
 
-    // استعلام رصيد USDC الحقيقي على Base
-    let usdcBalance = '0.00';
+    // 2. فحص رصيد منصة Limitless عبر API
     try {
-      const usdcAbi = ['function balanceOf(address account) external view returns (uint256)'];
-      const usdcContract = new ethers.Contract(USDC_BASE_ADDRESS, usdcAbi, provider);
-      const rawUsdc = await usdcContract.balanceOf(address);
-      usdcBalance = parseFloat(ethers.formatUnits(rawUsdc, 6)).toFixed(2);
-    } catch (err: any) {
-      console.warn('خطأ في جلب رصيد USDC:', err.message);
-    }
+      const lmtsResp = await fetch(`${process.env.LIMITLESS_API_URL || 'https://api.limitless.exchange'}/users/${address}/portfolio`);
+      if (lmtsResp.ok) {
+        const lmtsData = await lmtsResp.json();
+        if (lmtsData.collateral || lmtsData.balance) {
+          limitlessCollateral = parseFloat(lmtsData.collateral || lmtsData.balance || '0').toFixed(2);
+        }
+      }
+    } catch {}
+
+    // 3. فحص الشبكات الأخرى (Ethereum Mainnet, Arbitrum, Polygon, Optimism) لمعرفة أين يوجد الرصيد
+    const otherNetworks = [
+      { name: 'Ethereum Mainnet', rpc: 'https://eth.llamarpc.com', usdc: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', decimals: 6 },
+      { name: 'Arbitrum One', rpc: 'https://arb1.arbitrum.io/rpc', usdc: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', decimals: 6 },
+      { name: 'Polygon', rpc: 'https://polygon-rpc.com', usdc: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', decimals: 6 },
+      { name: 'Optimism', rpc: 'https://mainnet.optimism.io', usdc: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85', decimals: 6 },
+    ];
+
+    await Promise.all(
+      otherNetworks.map(async (net) => {
+        try {
+          const prov = new ethers.JsonRpcProvider(net.rpc);
+          const rawE = await prov.getBalance(address);
+          const eVal = parseFloat(ethers.formatEther(rawE));
+          if (eVal > 0.001) {
+            otherChainsFound.push({ chain: net.name, balance: eVal.toFixed(4), asset: 'ETH' });
+          }
+
+          const contract = new ethers.Contract(net.usdc, ['function balanceOf(address) view returns (uint256)'], prov);
+          const rawU = await contract.balanceOf(address);
+          const uVal = parseFloat(ethers.formatUnits(rawU, net.decimals));
+          if (uVal > 0.1) {
+            otherChainsFound.push({ chain: net.name, balance: uVal.toFixed(2), asset: 'USDC' });
+          }
+        } catch {}
+      })
+    );
+
+    const totalUsdc = (nativeUsdc + bridgedUsdc).toFixed(2);
 
     return res.json({
       configured: true,
       address,
-      usdcBalance,
+      usdcBalance: totalUsdc,
+      nativeUsdc: nativeUsdc.toFixed(2),
+      bridgedUsdc: bridgedUsdc.toFixed(2),
       ethBalance,
+      limitlessCollateral,
+      otherChainsFound,
       network: 'Base Mainnet (Chain ID: 8453)',
       limitlessTokenConfigured: Boolean(process.env.LMTS_TOKEN_ID && process.env.LMTS_TOKEN_SECRET),
     });
