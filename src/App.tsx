@@ -14,7 +14,16 @@ import {
   Activity,
   Layers,
   Wallet,
+  X,
+  Globe,
+  KeyRound,
+  Check,
+  Copy,
+  ExternalLink,
+  ChevronDown,
+  LogOut,
 } from 'lucide-react';
+import { ethers } from 'ethers';
 
 import type {
   BotConfig,
@@ -53,6 +62,17 @@ export default function App() {
     return defaultBotConfig;
   });
 
+  // حالة ربط المحفظة الحقيقية (Web3 Wallet)
+  const [connectedWallet, setConnectedWallet] = useState<string | null>(() => {
+    return localStorage.getItem('limitless_connected_wallet') || null;
+  });
+  const [isWalletModalOpen, setIsWalletModalOpen] = useState<boolean>(false);
+  const [isConnectingWallet, setIsConnectingWallet] = useState<boolean>(false);
+  const [walletError, setWalletError] = useState<string | null>(null);
+  const [manualAddressInput, setManualAddressInput] = useState<string>('');
+  const [manualPkInput, setManualPkInput] = useState<string>('');
+  const [copiedAddr, setCopiedAddr] = useState<boolean>(false);
+
   // حالات محاكاة السوق
   const [candles, setCandles] = useState<Candle[]>(() =>
     generateSyntheticCandles(50, 94850, 'NORMAL')
@@ -85,6 +105,117 @@ export default function App() {
       console.error('فشل حفظ الإعدادات:', e);
     }
   }, [config]);
+
+  // المزامنة التلقائية للمحفظة الحقيقية من السيرفر (.env) فور فتح الصفحة
+  useEffect(() => {
+    const syncServerWallet = async () => {
+      try {
+        const response = await fetch('/api/wallet');
+        if (response.ok) {
+          const data = await response.json();
+          if (data.configured && data.address) {
+            setConnectedWallet(data.address);
+            localStorage.setItem('limitless_connected_wallet', data.address);
+            setConfig((prev) => ({ ...prev, walletAddress: data.address }));
+          }
+        }
+      } catch (err) {
+        // في حال تشغيل العميل بدون خادم
+      }
+    };
+    syncServerWallet();
+  }, []);
+
+  // ربط المحفظة عبر Browser Extension (MetaMask / Rabby / Coinbase)
+  const connectBrowserWallet = async () => {
+    setIsConnectingWallet(true);
+    setWalletError(null);
+    try {
+      if (typeof window !== 'undefined' && (window as any).ethereum) {
+        const provider = new ethers.BrowserProvider((window as any).ethereum);
+        const accounts = await provider.send('eth_requestAccounts', []);
+        if (accounts && accounts.length > 0) {
+          const address = accounts[0];
+          setConnectedWallet(address);
+          localStorage.setItem('limitless_connected_wallet', address);
+          setConfig((prev) => ({ ...prev, walletAddress: address }));
+
+          // التبديل التلقائي لشبكة Base Mainnet (ChainId: 8453 = 0x2105)
+          try {
+            await (window as any).ethereum.request({
+              method: 'wallet_switchEthereumChain',
+              params: [{ chainId: '0x2105' }],
+            });
+          } catch (switchError: any) {
+            if (switchError.code === 4902) {
+              await (window as any).ethereum.request({
+                method: 'wallet_addEthereumChain',
+                params: [
+                  {
+                    chainId: '0x2105',
+                    chainName: 'Base Mainnet',
+                    nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+                    rpcUrls: ['https://mainnet.base.org'],
+                    blockExplorerUrls: ['https://basescan.org'],
+                  },
+                ],
+              });
+            }
+          }
+          setIsWalletModalOpen(false);
+        }
+      } else {
+        setWalletError('لم يتم العثور على إضافة محفظة (MetaMask أو Rabby) في المتصفح. يمكنك إدخال عنوان محفظتك يدوياً في الخيار الثاني بالأسفل.');
+      }
+    } catch (err: any) {
+      console.error('Wallet connection error:', err);
+      setWalletError(err.message || 'فشل الاتصال بالمحفظة');
+    } finally {
+      setIsConnectingWallet(false);
+    }
+  };
+
+  // ربط المحفظة يدوياً عبر العنوان
+  const handleSaveManualAddress = () => {
+    const trimmed = manualAddressInput.trim();
+    if (ethers.isAddress(trimmed)) {
+      setConnectedWallet(trimmed);
+      localStorage.setItem('limitless_connected_wallet', trimmed);
+      setConfig((prev) => ({ ...prev, walletAddress: trimmed }));
+      setIsWalletModalOpen(false);
+      setWalletError(null);
+      setManualAddressInput('');
+    } else {
+      setWalletError('عنوان المحفظة غير صالح، يرجى كتابة عنوان EVM صحيح يبدأ بـ 0x.');
+    }
+  };
+
+  // ربط المفتاح الخاص محلياً
+  const handleSavePrivateKey = () => {
+    let pk = manualPkInput.trim();
+    if (!pk.startsWith('0x') && pk.length === 64) {
+      pk = `0x${pk}`;
+    }
+    try {
+      const w = new ethers.Wallet(pk);
+      const address = w.address;
+      setConnectedWallet(address);
+      localStorage.setItem('limitless_connected_wallet', address);
+      setConfig((prev) => ({ ...prev, walletAddress: address, privateKey: pk }));
+      setIsWalletModalOpen(false);
+      setWalletError(null);
+      setManualPkInput('');
+    } catch {
+      setWalletError('المفتاح الخاص غير صالح. يرجى التأكد من كتابته بشكل سليم.');
+    }
+  };
+
+  const disconnectWallet = () => {
+    setConnectedWallet(null);
+    localStorage.removeItem('limitless_connected_wallet');
+    setConfig((prev) => ({ ...prev, walletAddress: '0x45a90F8eB3f4bC1a3419eD9C882fF4129b0142fa' }));
+    setIsWalletModalOpen(false);
+  };
 
   const [isStreaming, setIsStreaming] = useState<boolean>(true);
   const [selectedTokenType, setSelectedTokenType] = useState<ContractTokenType>('NO');
@@ -687,7 +818,12 @@ export default function App() {
         )}
 
         {/* تبويب المحفظة والمراكز PortfolioFetcher */}
-        {activeTab === 'portfolio' && <PortfolioViewer sdk={sdk} />}
+        {activeTab === 'portfolio' && (
+          <PortfolioViewer
+            sdk={sdk}
+            connectedWallet={connectedWallet}
+          />
+        )}
 
         {/* التبويب 3: كود وإعدادات البوت الأساسية فقط */}
         {activeTab === 'setup' && (

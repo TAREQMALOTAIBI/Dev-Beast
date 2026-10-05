@@ -16,26 +16,48 @@ import { LimitlessExchangeSDK } from '../bot/limitlessSdk';
 
 interface PortfolioViewerProps {
   sdk: LimitlessExchangeSDK;
+  connectedWallet?: string | null;
+  onOpenWalletModal?: () => void;
 }
 
-export const PortfolioViewer: React.FC<PortfolioViewerProps> = ({ sdk }) => {
+export const PortfolioViewer: React.FC<PortfolioViewerProps> = ({
+  sdk,
+  connectedWallet,
+  onOpenWalletModal,
+}) => {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [positions, setPositions] = useState<ClobPosition[]>([]);
   const [history, setHistory] = useState<TradeHistoryEntry[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
+  const [onChainBalances, setOnChainBalances] = useState<{
+    usdc: string;
+    eth: string;
+  }>({
+    usdc: '0.00',
+    eth: '0.0000',
+  });
 
   const loadPortfolioData = async () => {
     setLoading(true);
     try {
-      const [prof, pos, hist] = await Promise.all([
-        sdk.getProfile(),
-        sdk.getCLOBPositions(),
-        sdk.getUserHistory(),
+      const activeAddress = connectedWallet || sdk.wallet?.address;
+      
+      const [prof, pos, hist, balances] = await Promise.all([
+        sdk.getProfile(activeAddress),
+        sdk.getCLOBPositions(activeAddress),
+        sdk.getUserHistory(activeAddress),
+        activeAddress ? sdk.getRealOnChainBalances(activeAddress) : Promise.resolve({ usdc: '0.00', eth: '0.0000', rawUsdc: 0n, rawEth: 0n }),
       ]);
       setProfile(prof);
       setPositions(pos);
       setHistory(hist.data);
+      setOnChainBalances({
+        usdc: balances.usdc,
+        eth: balances.eth,
+      });
+    } catch (e) {
+      console.error('فشل جلب بيانات المحفظة الحقيقية:', e);
     } finally {
       setLoading(false);
     }
@@ -43,7 +65,7 @@ export const PortfolioViewer: React.FC<PortfolioViewerProps> = ({ sdk }) => {
 
   useEffect(() => {
     loadPortfolioData();
-  }, [sdk]);
+  }, [sdk, connectedWallet]);
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -51,16 +73,16 @@ export const PortfolioViewer: React.FC<PortfolioViewerProps> = ({ sdk }) => {
     setTimeout(() => setCopiedHash(null), 2000);
   };
 
-  // احتساب الإجماليات
+  // احتساب الإجماليات الحقيقية
   const totalCostBasis = positions.reduce((acc, p) => {
-    const yesCost = parseFloat(p.positions.yes.cost || '0');
-    const noCost = parseFloat(p.positions.no.cost || '0');
+    const yesCost = parseFloat(p.positions?.yes?.cost || '0');
+    const noCost = parseFloat(p.positions?.no?.cost || '0');
     return acc + yesCost + noCost;
   }, 0);
 
   const totalMarketValue = positions.reduce((acc, p) => {
-    const yesVal = parseFloat(p.positions.yes.marketValue || '0');
-    const noVal = parseFloat(p.positions.no.marketValue || '0');
+    const yesVal = parseFloat(p.positions?.yes?.marketValue || '0');
+    const noVal = parseFloat(p.positions?.no?.marketValue || '0');
     return acc + yesVal + noVal;
   }, 0);
 
@@ -99,52 +121,48 @@ export const PortfolioViewer: React.FC<PortfolioViewerProps> = ({ sdk }) => {
 
       {/* Profile & KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Profile Card */}
+        {/* Real On-Chain USDC Balance */}
         <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
-          <span className="text-[10px] text-slate-400 font-sans block">معرف الملف الشخصي (Profile)</span>
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-mono text-cyan-400 font-bold">
-              ID: {profile?.id || '845391'}
+          <span className="text-[10px] text-slate-400 font-sans block">رصيد USDC المتاح (Base Mainnet)</span>
+          <div className="flex items-baseline gap-1">
+            <span className="text-xl font-bold font-mono text-emerald-400">
+              ${onChainBalances.usdc}
             </span>
-            <span className="text-[10px] px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/30">
-              رسوم {profile?.rank?.feeRateBps || 15} bps
-            </span>
+            <span className="text-xs text-slate-400">USDC</span>
           </div>
-          <span className="text-[11px] font-mono text-slate-400 truncate block">
-            {profile?.account || sdk.wallet?.address}
-          </span>
+          <span className="text-[10px] text-slate-500">الرصيد الفعلي في المحفظة للتداول</span>
         </div>
 
-        {/* Cost Basis */}
+        {/* Real On-Chain ETH Balance for Gas */}
         <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
-          <span className="text-[10px] text-slate-400 font-sans block">رأس المال المستثمر (Cost Basis)</span>
+          <span className="text-[10px] text-slate-400 font-sans block">رصيد ETH للغاز (Gas Fees)</span>
           <div className="flex items-baseline gap-1">
-            <span className="text-lg font-bold font-mono text-white">
+            <span className="text-xl font-bold font-mono text-cyan-400">
+              {onChainBalances.eth}
+            </span>
+            <span className="text-xs text-slate-400">ETH</span>
+          </div>
+          <span className="text-[10px] text-slate-500">رسوم الغاز على شبكة Base</span>
+        </div>
+
+        {/* Cost Basis in Open Positions */}
+        <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
+          <span className="text-[10px] text-slate-400 font-sans block">رأس المال في المراكز المفتوحة</span>
+          <div className="flex items-baseline gap-1">
+            <span className="text-xl font-bold font-mono text-white">
               ${totalCostBasis.toFixed(2)}
             </span>
             <span className="text-xs text-slate-400">USDC</span>
           </div>
-          <span className="text-[10px] text-slate-500">إجمالي تكلفة عقود التنبؤ المشتراة</span>
-        </div>
-
-        {/* Market Value */}
-        <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
-          <span className="text-[10px] text-slate-400 font-sans block">القيمة السوقية الحالية (Market Value)</span>
-          <div className="flex items-baseline gap-1">
-            <span className="text-lg font-bold font-mono text-cyan-400">
-              ${totalMarketValue.toFixed(2)}
-            </span>
-            <span className="text-xs text-slate-400">USDC</span>
-          </div>
-          <span className="text-[10px] text-slate-500">محسوبة بأسعار أفضل العروض الحالية</span>
+          <span className="text-[10px] text-slate-500">إجمالي تكلفة عقود التنبؤ النشطة</span>
         </div>
 
         {/* Unrealized PnL */}
         <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
-          <span className="text-[10px] text-slate-400 font-sans block">الربح/الخسارة غير المحققة (Unrealized PnL)</span>
+          <span className="text-[10px] text-slate-400 font-sans block">الأرباح/الخسائر غير المحققة (PnL)</span>
           <div className="flex items-baseline gap-1">
             <span
-              className={`text-lg font-bold font-mono ${
+              className={`text-xl font-bold font-mono ${
                 totalUnrealizedPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'
               }`}
             >
@@ -152,8 +170,8 @@ export const PortfolioViewer: React.FC<PortfolioViewerProps> = ({ sdk }) => {
             </span>
             <span className="text-xs text-slate-400">USDC</span>
           </div>
-          <span className="text-[10px] text-emerald-400 font-mono">
-            {totalCostBasis > 0 ? `+${((totalUnrealizedPnl / totalCostBasis) * 100).toFixed(1)}%` : '0%'}
+          <span className="text-[10px] text-slate-500 font-mono">
+            {totalCostBasis > 0 ? `${((totalUnrealizedPnl / totalCostBasis) * 100).toFixed(1)}%` : '0.0%'}
           </span>
         </div>
       </div>

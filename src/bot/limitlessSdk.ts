@@ -177,85 +177,120 @@ export class LimitlessExchangeSDK {
   }
 
   // ==========================================
-  // PortfolioFetcher
+  // PortfolioFetcher & On-Chain Real Balances
   // ==========================================
 
+  /**
+   * جلب الرصيد الحقيقي من شبكة Base (USDC و ETH)
+   */
+  public async getRealOnChainBalances(address: string): Promise<{
+    usdc: string;
+    eth: string;
+    rawUsdc: bigint;
+    rawEth: bigint;
+  }> {
+    try {
+      const provider = new ethers.JsonRpcProvider('https://mainnet.base.org');
+      
+      // 1. جلب رصيد ETH للغاز
+      const rawEth = await provider.getBalance(address);
+      const ethFormatted = ethers.formatEther(rawEth);
+
+      // 2. جلب رصيد USDC على Base (العقد: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913)
+      const usdcAbi = ['function balanceOf(address account) external view returns (uint256)'];
+      const usdcContract = new ethers.Contract(this.usdcAddress, usdcAbi, provider);
+      const rawUsdc = await usdcContract.balanceOf(address);
+      const usdcFormatted = ethers.formatUnits(rawUsdc, 6);
+
+      return {
+        usdc: parseFloat(usdcFormatted).toFixed(2),
+        eth: parseFloat(ethFormatted).toFixed(4),
+        rawUsdc,
+        rawEth,
+      };
+    } catch (err) {
+      console.error('فشل استعلام الرصيد الحقيقي من Base RPC:', err);
+      return {
+        usdc: '0.00',
+        eth: '0.0000',
+        rawUsdc: 0n,
+        rawEth: 0n,
+      };
+    }
+  }
+
   public async getProfile(walletAddress?: string): Promise<UserProfile> {
+    const address = walletAddress || this.wallet?.address;
+    if (!address) {
+      return {
+        id: 0,
+        account: 'غير متصل',
+      };
+    }
+
+    try {
+      const response = await fetch(`${this.baseURL}/users/${address}/profile`, {
+        headers: this.getHeaders(),
+      });
+      if (response.ok) {
+        return await response.json();
+      }
+    } catch {
+      // API قد لا يحتوي على ملف مستخدم جديد
+    }
+
     return {
-      id: 845391,
-      account: walletAddress || this.wallet?.address || '0x45a90F8eB3f4bC1a3419eD9C882fF4129b0142fa',
+      id: parseInt(address.slice(2, 8), 16) % 1000000,
+      account: address,
       rank: {
         feeRateBps: 15,
-        title: 'Limitless Quant Pro',
+        title: 'عضو منصة Limitless',
       },
-      accumulativePoints: 14250,
     };
   }
 
-  public async getCLOBPositions(): Promise<ClobPosition[]> {
-    if (this.simulatedPositions.length > 0) {
-      return this.simulatedPositions;
+  public async getCLOBPositions(walletAddress?: string): Promise<ClobPosition[]> {
+    const address = walletAddress || this.wallet?.address;
+    if (!address) {
+      return [];
     }
 
-    return [
-      {
-        market: {
-          id: 'btc-15m-active',
-          slug: 'btc-price-15m-now',
-          title: 'Will BTC settle above strike in current 15m window?',
-          closed: false,
-          deadline: new Date(Date.now() + 12 * 60 * 1000).toISOString(),
-        },
-        makerAddress: this.wallet?.address || '0x45a90F8eB3f4bC1a3419eD9C882fF4129b0142fa',
-        positions: {
-          yes: {
-            cost: '0',
-            fillPrice: '0',
-            marketValue: '0',
-            realisedPnl: '0',
-            unrealizedPnl: '0',
-          },
-          no: {
-            cost: '85.50',
-            fillPrice: '0.19',
-            marketValue: '103.50',
-            realisedPnl: '0',
-            unrealizedPnl: '+18.00',
-          },
-        },
-        tokensBalance: {
-          yes: '0',
-          no: '450',
-        },
-        latestTrade: {
-          latestYesPrice: 0.77,
-          latestNoPrice: 0.23,
-          outcomeTokenPrice: 0.23,
-        },
-      },
-    ];
+    try {
+      const response = await fetch(`${this.baseURL}/users/${address}/positions`, {
+        headers: this.getHeaders(),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (Array.isArray(data)) return data;
+      }
+    } catch {
+      // في حال عدم توفر استجابة
+    }
+
+    // إرجاع الصفقات المنفذة فعلياً من هذه الجلسة أو فارغ
+    return this.simulatedPositions;
   }
 
-  public async getUserHistory(cursor?: string, limit = 20): Promise<{ data: TradeHistoryEntry[]; nextCursor?: string }> {
+  public async getUserHistory(walletAddress?: string, cursor?: string, limit = 20): Promise<{ data: TradeHistoryEntry[]; nextCursor?: string }> {
+    const address = walletAddress || this.wallet?.address;
+    if (!address) {
+      return { data: [] };
+    }
+
+    try {
+      const response = await fetch(`${this.baseURL}/users/${address}/history?limit=${limit}`, {
+        headers: this.getHeaders(),
+      });
+      if (response.ok) {
+        const result = await response.json();
+        if (result && Array.isArray(result.data)) return result;
+      }
+    } catch {
+      // في حال عدم توفر استجابة
+    }
+
     return {
-      data: this.simulatedHistory.length > 0 ? this.simulatedHistory : [
-        {
-          blockTimestamp: Math.floor((Date.now() - 1000 * 120) / 1000),
-          market: {
-            id: 'btc-15m-active',
-            slug: 'btc-price-15m-now',
-            title: 'Will BTC settle above strike in 15m window?',
-            deadline: new Date(Date.now() + 13 * 60 * 1000).toISOString(),
-          },
-          outcomeIndex: 1,
-          outcomeTokenAmount: '450',
-          outcomeTokenPrice: 0.19,
-          collateralAmount: '85.50',
-          strategy: 'Market Buy',
-          transactionHash: '0x8f3c7e129b0142fa91d37b6c54210d7a6e43c8b9104ef932156a098b17c24a91',
-          orderId: '0xlimitless_initial_450',
-        },
-      ],
+      data: this.simulatedHistory,
     };
   }
 
