@@ -181,7 +181,7 @@ export class LimitlessExchangeSDK {
   // ==========================================
 
   /**
-   * جلب الرصيد الحقيقي من شبكة Base (USDC و ETH)
+   * جلب الرصيد الحقيقي من شبكة Base (USDC و ETH) عبر JSON-RPC مباشر بدون JsonRpcProvider
    */
   public async getRealOnChainBalances(address: string): Promise<{
     usdc: string;
@@ -190,16 +190,45 @@ export class LimitlessExchangeSDK {
     rawEth: bigint;
   }> {
     try {
-      const provider = new ethers.JsonRpcProvider('https://mainnet.base.org');
+      const rpcUrl = 'https://mainnet.base.org';
       
-      // 1. جلب رصيد ETH للغاز
-      const rawEth = await provider.getBalance(address);
+      // 1. جلب رصيد ETH للغاز (eth_getBalance)
+      const ethRes = await fetch(rpcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'eth_getBalance',
+          params: [address, 'latest'],
+        }),
+      });
+      const ethData = await ethRes.json();
+      const rawEth = ethData.result ? BigInt(ethData.result) : 0n;
       const ethFormatted = ethers.formatEther(rawEth);
 
-      // 2. جلب رصيد USDC على Base (العقد: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913)
-      const usdcAbi = ['function balanceOf(address account) external view returns (uint256)'];
-      const usdcContract = new ethers.Contract(this.usdcAddress, usdcAbi, provider);
-      const rawUsdc = await usdcContract.balanceOf(address);
+      // 2. جلب رصيد USDC على Base (eth_call -> balanceOf selector 0x70a08231)
+      const cleanAddr = address.toLowerCase().replace('0x', '').padStart(64, '0');
+      const usdcCallData = `0x70a08231${cleanAddr}`;
+      
+      const usdcRes = await fetch(rpcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 2,
+          method: 'eth_call',
+          params: [
+            {
+              to: this.usdcAddress,
+              data: usdcCallData,
+            },
+            'latest',
+          ],
+        }),
+      });
+      const usdcData = await usdcRes.json();
+      const rawUsdc = usdcData.result && usdcData.result !== '0x' ? BigInt(usdcData.result) : 0n;
       const usdcFormatted = ethers.formatUnits(rawUsdc, 6);
 
       return {
@@ -209,7 +238,6 @@ export class LimitlessExchangeSDK {
         rawEth,
       };
     } catch (err) {
-      console.error('فشل استعلام الرصيد الحقيقي من Base RPC:', err);
       return {
         usdc: '0.00',
         eth: '0.0000',

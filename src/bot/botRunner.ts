@@ -28,7 +28,7 @@ if (!rawPrivateKey || rawPrivateKey.includes('ضع_مفتاح')) {
 
 let wallet: ethers.Wallet;
 try {
-  const provider = new ethers.JsonRpcProvider(BASE_RPC_URL);
+  const provider = new ethers.JsonRpcProvider(BASE_RPC_URL, 8453, { staticNetwork: true });
   wallet = new ethers.Wallet(rawPrivateKey, provider);
   console.log(`✅ تم تحميل المحفظة الحقيقية بنجاح: ${wallet.address}`);
   console.log(`🌐 شبكة التداول: Base Mainnet (Chain ID: 8453)`);

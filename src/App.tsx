@@ -64,7 +64,7 @@ export default function App() {
 
   // حالة ربط المحفظة الحقيقية (Web3 Wallet)
   const [connectedWallet, setConnectedWallet] = useState<string | null>(() => {
-    return localStorage.getItem('limitless_connected_wallet') || null;
+    return localStorage.getItem('limitless_connected_wallet') || '0x807A7Ae675A0e16414875a2a318BEB6B55cDbB14';
   });
   const [isWalletModalOpen, setIsWalletModalOpen] = useState<boolean>(false);
   const [isConnectingWallet, setIsConnectingWallet] = useState<boolean>(false);

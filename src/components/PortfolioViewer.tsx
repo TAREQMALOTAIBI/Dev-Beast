@@ -29,7 +29,7 @@ export const PortfolioViewer: React.FC<PortfolioViewerProps> = ({
   const [positions, setPositions] = useState<ClobPosition[]>([]);
   const [history, setHistory] = useState<TradeHistoryEntry[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [activeAddr, setActiveAddr] = useState<string | null>(connectedWallet || null);
+  const [activeAddr, setActiveAddr] = useState<string | null>(connectedWallet || '0x807A7Ae675A0e16414875a2a318BEB6B55cDbB14');
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
   const [onChainBalances, setOnChainBalances] = useState<{
     usdc: string;

@@ -34,7 +34,7 @@ export const defaultBotConfig: BotConfig = {
   privateKey: process.env.PRIVATE_KEY,
   chainId: 8453, // Base Mainnet
   limitlessExchangeAddress: '0xC9c98965297Bc527861c898329Ee280632B76e18',
-  walletAddress: process.env.WALLET_ADDRESS || '0x1A2b3c4D5E6F7890123456789ABCDEF012345678',
+  walletAddress: process.env.WALLET_ADDRESS || '0x807A7Ae675A0e16414875a2a318BEB6B55cDbB14',
 };
 
 /**
