@@ -43,13 +43,49 @@ export default function App() {
   const [activeMarketSlug, setActiveMarketSlug] = useState<string>('btc-price-15m-now');
 
   // إعدادات البوت والبارامترات
-  const [config, setConfig] = useState<BotConfig>(defaultBotConfig);
+  const [config, setConfig] = useState<BotConfig>(() => {
+    try {
+      const saved = localStorage.getItem('limitless_bot_config');
+      if (saved) return { ...defaultBotConfig, ...JSON.parse(saved) };
+    } catch (e) {
+      console.error('خطأ في استرجاع إعدادات البوت:', e);
+    }
+    return defaultBotConfig;
+  });
 
   // حالات محاكاة السوق
   const [candles, setCandles] = useState<Candle[]>(() =>
     generateSyntheticCandles(50, 94850, 'NORMAL')
   );
-  const [isBotRunning, setIsBotRunning] = useState<boolean>(true);
+
+  // حالة تشغيل الروبوت مع حفظها في التخزين المحلي (LocalStorage) لتبقى محفوظة عند الخروج والعودة
+  const [isBotRunning, setIsBotRunning] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('limitless_bot_running');
+      return saved !== null ? saved === 'true' : true;
+    } catch (e) {
+      return true;
+    }
+  });
+
+  // حفظ حالة تشغيل الروبوت تلقائياً عند تغييرها
+  useEffect(() => {
+    try {
+      localStorage.setItem('limitless_bot_running', isBotRunning ? 'true' : 'false');
+    } catch (e) {
+      console.error('فشل حفظ حالة الروبوت:', e);
+    }
+  }, [isBotRunning]);
+
+  // حفظ الإعدادات تلقائياً عند تعديلها
+  useEffect(() => {
+    try {
+      localStorage.setItem('limitless_bot_config', JSON.stringify(config));
+    } catch (e) {
+      console.error('فشل حفظ الإعدادات:', e);
+    }
+  }, [config]);
+
   const [isStreaming, setIsStreaming] = useState<boolean>(true);
   const [selectedTokenType, setSelectedTokenType] = useState<ContractTokenType>('NO');
 
