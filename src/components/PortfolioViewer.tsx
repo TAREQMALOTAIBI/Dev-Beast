@@ -23,12 +23,12 @@ interface PortfolioViewerProps {
 export const PortfolioViewer: React.FC<PortfolioViewerProps> = ({
   sdk,
   connectedWallet,
-  onOpenWalletModal,
 }) => {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [positions, setPositions] = useState<ClobPosition[]>([]);
   const [history, setHistory] = useState<TradeHistoryEntry[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [activeAddr, setActiveAddr] = useState<string | null>(connectedWallet || null);
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
   const [onChainBalances, setOnChainBalances] = useState<{
     usdc: string;
@@ -41,21 +41,45 @@ export const PortfolioViewer: React.FC<PortfolioViewerProps> = ({
   const loadPortfolioData = async () => {
     setLoading(true);
     try {
-      const activeAddress = connectedWallet || sdk.wallet?.address;
-      
-      const [prof, pos, hist, balances] = await Promise.all([
-        sdk.getProfile(activeAddress),
-        sdk.getCLOBPositions(activeAddress),
-        sdk.getUserHistory(activeAddress),
-        activeAddress ? sdk.getRealOnChainBalances(activeAddress) : Promise.resolve({ usdc: '0.00', eth: '0.0000', rawUsdc: 0n, rawEth: 0n }),
-      ]);
-      setProfile(prof);
-      setPositions(pos);
-      setHistory(hist.data);
-      setOnChainBalances({
-        usdc: balances.usdc,
-        eth: balances.eth,
-      });
+      let currentAddress = connectedWallet || activeAddr || sdk.wallet?.address;
+
+      // 1. محاولة جلب المحفظة والأرصدة الحقيقية من السيرفر مباشرة (/api/wallet)
+      try {
+        const walletRes = await fetch('/api/wallet');
+        if (walletRes.ok) {
+          const walletData = await walletRes.json();
+          if (walletData.configured && walletData.address) {
+            currentAddress = walletData.address;
+            setActiveAddr(walletData.address);
+            setOnChainBalances({
+              usdc: walletData.usdcBalance,
+              eth: walletData.ethBalance,
+            });
+          }
+        }
+      } catch {
+        // تجاهل أخطاء الخادم والاعتماد على RPC المباشر
+      }
+
+      // 2. إذا لم يكن هناك رصيد من الـ API، جلبه عبر RPC مباشرة
+      if (currentAddress) {
+        setActiveAddr(currentAddress);
+        const [prof, pos, hist, balances] = await Promise.all([
+          sdk.getProfile(currentAddress),
+          sdk.getCLOBPositions(currentAddress),
+          sdk.getUserHistory(currentAddress),
+          sdk.getRealOnChainBalances(currentAddress),
+        ]);
+        setProfile(prof);
+        setPositions(pos);
+        setHistory(hist.data);
+        if (balances.usdc !== '0.00' || balances.eth !== '0.0000') {
+          setOnChainBalances({
+            usdc: balances.usdc,
+            eth: balances.eth,
+          });
+        }
+      }
     } catch (e) {
       console.error('فشل جلب بيانات المحفظة الحقيقية:', e);
     } finally {
@@ -97,14 +121,21 @@ export const PortfolioViewer: React.FC<PortfolioViewerProps> = ({
             <Wallet className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-base font-bold text-white flex items-center gap-2">
-              <span>المحفظة والمراكز وسجل التداول (Portfolio &amp; Positions)</span>
-              <span className="px-2 py-0.5 rounded text-[10px] bg-cyan-950 text-cyan-300 border border-cyan-800/50">
-                PortfolioFetcher API
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-base font-bold text-white">
+                المحفظة والمراكز وسجل التداول (Portfolio &amp; Positions)
+              </h2>
+              <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">
+                Base Mainnet (8453)
               </span>
-            </h2>
+              {activeAddr && (
+                <span className="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-cyan-300 font-mono border border-slate-700">
+                  {activeAddr.substring(0, 6)}...{activeAddr.substring(activeAddr.length - 4)}
+                </span>
+              )}
+            </div>
             <p className="text-xs text-slate-400">
-              متابعة المراكز المفتوحة في عقود الـ 15 دقيقة، حساب الأرباح غير المحققة (PnL)، وتتبع سجل الصفقات.
+              متابعة الأرصدة الحقيقية، المراكز المفتوحة في عقود الـ 15 دقيقة، والأرباح غير المحققة (PnL).
             </p>
           </div>
         </div>
@@ -112,7 +143,7 @@ export const PortfolioViewer: React.FC<PortfolioViewerProps> = ({
         <button
           onClick={loadPortfolioData}
           disabled={loading}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-xs font-medium text-slate-300 transition-all self-start sm:self-auto"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-xs font-medium text-slate-300 transition-all self-start sm:self-auto cursor-pointer"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-cyan-400' : ''}`} />
           <span>تحديث المحفظة</span>

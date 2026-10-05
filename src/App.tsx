@@ -106,6 +106,21 @@ export default function App() {
     }
   }, [config]);
 
+  // تبديل حالة تشغيل الروبوت مع مزامنتها مع السيرفر الخلفي
+  const handleToggleBot = async () => {
+    const nextState = !isBotRunning;
+    setIsBotRunning(nextState);
+    try {
+      await fetch('/api/bot/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ running: nextState }),
+      });
+    } catch {
+      // وضع غير متصل
+    }
+  };
+
   // المزامنة التلقائية للمحفظة الحقيقية من السيرفر (.env) فور فتح الصفحة
   useEffect(() => {
     const syncServerWallet = async () => {
@@ -458,7 +473,7 @@ export default function App() {
 
             {/* زر تشغيل وإيقاف الروبوت الرئيسي */}
             <button
-              onClick={() => setIsBotRunning(!isBotRunning)}
+              onClick={handleToggleBot}
               className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl font-bold text-xs transition-all shadow-md cursor-pointer ${
                 isBotRunning
                   ? 'bg-rose-500 hover:bg-rose-600 text-white shadow-rose-500/20'
@@ -569,7 +584,7 @@ export default function App() {
 
               <div className="flex items-center gap-3 self-end sm:self-center">
                 <button
-                  onClick={() => setIsBotRunning(!isBotRunning)}
+                  onClick={handleToggleBot}
                   className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs transition-all shadow-lg cursor-pointer ${
                     isBotRunning
                       ? 'bg-rose-500 hover:bg-rose-600 text-white shadow-rose-500/25'
