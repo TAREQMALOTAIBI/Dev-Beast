@@ -17,6 +17,11 @@ export const defaultBotConfig: BotConfig = {
   candleTimeframe: '1m',
   marketDurationMinutes: 15,
   maxEntryPrice: 0.20, // سقف السعر اللامتماثل (حتى 0.20$ لعائد 5 أضعاف)
+  zScore: {
+    period: 20,           // Lookback Window: آخر 20 شمعة على فريم الدقيقة (1m)
+    upperThreshold: 2.0,  // إشارة هبوط عند Z-Score >= +2.0
+    lowerThreshold: -2.0, // إشارة صعود عند Z-Score <= -2.0
+  },
   bollingerBands: {
     period: 20,
     stdDev: 2,

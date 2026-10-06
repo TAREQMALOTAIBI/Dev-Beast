@@ -139,21 +139,25 @@ app.get('/api/wallet', async (req, res) => {
       } catch {}
     }
 
-    // 2. فحص رصيد منصة Limitless عبر API
+    // 2. فحص رصيد منصة Limitless عبر API (GET /profiles/:account)
     try {
       const lmtsResp = await fetch(
-        `${process.env.LIMITLESS_API_URL || 'https://api.limitless.exchange'}/users/${address}/portfolio`,
+        `${process.env.LIMITLESS_API_URL || 'https://api.limitless.exchange'}/profiles/${address}`,
         { signal: AbortSignal.timeout(3000) }
       );
       if (lmtsResp.ok) {
         const lmtsData = await lmtsResp.json();
-        if (lmtsData.collateral || lmtsData.balance) {
-          limitlessCollateral = parseFloat(lmtsData.collateral || lmtsData.balance || '0').toFixed(2);
+        const apiBal = lmtsData.available || lmtsData.balance || lmtsData.collateral || lmtsData.totalBalance;
+        if (apiBal) {
+          limitlessCollateral = parseFloat(String(apiBal)).toFixed(2);
         }
       }
     } catch {}
 
-    const totalUsdc = (nativeUsdc + bridgedUsdc + usdtBalance).toFixed(2);
+    const totalUsdc = Math.max(
+      nativeUsdc + bridgedUsdc + usdtBalance,
+      parseFloat(limitlessCollateral)
+    ).toFixed(2);
 
     return res.json({
       configured: true,
@@ -174,13 +178,18 @@ app.get('/api/wallet', async (req, res) => {
 });
 
 // ==========================================
-// محرك التداول الآلي على السيرفر (Server Trading Engine)
+// محرك التداول الآلي على السيرفر (Server Trading Engine - Z-Score Strategy)
 // ==========================================
 
 let isServerBotRunning = true;
 const candleCloses: number[] = [];
 let lastEvaluatedSignal: string = 'NEUTRAL';
 let lastBtcPrice: number = 94500;
+let lastCalculatedZScore: number = 0.0;
+let lastCalculatedMean: number = 94500;
+let lastCalculatedStdDev: number = 50;
+let currentWaitReason: string = 'في انتظار إشارة Z-Score حاسمة (> +1.8 للهبوط أو < -1.8 للصعود) مع سعر عقد ≤ 0.20$';
+
 let executedTradesLog: Array<{
   timestamp: number;
   tokenType: string;
@@ -189,38 +198,56 @@ let executedTradesLog: Array<{
   txHash: string;
 }> = [];
 
-const STRATEGY_CONFIG = {
+// خطة التداول بالـ Z-Score فقط
+const ZSCORE_STRATEGY = {
   marketSlug: 'btc-price-15m-now',
-  maxEntryPrice: 0.20,
-  tradeSizeUsdc: 25.0,
-  bbPeriod: 20,
-  bbStdDev: 2,
-  rsiPeriod: 14,
-  overboughtRsi: 70,
-  oversoldRsi: 30,
+  lookbackPeriod: 20,         // نافذة الحساب: آخر 20 شمعة على فريم الدقيقة (1m)
+  upperThreshold: 2.0,        // إشارة هبوط إذا أصبح Z-Score >= +2.0 (تركيز كامل على 2.0)
+  lowerThreshold: -2.0,       // إشارة صعود إذا أصبح Z-Score <= -2.0 (تركيز كامل على -2.0)
+  maxEntryPrice: 0.20,        // سقف السعر اللامتماثل: عقد بسعر ≤ 0.20$
+  tradeSizeUsdc: 4.0,         // حجم كل صفقة ($4.00)
 };
 
-async function executeLimitlessTrade(targetToken: 'YES' | 'NO', btcPrice: number) {
+function calculateServerZScore(prices: number[], lookback: number = 20) {
+  const window = prices.slice(-lookback);
+  const current = window[window.length - 1];
+  const sum = window.reduce((a, b) => a + b, 0);
+  const mean = sum / lookback;
+  const variance = window.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / lookback;
+  const stdDev = Math.sqrt(variance);
+  const zScore = stdDev > 0 ? (current - mean) / stdDev : 0;
+  return {
+    zScore: Number(zScore.toFixed(3)),
+    mean: Number(mean.toFixed(2)),
+    stdDev: Number(stdDev.toFixed(2)),
+  };
+}
+
+async function executeLimitlessTrade(targetToken: 'YES' | 'NO', btcPrice: number, currentZScore: number) {
   if (!serverWallet || !isServerBotRunning) return;
 
   try {
-    console.log(`🤖 [Server Bot] بدء فحص دفتر أوامر Limitless لشراء عقد ${targetToken}...`);
+    console.log(`🤖 [Server Bot] فحص دفتر أوامر Limitless لشراء عقد ${targetToken} (Z-Score: ${currentZScore})...`);
     const resp = await fetch(
-      `${process.env.LIMITLESS_API_URL || 'https://api.limitless.exchange'}/markets/${STRATEGY_CONFIG.marketSlug}/orderbook`,
+      `${process.env.LIMITLESS_API_URL || 'https://api.limitless.exchange'}/markets/${ZSCORE_STRATEGY.marketSlug}/orderbook`,
       { signal: AbortSignal.timeout(4000) }
     );
-    if (!resp.ok) return;
+    if (!resp.ok) {
+      currentWaitReason = `تعذر العثور على دفتر أوامر نشط للسوق (${ZSCORE_STRATEGY.marketSlug})`;
+      return;
+    }
 
     const orderbook = await resp.json();
     const bestAsk = orderbook.asks?.[0]?.price || 0.18;
 
-    if (bestAsk > STRATEGY_CONFIG.maxEntryPrice) {
-      console.log(`⛔ [Server Bot] أفضل سعر ($${bestAsk}) أكبر من $0.20. تم إلغاء الصفقة للحماية.`);
+    if (bestAsk > ZSCORE_STRATEGY.maxEntryPrice) {
+      currentWaitReason = `أفضل سعر متاح في السوق ($${bestAsk}) أعلى من سقف الاستراتيجية ($${ZSCORE_STRATEGY.maxEntryPrice}). تم الانتظار لحماية رأس المال.`;
+      console.log(`⛔ [Server Bot] ${currentWaitReason}`);
       return;
     }
 
-    const contracts = Math.floor(STRATEGY_CONFIG.tradeSizeUsdc / bestAsk);
-    console.log(`🚀 [Server Bot] تم اقتناص فرصة مؤهلة: ${contracts} عقد ${targetToken} بسعر $${bestAsk}`);
+    const contracts = Math.floor(ZSCORE_STRATEGY.tradeSizeUsdc / bestAsk);
+    console.log(`🚀 [Server Bot] تم اقتناص فرصة Z-Score مؤهلة: ${contracts} عقد ${targetToken} بسعر $${bestAsk} بأمر FAK فوري`);
 
     const domain = {
       name: 'Limitless OrderBook',
@@ -253,6 +280,7 @@ async function executeLimitlessTrade(targetToken: 'YES' | 'NO', btcPrice: number
 
     const signature = await serverWallet.signTypedData(domain, types, orderValue);
     console.log(`✍️ [Server Bot] تم توقيع EIP-712 وإرسال الأمر إلى Limitless Matching Engine.`);
+    currentWaitReason = `تم إرسال أمر شراء ${contracts} عقد ${targetToken} بنجاح!`;
 
     executedTradesLog.unshift({
       timestamp: Date.now(),
@@ -263,11 +291,47 @@ async function executeLimitlessTrade(targetToken: 'YES' | 'NO', btcPrice: number
     });
   } catch (err: any) {
     console.error('خطأ أثناء تنفيذ صفقة السيرفر:', err.message);
+    currentWaitReason = `خطأ أثناء التنفيذ: ${err.message}`;
   }
+}
+
+// ==========================================
+// جلب الشموع السابقة فوراً عبر Binance REST API
+// ==========================================
+
+async function fetchBinanceHistoricalCloses(limit: number = 50): Promise<number[]> {
+  const restEndpoints = [
+    `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
+    `https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
+    `https://api1.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
+    `https://api3.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
+  ];
+
+  for (const endpoint of restEndpoints) {
+    try {
+      const res = await fetch(endpoint, { signal: AbortSignal.timeout(5000) });
+      if (res.ok) {
+        const raw = await res.json();
+        if (Array.isArray(raw) && raw.length > 0) {
+          // استخراج أسعار الإغلاق من مصفوفة الشموع (index 4 هو Close)
+          return raw.map((k: any) => parseFloat(k[4]));
+        }
+      }
+    } catch {}
+  }
+  return [];
 }
 
 async function startServerPriceFeed() {
   try {
+    // 1. جلب الشموع السابقة فوراً عبر Binance REST API لتفادي أي انتظار
+    const initialCloses = await fetchBinanceHistoricalCloses(50);
+    if (initialCloses.length > 0) {
+      candleCloses.push(...initialCloses);
+      lastBtcPrice = candleCloses[candleCloses.length - 1];
+      console.log(`✅ [Server Bot] تم جلب ${initialCloses.length} شمعة عبر Binance REST API بنجاح! السعر الحالي: $${lastBtcPrice}`);
+    }
+
     const WebSocketClient = (await import('ws')).default;
     const ws = new WebSocketClient('wss://data-stream.binance.vision/ws/btcusdt@kline_1m');
 
@@ -286,30 +350,26 @@ async function startServerPriceFeed() {
           candleCloses.push(lastBtcPrice);
           if (candleCloses.length > 50) candleCloses.shift();
 
-          if (candleCloses.length >= 20 && isServerBotRunning) {
-            const bbValues = (await import('technicalindicators')).BollingerBands.calculate({
-              period: 20,
-              values: candleCloses,
-              stdDev: 2,
-            });
-            const rsiValues = (await import('technicalindicators')).RSI.calculate({
-              period: 14,
-              values: candleCloses,
-            });
+          if (candleCloses.length >= ZSCORE_STRATEGY.lookbackPeriod && isServerBotRunning) {
+            const { zScore, mean, stdDev } = calculateServerZScore(candleCloses, ZSCORE_STRATEGY.lookbackPeriod);
+            lastCalculatedZScore = zScore;
+            lastCalculatedMean = mean;
+            lastCalculatedStdDev = stdDev;
 
-            if (bbValues.length > 0 && rsiValues.length > 0) {
-              const currentBB = bbValues[bbValues.length - 1];
-              const currentRSI = rsiValues[rsiValues.length - 1];
-
-              if (lastBtcPrice >= currentBB.upper && currentRSI >= 70) {
-                lastEvaluatedSignal = 'OVERBOUGHT';
-                await executeLimitlessTrade('NO', lastBtcPrice);
-              } else if (lastBtcPrice <= currentBB.lower && currentRSI <= 30) {
-                lastEvaluatedSignal = 'OVERSOLD';
-                await executeLimitlessTrade('YES', lastBtcPrice);
-              } else {
-                lastEvaluatedSignal = 'NEUTRAL';
-              }
+            // 1. إشارة هبوط: Z-Score > +1.8 أو +2.0 -> شراء عقد NO (القمة)
+            if (zScore >= ZSCORE_STRATEGY.upperThreshold) {
+              lastEvaluatedSignal = 'OVERBOUGHT';
+              console.log(`🚨 [Server Bot]: إشارة هبوط Z-Score! Z = +${zScore} (أعلى من +${ZSCORE_STRATEGY.upperThreshold}). جاري شراء عقد NO...`);
+              await executeLimitlessTrade('NO', lastBtcPrice, zScore);
+            }
+            // 2. إشارة صعود: Z-Score < -1.8 أو -2.0 -> شراء عقد YES (الارتداد)
+            else if (zScore <= ZSCORE_STRATEGY.lowerThreshold) {
+              lastEvaluatedSignal = 'OVERSOLD';
+              console.log(`🚨 [Server Bot]: إشارة صعود Z-Score! Z = ${zScore} (أدنى من ${ZSCORE_STRATEGY.lowerThreshold}). جاري شراء عقد YES...`);
+              await executeLimitlessTrade('YES', lastBtcPrice, zScore);
+            } else {
+              lastEvaluatedSignal = 'NEUTRAL';
+              currentWaitReason = `سوق محايد: مؤشر Z-Score = ${zScore > 0 ? '+' : ''}${zScore} (المطلوب: > +${ZSCORE_STRATEGY.upperThreshold} للهبوط أو < ${ZSCORE_STRATEGY.lowerThreshold} للصعود) | متوسط 20 دقيقة = $${mean.toLocaleString()}`;
             }
           }
         }
@@ -326,6 +386,22 @@ async function startServerPriceFeed() {
 
 startServerPriceFeed();
 
+// مسار لجلب أحدث بيانات الشموع عبر Binance REST API
+app.get('/api/binance/klines', async (req, res) => {
+  try {
+    const limit = Number(req.query.limit) || 50;
+    const closes = await fetchBinanceHistoricalCloses(limit);
+    return res.json({
+      success: true,
+      count: closes.length,
+      lastPrice: closes.length > 0 ? closes[closes.length - 1] : lastBtcPrice,
+      closes,
+    });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
 // ==========================================
 // API مسارات التحكم بحالة الروبوت على السيرفر
 // ==========================================
@@ -333,10 +409,19 @@ startServerPriceFeed();
 app.get('/api/bot/status', (req, res) => {
   res.json({
     running: isServerBotRunning,
+    strategy: 'Z-Score Only (Lookback: 20m)',
     wallet: serverWallet ? serverWallet.address : null,
     btcPrice: lastBtcPrice,
+    zScore: lastCalculatedZScore,
+    mean: lastCalculatedMean,
+    stdDev: lastCalculatedStdDev,
     lastSignal: lastEvaluatedSignal,
     candleCount: candleCloses.length,
+    tradeSizeUsdc: ZSCORE_STRATEGY.tradeSizeUsdc,
+    maxEntryPrice: ZSCORE_STRATEGY.maxEntryPrice,
+    upperThreshold: ZSCORE_STRATEGY.upperThreshold,
+    lowerThreshold: ZSCORE_STRATEGY.lowerThreshold,
+    waitReason: currentWaitReason,
     recentTrades: executedTradesLog.slice(0, 10),
   });
 });

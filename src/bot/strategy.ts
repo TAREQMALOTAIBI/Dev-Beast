@@ -56,9 +56,9 @@ export async function executeAsymmetricMeanReversion(
     };
   }
 
-  // الخطوة 4: تحديد رمز العقد المستهدف (Contract Selection)
-  // - في ذروة الشراء (OVERBOUGHT > 85 RSI): صعود غير مستدام؛ نشتري رمز "NO" للمراهنة ضد الصعود.
-  // - في ذروة البيع (OVERSOLD < 15 RSI): هبوط مذعور؛ نشتري رمز "YES" للمراهنة على ارتداد صاعد.
+  // الخطوة 4: تحديد رمز العقد المستهدف (Contract Selection بناءً على Z-Score)
+  // - إشارة هبوط (Z-Score > +1.8 أو +2.0): السعر تضخم فوق قمة 20 دقيقة؛ نشتري عقد "NO" للمراهنة على الهبوط.
+  // - إشارة صعود (Z-Score < -1.8 أو -2.0): السعر انهار تحت قاع 20 دقيقة؛ نشتري عقد "YES" للمراهنة على الصعود والارتداد.
   let targetTokenType: ContractTokenType;
   let targetTokenId: string;
 

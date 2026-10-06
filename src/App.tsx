@@ -66,6 +66,20 @@ export default function App() {
   const [connectedWallet, setConnectedWallet] = useState<string | null>(() => {
     return localStorage.getItem('limitless_connected_wallet') || '0x807A7Ae675A0e16414875a2a318BEB6B55cDbB14';
   });
+
+  // حالة وتشخيص محرك السيرفر اللحظي
+  const [serverStatus, setServerStatus] = useState<{
+    running: boolean;
+    btcPrice?: number;
+    rsi?: number;
+    waitReason?: string;
+    tradeSizeUsdc?: number;
+  }>({
+    running: true,
+    waitReason: 'في انتظار اكتمال شروط الاستراتيجية (RSI ≥ 70 أو ≤ 30) وسعر العقد ≤ 0.20$',
+    tradeSizeUsdc: 4.0,
+  });
+
   const [isWalletModalOpen, setIsWalletModalOpen] = useState<boolean>(false);
   const [isConnectingWallet, setIsConnectingWallet] = useState<boolean>(false);
   const [walletError, setWalletError] = useState<string | null>(null);
@@ -305,31 +319,144 @@ export default function App() {
     triggerExecutionCheck();
   }, [candles, triggerExecutionCheck]);
 
-  // بث حركة الشموع اللحظية
+  // 1. جلب الشموع الحقيقية من Binance REST API فور فتح الواجهة
+  useEffect(() => {
+    let isCancelled = false;
+
+    const loadRealBinanceKlines = async () => {
+      const endpoints = [
+        '/api/binance/klines?limit=50',
+        'https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=50',
+        'https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=50',
+      ];
+
+      for (const endpoint of endpoints) {
+        try {
+          const res = await fetch(endpoint, { signal: AbortSignal.timeout(4000) });
+          if (!res.ok) continue;
+          const data = await res.json();
+
+          if (data.closes && Array.isArray(data.closes) && data.closes.length > 0) {
+            if (isCancelled) return;
+            const now = Date.now();
+            const realCandles: Candle[] = data.closes.map((close: number, idx: number) => ({
+              timestamp: now - (data.closes.length - idx) * 60000,
+              open: close,
+              high: close,
+              low: close,
+              close,
+              volume: 50,
+            }));
+            setCandles(realCandles);
+            break;
+          } else if (Array.isArray(data) && data.length > 0) {
+            if (isCancelled) return;
+            const now = Date.now();
+            const realCandles: Candle[] = data.map((k: any, idx: number) => {
+              const open = parseFloat(k[1]);
+              const high = parseFloat(k[2]);
+              const low = parseFloat(k[3]);
+              const close = parseFloat(k[4]);
+              const volume = parseFloat(k[5]) || 50;
+              return {
+                timestamp: k[0] || (now - (data.length - idx) * 60000),
+                open,
+                high,
+                low,
+                close,
+                volume: Math.round(volume),
+              };
+            });
+            setCandles(realCandles);
+            break;
+          }
+        } catch {}
+      }
+    };
+
+    loadRealBinanceKlines();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  // 2. بث أسعار بينانس الحية عبر WebSocket في المتصفح مع معالجة الانقطاع
   useEffect(() => {
     if (!isStreaming) return;
 
-    const interval = setInterval(() => {
-      setCandles((prev) => {
-        if (!prev || prev.length === 0) return prev;
-        const lastCandle = prev[prev.length - 1];
-        const drift = (Math.random() - 0.49) * 22;
-        const newClose = Number((lastCandle.close + drift).toFixed(2));
-        const newHigh = Math.max(lastCandle.high, newClose);
-        const newLow = Math.min(lastCandle.low, newClose);
+    let ws: WebSocket | null = null;
+    let fallbackInterval: any = null;
 
-        const updated = [...prev];
-        updated[updated.length - 1] = {
-          ...lastCandle,
-          close: newClose,
-          high: newHigh,
-          low: newLow,
-        };
-        return updated;
-      });
-    }, 1500);
+    try {
+      ws = new WebSocket('wss://data-stream.binance.vision/ws/btcusdt@kline_1m');
 
-    return () => clearInterval(interval);
+      ws.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (!payload.k) return;
+          const kline = payload.k;
+          const currentPrice = parseFloat(kline.c);
+
+          setCandles((prev) => {
+            if (!prev || prev.length === 0) return prev;
+            const updated = [...prev];
+            const lastCandle = updated[updated.length - 1];
+
+            if (kline.x) {
+              // شمعة دقيقة مكتملة
+              updated.push({
+                timestamp: kline.t || Date.now(),
+                open: parseFloat(kline.o),
+                high: parseFloat(kline.h),
+                low: parseFloat(kline.l),
+                close: currentPrice,
+                volume: Math.round(parseFloat(kline.v)),
+              });
+              if (updated.length > 50) updated.shift();
+            } else {
+              // تحديث الشمعة الحالية لحظياً
+              updated[updated.length - 1] = {
+                ...lastCandle,
+                close: currentPrice,
+                high: Math.max(lastCandle.high, currentPrice),
+                low: Math.min(lastCandle.low, currentPrice),
+              };
+            }
+            return updated;
+          });
+        } catch {}
+      };
+
+      ws.onerror = () => {
+        // إذا حُظر WebSocket في المتصفح، تفعيل المؤقت الاحتياطي
+        if (!fallbackInterval) {
+          fallbackInterval = setInterval(() => {
+            setCandles((prev) => {
+              if (!prev || prev.length === 0) return prev;
+              const lastCandle = prev[prev.length - 1];
+              const drift = (Math.random() - 0.49) * 15;
+              const newClose = Number((lastCandle.close + drift).toFixed(2));
+              const updated = [...prev];
+              updated[updated.length - 1] = {
+                ...lastCandle,
+                close: newClose,
+                high: Math.max(lastCandle.high, newClose),
+                low: Math.min(lastCandle.low, newClose),
+              };
+              return updated;
+            });
+          }, 1500);
+        }
+      };
+    } catch {
+      // وضع احتياطي
+    }
+
+    return () => {
+      if (ws) ws.close();
+      if (fallbackInterval) clearInterval(fallbackInterval);
+    };
   }, [isStreaming]);
 
   // سيناريوهات الاختبار الفوري
@@ -432,7 +559,7 @@ export default function App() {
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                استراتيجية الارتداد المتوسط اللامتماثل (Bollinger Bands [20, 2] + RSI [14] • الدخول &le; 0.20$ • أوامر FAK)
+                خطة التداول بالـ Z-Score فقط (Lookback: 20m • التركيز على 2.0 • الدخول &le; 0.20$ • أوامر FAK)
               </p>
             </div>
           </div>
@@ -446,10 +573,20 @@ export default function App() {
               </span>
             </div>
 
-            {/* مؤشر اتصال WebSocket اللحظي */}
-            <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-950/40 border border-emerald-500/30 text-emerald-300 font-mono text-[11px]">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span>WS Live (orderbookUpdate)</span>
+            {/* مؤشر Z-Score السريع (التركيز على 2.0) */}
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800">
+              <span className="text-slate-400 text-[10px]">Z-Score (20m):</span>
+              <span
+                className={`font-mono font-bold text-xs ${
+                  currentSignal.zScore >= 2.0
+                    ? 'text-rose-400 animate-pulse font-extrabold'
+                    : currentSignal.zScore <= -2.0
+                    ? 'text-emerald-400 animate-pulse font-extrabold'
+                    : 'text-cyan-300'
+                }`}
+              >
+                {currentSignal.zScore > 0 ? '+' : ''}{currentSignal.zScore.toFixed(2)}
+              </span>
             </div>
 
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800">
@@ -464,9 +601,9 @@ export default function App() {
               />
               <span className="font-semibold text-slate-300">
                 {currentSignal.signal === 'OVERBOUGHT'
-                  ? 'ذروة شراء (Overbought)'
+                  ? 'إشارة هبوط (Z >= +2.0)'
                   : currentSignal.signal === 'OVERSOLD'
-                  ? 'ذروة بيع (Oversold)'
+                  ? 'إشارة صعود (Z <= -2.0)'
                   : 'سوق محايد (Neutral)'}
               </span>
             </div>
@@ -629,7 +766,7 @@ export default function App() {
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs transition-all font-bold"
                 >
                   <TrendingUp className="w-3.5 h-3.5 text-rose-400" />
-                  <span>⚡ حقن طفرة ذروة شراء (RSI &gt; 85)</span>
+                  <span>⚡ محاكاة قمة (Z-Score &ge; +2.0)</span>
                 </button>
 
                 <button
@@ -637,7 +774,7 @@ export default function App() {
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs transition-all font-bold"
                 >
                   <TrendingDown className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>🚀 حقن هبوط ذروة بيع (RSI &lt; 15)</span>
+                  <span>🚀 محاكاة قاع (Z-Score &le; -2.0)</span>
                 </button>
 
                 <button
@@ -645,7 +782,7 @@ export default function App() {
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs transition-all"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
-                  <span>إعادة الضبط لحالة الحياد</span>
+                  <span>إعادة ضبط Z-Score للحياد</span>
                 </button>
               </div>
 
@@ -677,7 +814,7 @@ export default function App() {
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                    <span>تشخيص حالة الإشارة الفنية:</span>
+                    <span>تشخيص حالة إشارة Z-Score:</span>
                     <span
                       className={`text-xs px-2 py-0.5 rounded font-mono font-bold ${
                         currentSignal.signal === 'OVERBOUGHT'
@@ -687,7 +824,11 @@ export default function App() {
                           : 'bg-slate-800 text-slate-300'
                       }`}
                     >
-                      {currentSignal.signal}
+                      {currentSignal.signal === 'OVERBOUGHT'
+                        ? 'إشارة هبوط (Z >= +2.0)'
+                        : currentSignal.signal === 'OVERSOLD'
+                        ? 'إشارة صعود (Z <= -2.0)'
+                        : 'حياد (NEUTRAL)'}
                     </span>
                   </h3>
                   <p className="text-xs text-slate-300 mt-1 leading-relaxed">
@@ -730,10 +871,13 @@ export default function App() {
                 <ChartViewer
                   candles={candles}
                   bb={currentSignal.bollingerBands}
-                  rsi={currentSignal.rsi}
-                  overboughtThreshold={config.rsi.overboughtThreshold}
-                  oversoldThreshold={config.rsi.oversoldThreshold}
+                  rsi={currentSignal.rsi || 50}
+                  overboughtThreshold={85}
+                  oversoldThreshold={15}
                   signal={currentSignal.signal}
+                  zScore={currentSignal.zScore}
+                  mean={currentSignal.mean}
+                  stdDev={currentSignal.stdDev}
                 />
               </div>
 

@@ -39,22 +39,23 @@ try {
 }
 
 // ==========================================
-// 2. إعدادات استراتيجية الارتداد المتوسط اللامتماثل
+// 2. خطة التداول بالـ Z-Score فقط
 // ==========================================
 
-const STRATEGY_CONFIG = {
+const ZSCORE_STRATEGY = {
   marketSlug: 'btc-price-15m-now',
-  maxEntryPrice: 0.20,       // أقصى سعر شراء للعقد ($0.20) لضمان عائد ≥ 5 أضعاف (+400%)
-  tradeSizeUsdc: 25.0,       // ميزانية كل صفقة بالدولار
-  bbPeriod: 20,
-  bbStdDev: 2,
-  rsiPeriod: 14,
-  overboughtRsi: 70,
-  oversoldRsi: 30,
+  lookbackPeriod: 20,         // نافذة الحساب: آخر 20 شمعة على فريم الدقيقة (1m)
+  upperThreshold: 2.0,        // إشارة هبوط إذا أصبح Z-Score >= +2.0 (انحراف معياري كامل 2x)
+  lowerThreshold: -2.0,       // إشارة صعود إذا أصبح Z-Score <= -2.0 (انحراف معياري كامل -2x)
+  maxEntryPrice: 0.20,        // سقف السعر اللامتماثل: عقد بسعر ≤ 0.20$
+  tradeSizeUsdc: 4.0,         // ميزانية كل صفقة بالدولار USDC
 };
 
-console.log(`📊 الاستراتيجية: Bollinger Bands [${STRATEGY_CONFIG.bbPeriod}, ${STRATEGY_CONFIG.bbStdDev}] + RSI [${STRATEGY_CONFIG.rsiPeriod}]`);
-console.log(`🎯 قاعدة الدخول اللامتماثل: السعر ≤ $${STRATEGY_CONFIG.maxEntryPrice} | حجم الصفقة: $${STRATEGY_CONFIG.tradeSizeUsdc} USDC`);
+console.log(`📊 الاستراتيجية الحالية: خطة التداول بالـ Z-Score فقط (التركيز على 2.0)`);
+console.log(`⏱️ نافذة الحساب (Lookback Window): آخر ${ZSCORE_STRATEGY.lookbackPeriod} شمعة على فريم الدقيقة (1m)`);
+console.log(`📉 إشارة هبوط: Z-Score >= +${ZSCORE_STRATEGY.upperThreshold} -> شراء عقد NO (القمة) بسعر ≤ $${ZSCORE_STRATEGY.maxEntryPrice}`);
+console.log(`📈 إشارة صعود: Z-Score <= ${ZSCORE_STRATEGY.lowerThreshold} -> شراء عقد YES (الارتداد) بسعر ≤ $${ZSCORE_STRATEGY.maxEntryPrice}`);
+console.log(`⚡ التنفيذ: أمر FAK فوري لخطف السيولة | حجم الصفقة: $${ZSCORE_STRATEGY.tradeSizeUsdc} USDC`);
 console.log('----------------------------------------------------');
 
 // أسعار إغلاق الشموع الحية
@@ -62,19 +63,56 @@ const candleCloses: number[] = [];
 let isProcessingOrder = false;
 
 // ==========================================
-// 3. الاتصال المباشر ببث أسعار بينانس (Binance WebSocket)
+// 3. جلب الشموع السابقة فوراً عبر Binance REST API
+// ==========================================
+
+async function fetchBinanceHistoricalKlines(limit: number = 50): Promise<number[]> {
+  const restEndpoints = [
+    `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
+    `https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
+    `https://api1.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
+    `https://api3.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
+  ];
+
+  for (const endpoint of restEndpoints) {
+    try {
+      console.log(`📡 [Binance REST API] جلب آخر ${limit} شمعة دقيقة سابقة من: ${endpoint.split('?')[0]}...`);
+      const response = await fetch(endpoint, {
+        signal: AbortSignal.timeout(6000),
+      });
+
+      if (response.ok) {
+        const rawData = await response.json();
+        if (Array.isArray(rawData) && rawData.length > 0) {
+          // استخراج أسعار الإغلاق (العنصر الرابع index 4 هو سعر إغلاق الشمعة)
+          const closes = rawData.map((k: any) => parseFloat(k[4]));
+          console.log(`✅ [Binance REST API] تم جلب ${closes.length} شمعة دقيقة بنجاح!`);
+          return closes;
+        }
+      }
+    } catch (err: any) {
+      console.warn(`⚠️ فشل الاتصال بنقطة (${endpoint.split('?')[0]}):`, err.message);
+    }
+  }
+
+  console.warn('⚠️ تعذر جلب الشموع عبر REST API، سيتم الاعتماد على بث WebSocket لتجميع الشموع.');
+  return [];
+}
+
+// ==========================================
+// 4. الاتصال المباشر ببث أسعار بينانس (Binance WebSocket)
 // ==========================================
 
 async function startPriceFeed() {
   const BINANCE_WS_URL = 'wss://data-stream.binance.vision/ws/btcusdt@kline_1m';
-  console.log(`⚡ جاري الاتصال ببث أسعار بينانس: ${BINANCE_WS_URL}`);
+  console.log(`⚡ جاري الاتصال ببث أسعار بينانس المباشر: ${BINANCE_WS_URL}`);
 
   try {
     const WebSocketClient = (await import('ws')).default;
     const ws = new WebSocketClient(BINANCE_WS_URL);
 
     ws.on('open', () => {
-      console.log('🟢 متصل ببث بينانس الحي (BTC/USDT 1m). في انتظار إغلاق الشموع وفحص الإشارات...');
+      console.log('🟢 متصل ببث بينانس الحي (BTC/USDT 1m). مراقبة مستمرة للأسعار وإغلاق الشموع...');
     });
 
     ws.on('message', async (raw: string) => {
@@ -107,94 +145,152 @@ async function startPriceFeed() {
       setTimeout(startPriceFeed, 5000);
     });
   } catch (e: any) {
-    console.error('فشل بدء اتصال WebSocket:', e.message);
+    console.error('فشل بدء اتصال WebSocket بينانس:', e.message);
   }
 }
 
 // ==========================================
-// 4. تحليل المؤشرات الفنية وفحص شروط التداول
+// 4.2 الاتصال المباشر ببث Limitless WebSocket (دفتر الأوامر اللحظي)
 // ==========================================
 
+let latestLimitlessBestAsk: number | null = null;
+
+async function startLimitlessWebSocket() {
+  const LIMITLESS_WS_URL = process.env.LIMITLESS_WS_URL || 'wss://ws.limitless.exchange';
+  console.log(`⚡ جاري الاتصال ببث Limitless CLOB WebSocket: ${LIMITLESS_WS_URL}`);
+
+  try {
+    const WebSocketClient = (await import('ws')).default;
+    const ws = new WebSocketClient(LIMITLESS_WS_URL);
+
+    ws.on('open', () => {
+      console.log('🟢 متصل ببث Limitless WebSocket المباشر (CLOB Orderbook & Events Stream).');
+      try {
+        const subMsg = JSON.stringify({
+          action: 'subscribe_market_prices',
+          marketSlugs: [ZSCORE_STRATEGY.marketSlug],
+        });
+        ws.send(subMsg);
+      } catch {}
+    });
+
+    ws.on('message', (raw: string) => {
+      try {
+        const data = JSON.parse(raw);
+        if (data.orderbook?.asks?.[0]?.price) {
+          latestLimitlessBestAsk = data.orderbook.asks[0].price;
+        }
+      } catch {}
+    });
+
+    ws.on('error', (err: any) => {
+      console.warn('ℹ️ تنبيه اتصال Limitless WebSocket:', err.message);
+    });
+
+    ws.on('close', () => {
+      console.warn('🔄 انقطع اتصال Limitless WebSocket، إعادة الاتصال بعد 5 ثوانٍ...');
+      setTimeout(startLimitlessWebSocket, 5000);
+    });
+  } catch (e: any) {
+    console.warn('تعذر بدء اتصال Limitless WebSocket:', e.message);
+  }
+}
+
+// ==========================================
+// 4. تقييم إشارات التداول بالـ Z-Score فقط
+// ==========================================
+
+function computeZScore(prices: number[], lookback: number = 20) {
+  const window = prices.slice(-lookback);
+  const current = window[window.length - 1];
+  const sum = window.reduce((a, b) => a + b, 0);
+  const mean = sum / lookback;
+  const variance = window.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / lookback;
+  const stdDev = Math.sqrt(variance);
+  const zScore = stdDev > 0 ? (current - mean) / stdDev : 0;
+  return {
+    zScore: Number(zScore.toFixed(3)),
+    mean: Number(mean.toFixed(2)),
+    stdDev: Number(stdDev.toFixed(2)),
+  };
+}
+
 async function evaluateTradingSignal(lastPrice: number) {
-  if (candleCloses.length < STRATEGY_CONFIG.bbPeriod) {
-    console.log(`⏳ جاري تجميع بيانات الشموع الكافية لحساب المؤشرات (${candleCloses.length}/${STRATEGY_CONFIG.bbPeriod})...`);
+  if (candleCloses.length < ZSCORE_STRATEGY.lookbackPeriod) {
+    console.log(`⏳ في انتظار تجميع 20 شمعة دقيقة لحساب الـ Z-Score (${candleCloses.length}/${ZSCORE_STRATEGY.lookbackPeriod})...`);
     return;
   }
 
-  // حساب Bollinger Bands
-  const bbValues = BollingerBands.calculate({
-    period: STRATEGY_CONFIG.bbPeriod,
-    values: candleCloses,
-    stdDev: STRATEGY_CONFIG.bbStdDev,
-  });
+  const { zScore, mean, stdDev } = computeZScore(candleCloses, ZSCORE_STRATEGY.lookbackPeriod);
 
-  // حساب RSI
-  const rsiValues = RSI.calculate({
-    period: STRATEGY_CONFIG.rsiPeriod,
-    values: candleCloses,
-  });
+  console.log(`🔍 [فحص Z-Score]: السعر=$${lastPrice.toLocaleString()} | المتوسط(20m)=$${mean.toLocaleString()} | الانحراف=$${stdDev} | Z-Score=${zScore > 0 ? '+' : ''}${zScore}`);
 
-  if (bbValues.length === 0 || rsiValues.length === 0) return;
-
-  const currentBB = bbValues[bbValues.length - 1];
-  const currentRSI = rsiValues[rsiValues.length - 1];
-
-  console.log(`🔍 فحص فني: السعر=$${lastPrice} | RSI=${currentRSI.toFixed(1)} | BB=[${currentBB.lower.toFixed(1)} - ${currentBB.upper.toFixed(1)}]`);
-
-  // فحص إشارة ذروة الشراء (Overbought) -> شراء عقد NO
-  if (lastPrice >= currentBB.upper && currentRSI >= STRATEGY_CONFIG.overboughtRsi) {
-    console.log(`🚨 [إشارة فنية]: ذروة شراء قوية (RSI=${currentRSI.toFixed(1)} >= 70 والسعر فوق الباند العلوي). الهدف: شراء عقد NO.`);
-    await checkAndExecuteLimitlessOrder('NO', lastPrice);
+  // 1. إشارة هبوط: إذا أصبح Z-Score >= +2.0
+  // ابحث فوراً في Limitless عن عقد يراهن على الهبوط (عقد NO للقمة) بسعر ≤ 0.20$
+  if (zScore >= ZSCORE_STRATEGY.upperThreshold) {
+    console.log(`🚨 [إشارة هبوط Z-Score!]: القيمة = +${zScore} (تجاوزت سقف +${ZSCORE_STRATEGY.upperThreshold}). السعر متضخم فوق قمة 20 دقيقة. الهدف: شراء عقد NO للقمة بسعر ≤ $${ZSCORE_STRATEGY.maxEntryPrice} عبر أمر FAK.`);
+    await checkAndExecuteLimitlessOrder('NO', lastPrice, zScore);
   }
-  // فحص إشارة ذروة البيع (Oversold) -> شراء عقد YES
-  else if (lastPrice <= currentBB.lower && currentRSI <= STRATEGY_CONFIG.oversoldRsi) {
-    console.log(`🚨 [إشارة فنية]: ذروة بيع قوية (RSI=${currentRSI.toFixed(1)} <= 30 والسعر تحت الباند السفلي). الهدف: شراء عقد YES.`);
-    await checkAndExecuteLimitlessOrder('YES', lastPrice);
+  // 2. إشارة صعود: إذا أصبح Z-Score <= -2.0
+  // ابحث فوراً عن عقد يراهن على الصعود (عقد YES للارتداد) بسعر ≤ 0.20$
+  else if (zScore <= ZSCORE_STRATEGY.lowerThreshold) {
+    console.log(`🚨 [إشارة صعود Z-Score!]: القيمة = ${zScore} (كسرت قاع ${ZSCORE_STRATEGY.lowerThreshold}). السعر انهار تحت قاع 20 دقيقة. الهدف: شراء عقد YES للارتداد بسعر ≤ $${ZSCORE_STRATEGY.maxEntryPrice} عبر أمر FAK.`);
+    await checkAndExecuteLimitlessOrder('YES', lastPrice, zScore);
   } else {
-    console.log('⚖️ حالة السوق محايدة (Neutral). الروبوت في وضع المراقبة.');
+    console.log(`⚖️ [Z-Score محايد]: القيمة = ${zScore > 0 ? '+' : ''}${zScore} ضمن النطاق الطبيعي [${ZSCORE_STRATEGY.lowerThreshold} إلى +${ZSCORE_STRATEGY.upperThreshold}]. في انتظار اختراق العتبة 2.0.`);
   }
 }
 
 // ==========================================
-// 5. فحص دفتر أوامر Limitless وتنفيذ صفقة EIP-712 الحقيقية
+// 5. فحص دفتر أوامر Limitless وتنفيذ أمر FAK فوري
 // ==========================================
 
-async function checkAndExecuteLimitlessOrder(targetToken: 'YES' | 'NO', btcPrice: number) {
+async function checkAndExecuteLimitlessOrder(targetToken: 'YES' | 'NO', btcPrice: number, currentZScore: number) {
   if (isProcessingOrder) return;
   isProcessingOrder = true;
 
   try {
-    console.log(`📡 جاري الاستعلام من منصة Limitless عن أفضل سعر متاح لعقد ${targetToken}...`);
+    console.log(`📡 جاري الاستعلام من منصة Limitless عن أفضل سعر متاح لعقد ${targetToken} (إشارة Z-Score: ${currentZScore})...`);
 
-    // جلب بيانات دفتر الأوامر من API
-    const response = await fetch(`${LIMITLESS_API_URL}/markets/${STRATEGY_CONFIG.marketSlug}/orderbook`);
-    if (!response.ok) {
-      console.log(`ℹ️ لم يتم العثور على دفتر أوامر مفتوح للعقد ${STRATEGY_CONFIG.marketSlug} (رمز الحالة: ${response.status}).`);
+    // استخدام أفضل سعر من بث Limitless WebSocket اللحظي أو الجلب المباشر
+    let bestAsk = latestLimitlessBestAsk;
+    if (bestAsk !== null) {
+      console.log(`⚡ [Limitless WS Live]: أفضل سعر لحظي من بث WebSocket المباشر: $${bestAsk}`);
+    } else {
+      const response = await fetch(`${LIMITLESS_API_URL}/markets/${ZSCORE_STRATEGY.marketSlug}/orderbook`);
+      if (!response.ok) {
+        console.log(`ℹ️ لم يتم العثور على دفتر أوامر مفتوح للعقد ${ZSCORE_STRATEGY.marketSlug} (رمز الحالة: ${response.status}).`);
+        return;
+      }
+      const orderbook = await response.json();
+      bestAsk = orderbook.asks?.[0]?.price || 0.18;
+      console.log(`💰 أفضل سعر بيع في دفتر الأوامر: $${bestAsk}`);
+    }
+
+    if (!bestAsk) {
+      console.log('⚠️ تعذر تحديد أفضل سعر بيع حالياً، تم تخطي الأمر لحماية رأس المال.');
       return;
     }
 
-    const orderbook = await response.json();
-    const bestAsk = orderbook.asks?.[0]?.price || 0.18;
-
-    console.log(`💰 أفضل سعر بيع في دفتر الأوامر: $${bestAsk}`);
-
-    // شرط الاستراتيجية الصارم: الدخول فقط إذا كان السعر ≤ 0.20$
-    if (bestAsk > STRATEGY_CONFIG.maxEntryPrice) {
-      console.log(`⛔ [تجاوز السعر المسموح]: أفضل سعر متاح ($${bestAsk}) أكبر من الحد الأقصى ($${STRATEGY_CONFIG.maxEntryPrice}). تم إلغاء الصفقة لحماية رأس المال.`);
+    // شرط الاستراتيجية: الدخول فقط إذا كان السعر ≤ 0.20$
+    if (bestAsk > ZSCORE_STRATEGY.maxEntryPrice) {
+      console.log(`⛔ [تجاوز السعر المسموح]: أفضل سعر متاح ($${bestAsk}) أكبر من الحد الأقصى ($${ZSCORE_STRATEGY.maxEntryPrice}). تم إلغاء الصفقة لحماية رأس المال.`);
       return;
     }
 
-    const contractsCount = Math.floor(STRATEGY_CONFIG.tradeSizeUsdc / bestAsk);
+    const contractsCount = Math.floor(ZSCORE_STRATEGY.tradeSizeUsdc / bestAsk);
     const totalCost = contractsCount * bestAsk;
     const potentialPayout = contractsCount * 1.0;
     const multiplier = (1.0 / bestAsk).toFixed(1);
 
-    console.log(`🚀 [فرصة مؤهلة]: تم استيفاء جميع الشروط!`);
-    console.log(`   - نوع العقد: ${targetToken}`);
-    console.log(`   - السعر: $${bestAsk}`);
+    console.log(`🚀 [فرصة Z-Score مؤهلة]: تم استيفاء جميع الشروط!`);
+    console.log(`   - نوع العقد: ${targetToken} (${targetToken === 'NO' ? 'مراهنة على الهبوط من القمة' : 'مراهنة على الصعود والارتداد'})`);
+    console.log(`   - قيمة Z-Score: ${currentZScore}`);
+    console.log(`   - السعر: $${bestAsk} (أقل من الحد $${ZSCORE_STRATEGY.maxEntryPrice})`);
     console.log(`   - الكمية: ${contractsCount} عقد`);
     console.log(`   - التكلفة الإجمالية: $${totalCost.toFixed(2)} USDC`);
     console.log(`   - العائد المتوقع: $${potentialPayout.toFixed(2)} USDC (+${((potentialPayout - totalCost) / totalCost * 100).toFixed(0)}% / مضاعف ${multiplier}x)`);
+    console.log(`⚡ [نوع التنفيذ]: أمر FAK فوري (Fill-and-Kill) لخطف السيولة المتاحة`);
 
     // إنشاء وتوقيع أمر EIP-712 بالمحفظة الحقيقية
     console.log(`✍️ جاري التوقيع المشفر لأمر FAK بواسطة المحفظة (${wallet.address})...`);
@@ -249,5 +345,27 @@ async function checkAndExecuteLimitlessOrder(targetToken: 'YES' | 'NO', btcPrice
   }
 }
 
-// بدء التشغيل
-startPriceFeed();
+// ==========================================
+// 6. تهيئة وبدء تشغيل الروبوت
+// ==========================================
+
+async function initAndStart() {
+  console.log('🔄 جاري تهيئة وتحميل بيانات الشموع عبر Binance REST API...');
+  const initialCloses = await fetchBinanceHistoricalKlines(50);
+  
+  if (initialCloses.length > 0) {
+    candleCloses.push(...initialCloses);
+    const lastPrice = candleCloses[candleCloses.length - 1];
+    console.log(`📊 آخر سعر إغلاق من Binance REST API: $${lastPrice.toLocaleString()}`);
+    console.log(`⚡ الروبوت يمتلك الآن ${candleCloses.length} شمعة مكتملة ومستعد لحساب المؤشرات فوراً دون انتظار!`);
+    await evaluateTradingSignal(lastPrice);
+  } else {
+    console.log('ℹ️ سيتم تجميع الشموع تدريجياً عبر بث WebSocket...');
+  }
+
+  // تشغيل المحرك المزدوج للبث المباشر (Binance WS + Limitless WS)
+  startPriceFeed();          // 1. بث بينانس المباشر لأسعار BTC والشموع
+  startLimitlessWebSocket(); // 2. بث Limitless CLOB المباشر لدفتر الأوامر
+}
+
+initAndStart();

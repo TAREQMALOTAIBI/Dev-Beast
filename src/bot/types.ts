@@ -278,11 +278,18 @@ export interface RsiConfig {
   oversoldThreshold: number;
 }
 
+export interface ZScoreConfig {
+  period: number;         // Lookback Window: آخر 20 شمعة على فريم الدقيقة (1m)
+  upperThreshold: number; // إشارة هبوط إذا Z-Score >= +2.0 (أو القيمة المحددة)
+  lowerThreshold: number; // إشارة صعود إذا Z-Score <= -2.0 (أو القيمة المحددة)
+}
+
 export interface BotConfig {
   symbol: string;
   candleTimeframe: '1m';
   marketDurationMinutes: 15;
   maxEntryPrice: number;
+  zScore: ZScoreConfig;
   bollingerBands: BollingerBandsConfig;
   rsi: RsiConfig;
   tradeSizeUsdc: number;
@@ -318,6 +325,9 @@ export type ContractTokenType = 'YES' | 'NO';
 export interface SignalEvaluation {
   signal: SignalType;
   currentPrice: number;
+  zScore: number;
+  mean: number;
+  stdDev: number;
   rsi: number;
   bollingerBands: BollingerBandsValues;
   isOverbought: boolean;

@@ -1,137 +1,162 @@
 /**
  * @file indicators.ts
- * @description محرك حساب المؤشرات الفنية واستخراج إشارات الارتداد المتوسط (Mean Reversion)
- * باستخدام مكتبة technicalindicators مع تعليقات وشروح وافية باللغة العربية.
+ * @description محرك حساب استراتيجية الـ Z-Score فقط على فريم الدقيقة (1m)
+ * 
+ * القواعد الرياضية:
+ * 1. نافذة الحساب (Lookback Window): آخر 20 شمعة على فريم الدقيقة (1m).
+ * 2. المتوسط الحسابي (Mean): متوسط أسعار الإغلاق لآخر 20 شمعة.
+ * 3. الانحراف المعياري (StdDev): الانحراف المعياري لآخر 20 شمعة.
+ * 4. قيمة Z-Score: (السعر الحالي - المتوسط) / الانحراف المعياري.
+ * 
+ * شروط الدخول:
+ * - إشارة هبوط: Z-Score > +1.8 أو +2.0 -> استهداف عقد يراهن على الهبوط (عقد NO للقمة) بسعر ≤ 0.20$.
+ * - إشارة صعود: Z-Score < -1.8 أو -2.0 -> استهداف عقد يراهن على الصعود (عقد YES للقاع) بسعر ≤ 0.20$.
  */
 
 import { BollingerBands, RSI } from 'technicalindicators';
 import type { BotConfig, Candle, BollingerBandsValues, SignalEvaluation } from './types';
 
 /**
- * وظيفة لفحص وتقييم إشارة الارتداد المتوسط اللامتماثل (Asymmetric Mean Reversion)
+ * حساب الـ Z-Score الدقيق لمصفوفة الأسعار
+ */
+export function calculateZScore(
+  closePrices: number[],
+  lookback: number = 20
+): {
+  zScore: number;
+  mean: number;
+  stdDev: number;
+  currentPrice: number;
+} {
+  if (!closePrices || closePrices.length < lookback) {
+    const fallbackPrice = closePrices && closePrices.length > 0 ? closePrices[closePrices.length - 1] : 0;
+    return {
+      zScore: 0,
+      mean: fallbackPrice,
+      stdDev: 0,
+      currentPrice: fallbackPrice,
+    };
+  }
+
+  // أخذ آخر N شمعة (Lookback Window = 20 شمعة)
+  const windowPrices = closePrices.slice(-lookback);
+  const currentPrice = windowPrices[windowPrices.length - 1];
+
+  // 1. حساب المتوسط الحسابي (Mean μ)
+  const sum = windowPrices.reduce((acc, p) => acc + p, 0);
+  const mean = sum / lookback;
+
+  // 2. حساب الانحراف المعياري (Standard Deviation σ)
+  const variance = windowPrices.reduce((acc, p) => acc + Math.pow(p - mean, 2), 0) / lookback;
+  const stdDev = Math.sqrt(variance);
+
+  // 3. حساب Z-Score = (Current Price - Mean) / StdDev
+  const zScore = stdDev > 0 ? (currentPrice - mean) / stdDev : 0;
+
+  return {
+    zScore: Number(zScore.toFixed(3)),
+    mean: Number(mean.toFixed(2)),
+    stdDev: Number(stdDev.toFixed(2)),
+    currentPrice,
+  };
+}
+
+/**
+ * وظيفة فحص وتقييم إشارة التداول بالـ Z-Score فقط
  * 
- * القواعد الرياضية:
- * 1. ذروة الشراء (Overbought): سعر البيتكوين الحالي أعلى من النطاق العلوي للبولنجر باند (Upper BB) ومؤشر القوة النسبية RSI يتجاوز 85.
- * 2. ذروة البيع (Oversold): سعر البيتكوين الحالي أدنى من النطاق السفلي للبولنجر باند (Lower BB) ومؤشر القوة النسبية RSI يقل عن 15.
- * 
- * @param candles مصفوفة شموع البيتكوين (إطار 1 دقيقة) مرتبة تصاعدياً حسب الوقت
- * @param config إعدادات البوت والبارامترات الفنية
- * @returns SignalEvaluation نتيجة تقييم الإشارة الفنية ومؤشراتها
+ * @param candles مصفوفة شموع البيتكوين (إطار 1 دقيقة)
+ * @param config إعدادات البوت والبارامترات
+ * @returns SignalEvaluation نتيجة تقييم إشارة الـ Z-Score
  */
 export function checkMeanReversionSignal(
   candles: Candle[],
   config: BotConfig
 ): SignalEvaluation {
-  const minCandlesRequired = Math.max(
-    config.bollingerBands.period + 1,
-    config.rsi.period + 1,
-    25
-  );
+  const lookbackPeriod = config.zScore?.period || 20; // 20 شمعة على فريم الدقيقة
+  const upperThreshold = config.zScore?.upperThreshold || 2.0; // التركيز على +2.0
+  const lowerThreshold = config.zScore?.lowerThreshold || -2.0; // التركيز على -2.0
 
-  // التحقق من كفاية بيانات الشموع لحساب المؤشرات بدقة رياضية
-  if (!candles || candles.length < minCandlesRequired) {
+  // التحقق من كفاية بيانات الشموع (20 شمعة على الأقل)
+  if (!candles || candles.length < lookbackPeriod) {
     const fallbackPrice = candles && candles.length > 0 ? candles[candles.length - 1].close : 0;
     return {
       signal: 'NEUTRAL',
       currentPrice: fallbackPrice,
+      zScore: 0,
+      mean: fallbackPrice,
+      stdDev: 0,
       rsi: 50,
       bollingerBands: { upper: fallbackPrice, middle: fallbackPrice, lower: fallbackPrice },
       isOverbought: false,
       isOversold: false,
-      explanationArabic: `بيانات الشموع غير كافية (المتوفر: ${candles ? candles.length : 0}، المطلوب: ${minCandlesRequired} شمعة على الأقل).`,
-      explanationEnglish: `Insufficient candle data for indicator calculation (Available: ${candles?.length || 0}, Required: ${minCandlesRequired}).`,
+      explanationArabic: `في انتظار تجميع 20 شمعة دقيقة لحساب الـ Z-Score (المتوفر حالياً: ${candles ? candles.length : 0} شمعة).`,
+      explanationEnglish: `Waiting for 20 one-minute candles for Z-Score calculation (Available: ${candles?.length || 0}).`,
       evaluatedAt: Date.now(),
     };
   }
 
-  // الخطوة 1: استخراج مصفوفة أسعار الإغلاق (Closing Prices) من الشموع
+  // استخراج أسعار الإغلاق
   const closePrices: number[] = candles.map((c) => c.close);
-  const currentCandle = candles[candles.length - 1];
-  const currentPrice = currentCandle.close;
+  const currentPrice = closePrices[closePrices.length - 1];
 
-  // الخطوة 2: حساب مؤشر البولنجر باند (Bollinger Bands: Period = 20, StdDev = 2)
-  // يتم استخدام النطاقات لتحديد انحراف السعر الإحصائي عن المتوسط المتحرك بمقدار 2 انحراف معياري (95.4% من التوزيع الطبيعي)
-  const bbResults = BollingerBands.calculate({
-    period: config.bollingerBands.period,
-    values: closePrices,
-    stdDev: config.bollingerBands.stdDev,
-  });
+  // حساب Z-Score بدقة إحصائية
+  const { zScore, mean, stdDev } = calculateZScore(closePrices, lookbackPeriod);
 
-  // الخطوة 3: حساب مؤشر القوة النسبية (RSI: Period = 14)
-  // لقياس زخم حركة السعر وقوة التشبع الشرائي أو البيعي
-  const rsiResults = RSI.calculate({
-    period: config.rsi.period,
-    values: closePrices,
-  });
-
-  // التأكد من استرجاع قيم صحيحة للمؤشرات لآخر شمعة مكتملة
-  if (!bbResults.length || !rsiResults.length) {
-    return {
-      signal: 'NEUTRAL',
-      currentPrice,
-      rsi: 50,
-      bollingerBands: { upper: currentPrice, middle: currentPrice, lower: currentPrice },
-      isOverbought: false,
-      isOversold: false,
-      explanationArabic: 'فشل استخراج نتائج المؤشرات من الحسابات الرياضية.',
-      explanationEnglish: 'Failed to extract indicator calculation outputs.',
-      evaluatedAt: Date.now(),
-    };
-  }
-
-  const latestBB = bbResults[bbResults.length - 1];
-  const latestRsi = rsiResults[rsiResults.length - 1];
-
-  const bollingerBands: BollingerBandsValues = {
-    upper: Number(latestBB.upper.toFixed(2)),
-    middle: Number(latestBB.middle.toFixed(2)),
-    lower: Number(latestBB.lower.toFixed(2)),
-    pb: latestBB.pb,
+  // حساب مساعد للـ Bollinger Bands و RSI للعرض في الواجهة الرسومية
+  let bollingerBands: BollingerBandsValues = {
+    upper: Number((mean + stdDev * 2).toFixed(2)),
+    middle: mean,
+    lower: Number((mean - stdDev * 2).toFixed(2)),
   };
+  let rsiValue = 50;
 
-  const rsiValue = Number(latestRsi.toFixed(2));
+  try {
+    const rsiCalc = RSI.calculate({ period: 14, values: closePrices });
+    if (rsiCalc.length > 0) rsiValue = Number(rsiCalc[rsiCalc.length - 1].toFixed(1));
+  } catch {}
 
-  // الخطوة 4: فحص شروط استراتيجية الارتداد المتوسط اللامتماثل (Asymmetric Mean Reversion)
-  
-  // شرط ذروة الشراء (Overbought Signal):
-  // 1) السعر الحالي > النطاق العلوي للبولنجر باند (Upper BB)
-  // 2) مؤشر RSI > 85 (تشبع شرائي حاد واستثنائي)
-  const isOverbought =
-    currentPrice > bollingerBands.upper &&
-    rsiValue > config.rsi.overboughtThreshold;
+  // ==========================================
+  // شروط الدخول بالـ Z-Score فقط
+  // ==========================================
 
-  // شرط ذروة البيع (Oversold Signal):
-  // 1) السعر الحالي < النطاق السفلي للبولنجر باند (Lower BB)
-  // 2) مؤشر RSI < 15 (تشبع بيعي حاد وهبوط استثنائي)
-  const isOversold =
-    currentPrice < bollingerBands.lower &&
-    rsiValue < config.rsi.oversoldThreshold;
+  // 1. إشارة هبوط: إذا أصبح Z-Score > +1.8 أو +2.0
+  // السعر تضخم إحصائياً بأكثر من 1.8 انحراف معياري فوق المتوسط -> استهداف عقد NO للقمة (مراهنة على الهبوط)
+  const isOverbought = zScore >= upperThreshold;
 
-  // الخطوة 5: صياغة التقرير وتحديد نوع الإشارة
+  // 2. إشارة صعود: إذا أصبح Z-Score < -1.8 أو -2.0
+  // السعر انهار إحصائياً بأكثر من 1.8 انحراف معياري تحت المتوسط -> استهداف عقد YES للقاع (مراهنة على الصعود والارتداد)
+  const isOversold = zScore <= lowerThreshold;
+
   if (isOverbought) {
     return {
-      signal: 'OVERBOUGHT',
+      signal: 'OVERBOUGHT', // إشارة هبوط للمؤشر
       currentPrice,
+      zScore,
+      mean,
+      stdDev,
       rsi: rsiValue,
       bollingerBands,
       isOverbought: true,
       isOversold: false,
-      explanationArabic: `إشارة ذروة شراء حادة (OVERBOUGHT)! السعر ($${currentPrice.toLocaleString()}) تجاوز الحد العلوي للبولنجر ($${bollingerBands.upper.toLocaleString()}) مع مؤشر RSI بلغ ${rsiValue} (> 85). يتم استهداف عقد يراهن ضد الصعود (NO).`,
-      explanationEnglish: `Extreme Overbought Trigger! BTC Price ($${currentPrice.toLocaleString()}) is above Upper BB ($${bollingerBands.upper.toLocaleString()}) and RSI is ${rsiValue} (> 85). Target: Bet against pump (NO contract).`,
+      explanationArabic: `🚨 [إشارة هبوط Z-Score]: القيمة الحالية = +${zScore} (تجاوزت سقف +${upperThreshold}). السعر ($${currentPrice.toLocaleString()}) أعلى من متوسط 20 دقيقة ($${mean.toLocaleString()}). الهدف: شراء عقد NO للقمة بسعر ≤ 0.20$ عبر أمر FAK فوراً.`,
+      explanationEnglish: `Bearish Z-Score Trigger! Z = +${zScore} (>= +${upperThreshold}). Price is ${zScore} standard deviations above 20m mean ($${mean}). Target: NO contract <= $0.20 via immediate FAK order.`,
       evaluatedAt: Date.now(),
     };
   }
 
   if (isOversold) {
     return {
-      signal: 'OVERSOLD',
+      signal: 'OVERSOLD', // إشارة صعود للمؤشر
       currentPrice,
+      zScore,
+      mean,
+      stdDev,
       rsi: rsiValue,
       bollingerBands,
       isOverbought: false,
       isOversold: true,
-      explanationArabic: `إشارة ذروة بيع حادة (OVERSOLD)! السعر ($${currentPrice.toLocaleString()}) انكسر تحت الحد السفلي للبولنجر ($${bollingerBands.lower.toLocaleString()}) مع مؤشر RSI بلغ ${rsiValue} (< 15). يتم استهداف عقد يراهن على الارتداد (YES).`,
-      explanationEnglish: `Extreme Oversold Trigger! BTC Price ($${currentPrice.toLocaleString()}) is below Lower BB ($${bollingerBands.lower.toLocaleString()}) and RSI is ${rsiValue} (< 15). Target: Bet on bounce (YES contract).`,
+      explanationArabic: `🚨 [إشارة صعود Z-Score]: القيمة الحالية = ${zScore} (كسرت قاع ${lowerThreshold}). السعر ($${currentPrice.toLocaleString()}) أدنى من متوسط 20 دقيقة ($${mean.toLocaleString()}). الهدف: شراء عقد YES للارتداد بسعر ≤ 0.20$ عبر أمر FAK فوراً.`,
+      explanationEnglish: `Bullish Z-Score Trigger! Z = ${zScore} (<= ${lowerThreshold}). Price is ${Math.abs(zScore)} standard deviations below 20m mean ($${mean}). Target: YES contract <= $0.20 via immediate FAK order.`,
       evaluatedAt: Date.now(),
     };
   }
@@ -139,12 +164,15 @@ export function checkMeanReversionSignal(
   return {
     signal: 'NEUTRAL',
     currentPrice,
+    zScore,
+    mean,
+    stdDev,
     rsi: rsiValue,
     bollingerBands,
     isOverbought: false,
     isOversold: false,
-    explanationArabic: `السوق في حالة حياد (NEUTRAL). السعر ($${currentPrice.toLocaleString()}) ضمن النطاق الطبيعي [${bollingerBands.lower.toLocaleString()} - ${bollingerBands.upper.toLocaleString()}] وقيمة RSI = ${rsiValue}. الشروط غير متحققة.`,
-    explanationEnglish: `Neutral market conditions. BTC ($${currentPrice.toLocaleString()}) within BB band [${bollingerBands.lower.toLocaleString()} - ${bollingerBands.upper.toLocaleString()}] and RSI is ${rsiValue}.`,
+    explanationArabic: `⚖️ [Z-Score محايد]: القيمة = ${zScore > 0 ? '+' : ''}${zScore} (بين ${lowerThreshold} و +${upperThreshold}). متوسط 20 دقيقة = $${mean.toLocaleString()} (الانحراف المعياري = $${stdDev}). الروبوت في وضع مراقبة خطة الـ Z-Score.`,
+    explanationEnglish: `Neutral Z-Score: Z = ${zScore} (between ${lowerThreshold} and +${upperThreshold}). 20m Mean = $${mean}, StdDev = $${stdDev}. Monitoring mode.`,
     evaluatedAt: Date.now(),
   };
 }

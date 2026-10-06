@@ -8,6 +8,9 @@ interface ChartViewerProps {
   overboughtThreshold: number;
   oversoldThreshold: number;
   signal: 'OVERBOUGHT' | 'OVERSOLD' | 'NEUTRAL';
+  zScore?: number;
+  mean?: number;
+  stdDev?: number;
 }
 
 export const ChartViewer: React.FC<ChartViewerProps> = ({
@@ -17,6 +20,9 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
   overboughtThreshold,
   oversoldThreshold,
   signal,
+  zScore = 0,
+  mean,
+  stdDev,
 }) => {
   if (!candles || candles.length === 0) {
     return (
@@ -237,59 +243,77 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
 
       {/* Sub-Chart: RSI (14) Oscillator Panel */}
       <div className="mt-3 pt-3 border-t border-slate-800/80">
+        {/* Sub-Chart: Z-Score (Lookback 20m) Visualizer Panel */}
         <div className="flex flex-wrap items-center justify-between text-xs mb-1.5 gap-2">
           <div className="flex items-center gap-2">
-            <span className="text-slate-400 font-semibold">مؤشر القوة النسبية RSI (14):</span>
+            <span className="text-white font-bold">مؤشر Z-Score (التركيز على 2.0):</span>
             <span
-              className={`font-mono font-bold text-sm ${
-                rsi >= overboughtThreshold
-                  ? 'text-rose-400'
-                  : rsi <= oversoldThreshold
-                  ? 'text-emerald-400'
-                  : 'text-cyan-300'
+              className={`font-mono font-bold text-sm px-2 py-0.5 rounded ${
+                zScore >= 2.0
+                  ? 'bg-rose-950 text-rose-400 border border-rose-500/40'
+                  : zScore <= -2.0
+                  ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/40'
+                  : 'bg-slate-900 text-cyan-300 border border-slate-700'
               }`}
             >
-              {rsi.toFixed(2)}
+              {zScore > 0 ? '+' : ''}{zScore.toFixed(3)}
             </span>
+            {mean && (
+              <span className="text-[11px] text-slate-400">
+                (المتوسط: ${mean.toLocaleString()} | الانحراف: ${stdDev})
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-3 text-[11px] text-slate-400">
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-rose-500" />
-              مستوى ذروة الشراء: &gt; {overboughtThreshold}
+              إشارة هبوط: &ge; +2.0
             </span>
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              مستوى ذروة البيع: &lt; {oversoldThreshold}
+              إشارة صعود: &le; -2.0
             </span>
           </div>
         </div>
 
-        {/* RSI Meter Visualizer */}
-        <div className="relative h-6 bg-slate-950 rounded-lg overflow-hidden border border-slate-800 flex items-center px-2">
-          {/* Overbought zone highlight (>85) */}
+        {/* Z-Score Meter Visualizer (-3.0 to +3.0) */}
+        <div className="relative h-6 bg-slate-950 rounded-lg overflow-hidden border border-slate-800 flex items-center px-2 mb-3">
+          {/* Neutral center guide (0) */}
+          <div className="absolute top-0 bottom-0 left-1/2 w-px bg-slate-700 z-0" />
+          
+          {/* Bullish oversold zone (<= -2.0) on left */}
           <div
-            className="absolute top-0 bottom-0 left-0 bg-rose-500/15 border-r border-rose-500/40"
-            style={{ width: `${100 - overboughtThreshold}%` }}
+            className="absolute top-0 bottom-0 left-0 bg-emerald-500/15 border-r border-emerald-500/40"
+            style={{ width: '16.7%' }}
+            title="منطقة إشارة الصعود (Z <= -2.0)"
           />
-          {/* Oversold zone highlight (<15) */}
+          {/* Bearish overbought zone (>= +2.0) on right */}
           <div
-            className="absolute top-0 bottom-0 right-0 bg-emerald-500/15 border-l border-emerald-500/40"
-            style={{ width: `${oversoldThreshold}%` }}
+            className="absolute top-0 bottom-0 right-0 bg-rose-500/15 border-l border-rose-500/40"
+            style={{ width: '16.7%' }}
+            title="منطقة إشارة الهبوط (Z >= +2.0)"
           />
 
-          {/* Dynamic Needle */}
-          <div
-            className="absolute top-0.5 bottom-0.5 w-2 rounded-full transition-all duration-300 -translate-x-1 shadow-md shadow-cyan-500/30 flex items-center justify-center"
-            style={{
-              right: `${Math.min(Math.max(rsi, 2), 98)}%`,
-              backgroundColor:
-                rsi >= overboughtThreshold
-                  ? '#f43f5e'
-                  : rsi <= oversoldThreshold
-                  ? '#10b981'
-                  : '#38bdf8',
-            }}
-          />
+          {/* Dynamic Z-Score Needle */}
+          {(() => {
+            // Map zScore from [-3, +3] to [0%, 100%]
+            const clampedZ = Math.min(Math.max(zScore, -3.0), 3.0);
+            const percent = ((clampedZ + 3.0) / 6.0) * 100;
+            return (
+              <div
+                className="absolute top-0.5 bottom-0.5 w-3 rounded-full transition-all duration-300 -translate-x-1.5 shadow-md flex items-center justify-center z-10"
+                style={{
+                  left: `${percent}%`,
+                  backgroundColor:
+                    zScore >= 2.0
+                      ? '#f43f5e'
+                      : zScore <= -2.0
+                      ? '#10b981'
+                      : '#38bdf8',
+                }}
+              />
+            );
+          })()}
         </div>
       </div>
     </div>
