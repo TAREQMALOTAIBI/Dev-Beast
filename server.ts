@@ -206,7 +206,8 @@ const ZSCORE_STRATEGY = {
   upperThreshold: 2.0,        // إشارة هبوط إذا أصبح Z-Score >= +2.0 (تركيز كامل على 2.0)
   lowerThreshold: -2.0,       // إشارة صعود إذا أصبح Z-Score <= -2.0 (تركيز كامل على -2.0)
   maxEntryPrice: 0.20,        // سقف السعر اللامتماثل: عقد بسعر ≤ 0.20$
-  tradeSizeUsdc: 4.0,         // حجم كل صفقة ($4.00)
+  riskPercent: 1.0,           // نسبة المخاطرة للصفقة (1.0% من رأس المال بدلاً من 0.50%)
+  tradeSizeUsdc: 8.0,         // حجم كل صفقة ($8.00 USDC)
 };
 
 function calculateServerZScore(prices: number[], lookback: number = 20) {
@@ -479,6 +480,7 @@ app.get('/api/bot/status', (req, res) => {
     stdDev: lastCalculatedStdDev,
     lastSignal: lastEvaluatedSignal,
     candleCount: candleCloses.length,
+    riskPercent: ZSCORE_STRATEGY.riskPercent,
     tradeSizeUsdc: ZSCORE_STRATEGY.tradeSizeUsdc,
     maxEntryPrice: ZSCORE_STRATEGY.maxEntryPrice,
     upperThreshold: ZSCORE_STRATEGY.upperThreshold,

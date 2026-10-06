@@ -31,7 +31,8 @@ export const defaultBotConfig: BotConfig = {
     overboughtThreshold: 85, // شرط ذروة الشراء الحرج
     oversoldThreshold: 15,  // شرط ذروة البيع الحرج
   },
-  tradeSizeUsdc: 100, // ميزانية الصفقة بالدولار
+  riskPercent: 1.0, // نسبة المخاطرة للصفقة (1% من رصيد المحفظة)
+  tradeSizeUsdc: 8.0, // ميزانية الصفقة بالدولار (1% من رأس المال)
   maxSlippagePercent: 1.0,
   apiBaseUrl: process.env.LIMITLESS_API_URL || 'https://api.limitless.exchange',
   lmtsTokenId: process.env.LMTS_TOKEN_ID,

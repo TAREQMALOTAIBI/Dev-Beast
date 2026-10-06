@@ -292,6 +292,7 @@ export interface BotConfig {
   zScore: ZScoreConfig;
   bollingerBands: BollingerBandsConfig;
   rsi: RsiConfig;
+  riskPercent?: number; // نسبة المخاطرة للصفقة (1.0% من رأس المال)
   tradeSizeUsdc: number;
   maxSlippagePercent: number;
   apiBaseUrl: string;

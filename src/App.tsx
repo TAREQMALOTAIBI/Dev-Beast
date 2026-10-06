@@ -76,8 +76,8 @@ export default function App() {
     tradeSizeUsdc?: number;
   }>({
     running: true,
-    waitReason: 'في انتظار اكتمال شروط الاستراتيجية (RSI ≥ 70 أو ≤ 30) وسعر العقد ≤ 0.20$',
-    tradeSizeUsdc: 4.0,
+    waitReason: 'في انتظار اكتمال شروط الاستراتيجية (Z-Score ≥ 2.0 أو ≤ -2.0) وسعر العقد ≤ 0.20$',
+    tradeSizeUsdc: 8.0,
   });
 
   const [isWalletModalOpen, setIsWalletModalOpen] = useState<boolean>(false);

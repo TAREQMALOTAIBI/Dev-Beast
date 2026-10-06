@@ -49,14 +49,15 @@ const ZSCORE_STRATEGY = {
   upperThreshold: 2.0,        // إشارة هبوط إذا أصبح Z-Score >= +2.0 (انحراف معياري كامل 2x)
   lowerThreshold: -2.0,       // إشارة صعود إذا أصبح Z-Score <= -2.0 (انحراف معياري كامل -2x)
   maxEntryPrice: 0.20,        // سقف السعر اللامتماثل: عقد بسعر ≤ 0.20$
-  tradeSizeUsdc: 4.0,         // ميزانية كل صفقة بالدولار USDC
+  riskPercent: 1.0,           // نسبة المخاطرة للصفقة: 1% من رأس المال (بدلاً من 0.50%)
+  tradeSizeUsdc: 8.0,         // ميزانية كل صفقة بالدولار USDC (1% من المحفظة)
 };
 
 console.log(`📊 الاستراتيجية الحالية: خطة التداول بالـ Z-Score فقط (التركيز على 2.0)`);
 console.log(`⏱️ نافذة الحساب (Lookback Window): آخر ${ZSCORE_STRATEGY.lookbackPeriod} شمعة على فريم الدقيقة (1m)`);
 console.log(`📉 إشارة هبوط: Z-Score >= +${ZSCORE_STRATEGY.upperThreshold} -> شراء عقد NO (القمة) بسعر ≤ $${ZSCORE_STRATEGY.maxEntryPrice}`);
 console.log(`📈 إشارة صعود: Z-Score <= ${ZSCORE_STRATEGY.lowerThreshold} -> شراء عقد YES (الارتداد) بسعر ≤ $${ZSCORE_STRATEGY.maxEntryPrice}`);
-console.log(`⚡ التنفيذ: أمر FAK فوري لخطف السيولة | حجم الصفقة: $${ZSCORE_STRATEGY.tradeSizeUsdc} USDC`);
+console.log(`⚡ التنفيذ: أمر FAK فوري لخطف السيولة | نسبة الصفقة: ${ZSCORE_STRATEGY.riskPercent}% | حجم الصفقة: $${ZSCORE_STRATEGY.tradeSizeUsdc} USDC`);
 console.log('----------------------------------------------------');
 
 // أسعار إغلاق الشموع الحية
