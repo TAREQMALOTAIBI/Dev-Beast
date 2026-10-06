@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { ethers } from 'ethers';
 import { BollingerBands, RSI } from 'technicalindicators';
+import { HttpClient, MarketFetcher, OrderClient, Side, OrderType, WebSocketClient } from '@limitless-exchange/sdk';
 
 // ==========================================
 // 1. قراءة مفاتيح المحفظة و Limitless من ملف .env
@@ -150,49 +151,84 @@ async function startPriceFeed() {
 }
 
 // ==========================================
-// 4.2 الاتصال المباشر ببث Limitless WebSocket (دفتر الأوامر اللحظي)
+// 4.2 الاتصال المباشر ببث Limitless WebSocket عبر WebSocketClient الرسمي
 // ==========================================
 
 let latestLimitlessBestAsk: number | null = null;
+let latestLimitlessBestBid: number | null = null;
+let limitlessWsClient: any = null;
 
-async function startLimitlessWebSocket() {
+async function startLimitlessWebSocket(targetSlug?: string) {
+  const slug = targetSlug || ZSCORE_STRATEGY.marketSlug;
   const LIMITLESS_WS_URL = process.env.LIMITLESS_WS_URL || 'wss://ws.limitless.exchange';
-  console.log(`⚡ جاري الاتصال ببث Limitless CLOB WebSocket: ${LIMITLESS_WS_URL}`);
+  console.log(`⚡ جاري الاتصال ببث Limitless WebSocket الرسمي: ${LIMITLESS_WS_URL}`);
 
   try {
-    const WebSocketClient = (await import('ws')).default;
-    const ws = new WebSocketClient(LIMITLESS_WS_URL);
+    const wsOptions: any = {
+      url: LIMITLESS_WS_URL,
+      autoReconnect: true,
+    };
 
-    ws.on('open', () => {
-      console.log('🟢 متصل ببث Limitless WebSocket المباشر (CLOB Orderbook & Events Stream).');
-      try {
-        const subMsg = JSON.stringify({
-          action: 'subscribe_market_prices',
-          marketSlugs: [ZSCORE_STRATEGY.marketSlug],
-        });
-        ws.send(subMsg);
-      } catch {}
-    });
+    if (LMTS_TOKEN_ID && LMTS_TOKEN_SECRET && !LMTS_TOKEN_ID.includes('ضع_رمز')) {
+      wsOptions.hmacCredentials = {
+        tokenId: LMTS_TOKEN_ID,
+        secret: LMTS_TOKEN_SECRET,
+      };
+    }
 
-    ws.on('message', (raw: string) => {
+    limitlessWsClient = new WebSocketClient(wsOptions);
+    await limitlessWsClient.connect();
+
+    console.log('🟢 متصل بنجاح ببث Limitless WebSocket الرسمي (Live Orderbook & Account Events).');
+
+    // 1. الاستماع لتحديثات دفتر الأوامر (orderbookUpdate)
+    limitlessWsClient.on('orderbookUpdate', (data: any) => {
       try {
-        const data = JSON.parse(raw);
-        if (data.orderbook?.asks?.[0]?.price) {
-          latestLimitlessBestAsk = data.orderbook.asks[0].price;
+        if (data.orderbook) {
+          if (data.orderbook.asks && data.orderbook.asks.length > 0) {
+            latestLimitlessBestAsk = data.orderbook.asks[0].price;
+          }
+          if (data.orderbook.bids && data.orderbook.bids.length > 0) {
+            latestLimitlessBestBid = data.orderbook.bids[0].price;
+          }
         }
       } catch {}
     });
 
-    ws.on('error', (err: any) => {
-      console.warn('ℹ️ تنبيه اتصال Limitless WebSocket:', err.message);
+    // 2. الاستماع لأحداث الأوامر والتنفيذ والتسوية (orderEvent)
+    limitlessWsClient.on('orderEvent', (event: any) => {
+      if (event.source === 'OME') {
+        console.log(`📡 [Limitless OME]: حالة الأمر ${event.orderId || ''}: ${event.type || event.status}`);
+      } else {
+        console.log(`⛓️ [Limitless Settlement]: تسوية على البلوكتشين: ${event.type} | TxHash: ${event.txHash || ''}`);
+      }
     });
 
-    ws.on('close', () => {
-      console.warn('🔄 انقطع اتصال Limitless WebSocket، إعادة الاتصال بعد 5 ثوانٍ...');
-      setTimeout(startLimitlessWebSocket, 5000);
+    // 3. الاستماع لأحداث تحديث المحفظة والصفقات (positions & tx)
+    limitlessWsClient.on('positions', (data: any) => {
+      console.log('💼 [Limitless Positions]: تم تحديث مراكز المحفظة الحية.');
     });
+
+    limitlessWsClient.on('tx', (data: any) => {
+      console.log(`🚀 [Limitless Tx]: المعاملة: ${data.txHash} | الحالة: ${data.status}`);
+    });
+
+    limitlessWsClient.on('disconnect', (reason: string) => {
+      console.warn(`🔄 انقطع اتصال Limitless WebSocket (${reason}). إعادة الاتصال والاشتراك التلقائي...`);
+    });
+
+    // الاشتراك في أسعار السوق وأحداث الحساب
+    await limitlessWsClient.subscribe('subscribe_market_prices', {
+      marketSlugs: [slug],
+    });
+
+    if (wsOptions.hmacCredentials) {
+      await limitlessWsClient.subscribe('subscribe_positions', { marketSlugs: [slug] }).catch(() => {});
+      await limitlessWsClient.subscribe('subscribe_order_events').catch(() => {});
+      await limitlessWsClient.subscribe('subscribe_transactions').catch(() => {});
+    }
   } catch (e: any) {
-    console.warn('تعذر بدء اتصال Limitless WebSocket:', e.message);
+    console.warn('تعذر بدء اتصال Limitless WebSocketClient:', e.message);
   }
 }
 
@@ -242,39 +278,117 @@ async function evaluateTradingSignal(lastPrice: number) {
 }
 
 // ==========================================
-// 5. فحص دفتر أوامر Limitless وتنفيذ أمر FAK فوري
+// 5. اكتشاف السوق النشط وتنفيذ الأوامر عبر MarketFetcher و OrderClient (SDK الرسمي)
 // ==========================================
+
+const limitlessHttp = new HttpClient({
+  baseURL: LIMITLESS_API_URL,
+});
+const marketFetcher = new MarketFetcher(limitlessHttp);
+
+let orderClient: OrderClient | null = null;
+if (LMTS_TOKEN_ID && LMTS_TOKEN_SECRET && !LMTS_TOKEN_ID.includes('ضع_رمز')) {
+  try {
+    const authHttp = new HttpClient({
+      baseURL: LIMITLESS_API_URL,
+      hmacCredentials: {
+        tokenId: LMTS_TOKEN_ID,
+        secret: LMTS_TOKEN_SECRET,
+      },
+    });
+    orderClient = new OrderClient({
+      httpClient: authHttp,
+      wallet,
+      marketFetcher,
+    });
+    console.log('⚡ تم تفعيل عميل OrderClient الموثق بـ HMAC Credentials بنجاح!');
+  } catch (err: any) {
+    console.warn('⚠️ تنبيه عند إعداد OrderClient:', err.message);
+  }
+}
+
+async function getLiveActiveBtcMarket(): Promise<{ slug: string; title: string }> {
+  try {
+    const { data: markets } = await marketFetcher.getActiveMarkets({
+      limit: 25,
+      page: 1,
+      sortBy: 'newest',
+    });
+
+    if (Array.isArray(markets) && markets.length > 0) {
+      const btc15m = markets.find(
+        (m: any) =>
+          m.slug.includes('btc') &&
+          (m.slug.includes('15-min') || m.title.includes('15 Min'))
+      );
+      const btc5m = markets.find(
+        (m: any) =>
+          m.slug.includes('btc') &&
+          (m.slug.includes('5-min') || m.title.includes('5 Min'))
+      );
+      const btcAny = markets.find((m: any) => m.slug.includes('btc'));
+
+      const chosen = btc15m || btc5m || btcAny;
+      if (chosen) {
+        return { slug: chosen.slug, title: chosen.title };
+      }
+    }
+  } catch (err: any) {
+    console.warn('⚠️ تنبيه أثناء جلب السوق عبر MarketFetcher:', err.message);
+  }
+
+  return { slug: ZSCORE_STRATEGY.marketSlug, title: 'BTC Up or Down 15m' };
+}
 
 async function checkAndExecuteLimitlessOrder(targetToken: 'YES' | 'NO', btcPrice: number, currentZScore: number) {
   if (isProcessingOrder) return;
   isProcessingOrder = true;
 
   try {
-    console.log(`📡 جاري الاستعلام من منصة Limitless عن أفضل سعر متاح لعقد ${targetToken} (إشارة Z-Score: ${currentZScore})...`);
+    console.log(`📡 جاري البحث عن سوق BTC نشط في Limitless عبر MarketFetcher (إشارة Z-Score: ${currentZScore})...`);
 
-    // استخدام أفضل سعر من بث Limitless WebSocket اللحظي أو الجلب المباشر
-    let bestAsk = latestLimitlessBestAsk;
-    if (bestAsk !== null) {
-      console.log(`⚡ [Limitless WS Live]: أفضل سعر لحظي من بث WebSocket المباشر: $${bestAsk}`);
-    } else {
-      const response = await fetch(`${LIMITLESS_API_URL}/markets/${ZSCORE_STRATEGY.marketSlug}/orderbook`);
-      if (!response.ok) {
-        console.log(`ℹ️ لم يتم العثور على دفتر أوامر مفتوح للعقد ${ZSCORE_STRATEGY.marketSlug} (رمز الحالة: ${response.status}).`);
-        return;
-      }
-      const orderbook = await response.json();
-      bestAsk = orderbook.asks?.[0]?.price || 0.18;
-      console.log(`💰 أفضل سعر بيع في دفتر الأوامر: $${bestAsk}`);
+    const activeMarket = await getLiveActiveBtcMarket();
+    console.log(`🎯 السوق النشط المستهدف: ${activeMarket.title} (${activeMarket.slug})`);
+
+    // 1. جلب بيانات السوق والرموز وعقد التسوية (Venue Caching)
+    const marketDetails = await marketFetcher.getMarket(activeMarket.slug).catch(() => null);
+    const venueExchange = marketDetails?.venue?.exchange || '0x05c748E2f4DcDe0ec9Fa8DDc40DE6b867f923fa5';
+    const yesTokenId = marketDetails?.tokens?.yes;
+    const noTokenId = marketDetails?.tokens?.no;
+    const selectedTokenId = targetToken === 'YES' ? yesTokenId : noTokenId;
+
+    // 2. جلب دفتر الأوامر عبر MarketFetcher
+    let bestAsk: number | null = null;
+    const orderbook = await marketFetcher.getOrderBook(activeMarket.slug).catch(() => null);
+
+    if (!orderbook) {
+      console.log(`ℹ️ لم يتم العثور على دفتر أوامر مفتوح للعقد ${activeMarket.slug}.`);
+      return;
     }
 
-    if (!bestAsk) {
-      console.log('⚠️ تعذر تحديد أفضل سعر بيع حالياً، تم تخطي الأمر لحماية رأس المال.');
+    // في عقود التنبؤ الثنائية (Binary Prediction):
+    // - لشراء YES: نأخذ أقل سعر بيع معروض لـ YES من orderbook.asks
+    // - لشراء NO: نأخذ (1 - أعلى طلب شراء لـ YES من orderbook.bids)
+    if (targetToken === 'YES') {
+      bestAsk = orderbook.asks?.[0]?.price || null;
+    } else {
+      if (orderbook.bids?.[0]?.price) {
+        bestAsk = Number((1.0 - orderbook.bids[0].price).toFixed(3));
+      } else {
+        bestAsk = orderbook.asks?.[0]?.price ? Number((1.0 - orderbook.asks[0].price).toFixed(3)) : null;
+      }
+    }
+
+    console.log(`💰 أفضل سعر متاح لشراء عقد ${targetToken}: $${bestAsk !== null ? bestAsk : 'غير متوفر'}`);
+
+    if (bestAsk === null || bestAsk <= 0) {
+      console.log('⚠️ تعذر تحديد أفضل سعر شراء حالياً، تم تخطي الأمر لحماية رأس المال.');
       return;
     }
 
     // شرط الاستراتيجية: الدخول فقط إذا كان السعر ≤ 0.20$
     if (bestAsk > ZSCORE_STRATEGY.maxEntryPrice) {
-      console.log(`⛔ [تجاوز السعر المسموح]: أفضل سعر متاح ($${bestAsk}) أكبر من الحد الأقصى ($${ZSCORE_STRATEGY.maxEntryPrice}). تم إلغاء الصفقة لحماية رأس المال.`);
+      console.log(`⛔ [سعر العقد مرتفع]: أفضل سعر متاح ($${bestAsk}) أعلى من سقف الاستراتيجية ($${ZSCORE_STRATEGY.maxEntryPrice}). تم الانتظار لحماية رأس المال واقتناص فرصة رخيصة.`);
       return;
     }
 
@@ -292,50 +406,81 @@ async function checkAndExecuteLimitlessOrder(targetToken: 'YES' | 'NO', btcPrice
     console.log(`   - العائد المتوقع: $${potentialPayout.toFixed(2)} USDC (+${((potentialPayout - totalCost) / totalCost * 100).toFixed(0)}% / مضاعف ${multiplier}x)`);
     console.log(`⚡ [نوع التنفيذ]: أمر FAK فوري (Fill-and-Kill) لخطف السيولة المتاحة`);
 
-    // إنشاء وتوقيع أمر EIP-712 بالمحفظة الحقيقية
-    console.log(`✍️ جاري التوقيع المشفر لأمر FAK بواسطة المحفظة (${wallet.address})...`);
+    // تنفيذ الأمر عبر OrderClient إذا كان مفعل بـ HMAC أو التوقيع المباشر
+    if (orderClient && selectedTokenId) {
+      console.log(`📤 تنفيذ الأمر عبر OrderClient الرسمي بـ Limitless SDK...`);
+      const result = await orderClient.createOrder({
+        marketSlug: activeMarket.slug,
+        tokenId: selectedTokenId,
+        side: Side.BUY,
+        price: bestAsk,
+        size: contractsCount,
+        orderType: OrderType.FAK,
+      });
+      console.log(`✅ تم تنفيذ الأمر بنجاح عبر SDK! معرف الأمر: ${result.order?.id || 'OK'}`);
+    } else {
+      // إنشاء وتوقيع أمر EIP-712 بالمحفظة الحقيقية مباشرة مع استخدام عقد التسوية الحقيقي المستخرج من Venue
+      console.log(`✍️ جاري التوقيع المشفر لأمر FAK بالمحفظة (${wallet.address}) على عقد Venue (${venueExchange})...`);
 
-    const domain = {
-      name: 'Limitless OrderBook',
-      version: '1',
-      chainId: 8453, // Base Mainnet
-      verifyingContract: '0x8b375b481077ea47d4a2336336a5a9bf681c2fe8',
-    };
+      const domain = {
+        name: 'Limitless OrderBook',
+        version: '1',
+        chainId: 8453, // Base Mainnet
+        verifyingContract: venueExchange,
+      };
 
-    const types = {
-      Order: [
-        { name: 'maker', type: 'address' },
-        { name: 'tokenId', type: 'uint256' },
-        { name: 'amount', type: 'uint256' },
-        { name: 'price', type: 'uint256' },
-        { name: 'side', type: 'uint8' },
-        { name: 'nonce', type: 'uint256' },
-        { name: 'deadline', type: 'uint256' },
-      ],
-    };
+      const types = {
+        Order: [
+          { name: 'maker', type: 'address' },
+          { name: 'tokenId', type: 'uint256' },
+          { name: 'amount', type: 'uint256' },
+          { name: 'price', type: 'uint256' },
+          { name: 'side', type: 'uint8' },
+          { name: 'nonce', type: 'uint256' },
+          { name: 'deadline', type: 'uint256' },
+        ],
+      };
 
-    const orderValue = {
-      maker: wallet.address,
-      tokenId: targetToken === 'YES' ? 1 : 2,
-      amount: ethers.parseUnits(String(contractsCount), 6),
-      price: ethers.parseUnits(String(bestAsk), 6),
-      side: 0, // BUY
-      nonce: Date.now(),
-      deadline: Math.floor(Date.now() / 1000) + 120, // صالح لمدة دقيقتين
-    };
+      const numericTokenId = selectedTokenId ? BigInt(selectedTokenId) : (targetToken === 'YES' ? 1n : 2n);
 
-    const signature = await wallet.signTypedData(domain, types, orderValue);
-    console.log(`🔐 تم إنشاء توقيع EIP-712 بنجاح: ${signature.substring(0, 20)}...`);
+      const orderValue = {
+        maker: wallet.address,
+        tokenId: numericTokenId,
+        amount: ethers.parseUnits(String(contractsCount), 6),
+        price: ethers.parseUnits(String(bestAsk), 6),
+        side: 0, // BUY
+        nonce: Date.now(),
+        deadline: Math.floor(Date.now() / 1000) + 120, // صالح لمدة دقيقتين
+      };
 
-    // إرسال الأمر الموثق إلى محرك مطابقة Limitless
-    console.log(`📤 إرسال الأمر الموثق إلى منصة Limitless...`);
+      const signature = await wallet.signTypedData(domain, types, orderValue);
+      console.log(`🔐 تم إنشاء توقيع EIP-712 بنجاح: ${signature.substring(0, 20)}...`);
 
-    // إرسال طلب POST
-    const orderPayload = {
-      order: orderValue,
-      signature,
-      orderType: 'FAK', // Fill and Kill
-    };
+      console.log(`📤 إرسال الأمر الموثق إلى محرك مطابقة Limitless...`);
+      const orderPayload = {
+        order: {
+          ...orderValue,
+          tokenId: orderValue.tokenId.toString(),
+          amount: orderValue.amount.toString(),
+          price: orderValue.price.toString(),
+        },
+        signature,
+        orderType: 'FAK',
+      };
+
+      const submitRes = await fetch(`${LIMITLESS_API_URL}/orders`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(orderPayload),
+      });
+
+      if (submitRes.ok) {
+        console.log('✅ تم إرسال الأمر وقبوله بنجاح في Limitless Match Engine!');
+      } else {
+        const errText = await submitRes.text();
+        console.warn(`ℹ️ استجابة محرك الأوامر (${submitRes.status}):`, errText);
+      }
+    }
 
     console.log('✅ تم إرسال الأمر بنجاح إلى Limitless Match Engine!');
   } catch (err: any) {
@@ -365,7 +510,8 @@ async function initAndStart() {
 
   // تشغيل المحرك المزدوج للبث المباشر (Binance WS + Limitless WS)
   startPriceFeed();          // 1. بث بينانس المباشر لأسعار BTC والشموع
-  startLimitlessWebSocket(); // 2. بث Limitless CLOB المباشر لدفتر الأوامر
+  const initialMarket = await getLiveActiveBtcMarket();
+  startLimitlessWebSocket(initialMarket.slug); // 2. بث Limitless WebSocket المباشر للسوق النشط
 }
 
 initAndStart();

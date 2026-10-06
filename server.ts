@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import { ethers } from 'ethers';
+import { HttpClient, MarketFetcher } from '@limitless-exchange/sdk';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -223,25 +224,84 @@ function calculateServerZScore(prices: number[], lookback: number = 20) {
   };
 }
 
+const serverLimitlessHttp = new HttpClient({
+  baseURL: process.env.LIMITLESS_API_URL || 'https://api.limitless.exchange',
+});
+const serverMarketFetcher = new MarketFetcher(serverLimitlessHttp);
+
+async function getServerActiveBtcMarket(): Promise<{ slug: string; title: string }> {
+  try {
+    const { data: markets } = await serverMarketFetcher.getActiveMarkets({
+      limit: 25,
+      page: 1,
+      sortBy: 'newest',
+    });
+
+    if (Array.isArray(markets) && markets.length > 0) {
+      const btc15m = markets.find(
+        (m: any) =>
+          m.slug.includes('btc') &&
+          (m.slug.includes('15-min') || m.title.includes('15 Min'))
+      );
+      const btc5m = markets.find(
+        (m: any) =>
+          m.slug.includes('btc') &&
+          (m.slug.includes('5-min') || m.title.includes('5 Min'))
+      );
+      const btcAny = markets.find((m: any) => m.slug.includes('btc'));
+
+      const chosen = btc15m || btc5m || btcAny;
+      if (chosen) {
+        return { slug: chosen.slug, title: chosen.title };
+      }
+    }
+  } catch (err: any) {
+    console.warn('⚠️ [Server Bot] تعذر جلب السوق عبر MarketFetcher:', err.message);
+  }
+
+  return { slug: ZSCORE_STRATEGY.marketSlug, title: 'BTC Up or Down 15m' };
+}
+
 async function executeLimitlessTrade(targetToken: 'YES' | 'NO', btcPrice: number, currentZScore: number) {
   if (!serverWallet || !isServerBotRunning) return;
 
   try {
-    console.log(`🤖 [Server Bot] فحص دفتر أوامر Limitless لشراء عقد ${targetToken} (Z-Score: ${currentZScore})...`);
-    const resp = await fetch(
-      `${process.env.LIMITLESS_API_URL || 'https://api.limitless.exchange'}/markets/${ZSCORE_STRATEGY.marketSlug}/orderbook`,
-      { signal: AbortSignal.timeout(4000) }
-    );
-    if (!resp.ok) {
-      currentWaitReason = `تعذر العثور على دفتر أوامر نشط للسوق (${ZSCORE_STRATEGY.marketSlug})`;
+    const activeMarket = await getServerActiveBtcMarket();
+    console.log(`🤖 [Server Bot] فحص السوق النشط (${activeMarket.title} - ${activeMarket.slug}) لشراء عقد ${targetToken} (Z-Score: ${currentZScore})...`);
+    
+    // 1. جلب بيانات السوق والـ Venue وعناوين العقود عبر MarketFetcher
+    const marketDetails = await serverMarketFetcher.getMarket(activeMarket.slug).catch(() => null);
+    const venueExchange = marketDetails?.venue?.exchange || '0x05c748E2f4DcDe0ec9Fa8DDc40DE6b867f923fa5';
+    const yesTokenId = marketDetails?.tokens?.yes;
+    const noTokenId = marketDetails?.tokens?.no;
+    const selectedTokenId = targetToken === 'YES' ? yesTokenId : noTokenId;
+
+    // 2. جلب دفتر الأوامر عبر MarketFetcher
+    const orderbook = await serverMarketFetcher.getOrderBook(activeMarket.slug).catch(() => null);
+    if (!orderbook) {
+      currentWaitReason = `تعذر العثور على دفتر أوامر نشط للسوق (${activeMarket.slug})`;
       return;
     }
 
-    const orderbook = await resp.json();
-    const bestAsk = orderbook.asks?.[0]?.price || 0.18;
+    let bestAsk: number | null = null;
+
+    if (targetToken === 'YES') {
+      bestAsk = orderbook.asks?.[0]?.price || null;
+    } else {
+      if (orderbook.bids?.[0]?.price) {
+        bestAsk = Number((1.0 - orderbook.bids[0].price).toFixed(3));
+      } else {
+        bestAsk = orderbook.asks?.[0]?.price ? Number((1.0 - orderbook.asks[0].price).toFixed(3)) : null;
+      }
+    }
+
+    if (bestAsk === null || bestAsk <= 0) {
+      currentWaitReason = `دفتر الأوامر غير متوفر لعقد ${targetToken} حالياً`;
+      return;
+    }
 
     if (bestAsk > ZSCORE_STRATEGY.maxEntryPrice) {
-      currentWaitReason = `أفضل سعر متاح في السوق ($${bestAsk}) أعلى من سقف الاستراتيجية ($${ZSCORE_STRATEGY.maxEntryPrice}). تم الانتظار لحماية رأس المال.`;
+      currentWaitReason = `أفضل سعر متاح لعقد ${targetToken} ($${bestAsk}) أعلى من سقف الاستراتيجية ($${ZSCORE_STRATEGY.maxEntryPrice}). تم الانتظار لاقتناص فرصة رخيصة.`;
       console.log(`⛔ [Server Bot] ${currentWaitReason}`);
       return;
     }
@@ -253,7 +313,7 @@ async function executeLimitlessTrade(targetToken: 'YES' | 'NO', btcPrice: number
       name: 'Limitless OrderBook',
       version: '1',
       chainId: 8453,
-      verifyingContract: '0x8b375b481077ea47d4a2336336a5a9bf681c2fe8',
+      verifyingContract: venueExchange,
     };
 
     const types = {
@@ -268,9 +328,11 @@ async function executeLimitlessTrade(targetToken: 'YES' | 'NO', btcPrice: number
       ],
     };
 
+    const numericTokenId = selectedTokenId ? BigInt(selectedTokenId) : (targetToken === 'YES' ? 1n : 2n);
+
     const orderValue = {
       maker: serverWallet.address,
-      tokenId: targetToken === 'YES' ? 1 : 2,
+      tokenId: numericTokenId,
       amount: ethers.parseUnits(String(contracts), 6),
       price: ethers.parseUnits(String(bestAsk), 6),
       side: 0,
@@ -279,7 +341,7 @@ async function executeLimitlessTrade(targetToken: 'YES' | 'NO', btcPrice: number
     };
 
     const signature = await serverWallet.signTypedData(domain, types, orderValue);
-    console.log(`✍️ [Server Bot] تم توقيع EIP-712 وإرسال الأمر إلى Limitless Matching Engine.`);
+    console.log(`✍️ [Server Bot] تم توقيع EIP-712 بنجاح على عقد Venue (${venueExchange}).`);
     currentWaitReason = `تم إرسال أمر شراء ${contracts} عقد ${targetToken} بنجاح!`;
 
     executedTradesLog.unshift({
@@ -454,7 +516,10 @@ async function startServer() {
   } else {
     console.log('⚡ تشغيل Vite Middleware في وضع التطوير');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: false,
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
