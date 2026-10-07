@@ -76,7 +76,7 @@ export default function App() {
     tradeSizeUsdc?: number;
   }>({
     running: true,
-    waitReason: 'في انتظار اكتمال شروط الاستراتيجية (Z-Score ≥ 2.0 أو ≤ -2.0) وسعر العقد ≤ 0.20$',
+    waitReason: 'في انتظار اكتمال شروط الاستراتيجية (Z-Score ≥ 0.50 أو ≤ -0.50) وسعر العقد ≤ 0.80$',
     tradeSizeUsdc: 8.0,
   });
 
@@ -559,7 +559,7 @@ export default function App() {
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                خطة التداول بالـ Z-Score فقط (Lookback: 20m • التركيز على 2.0 • الدخول &le; 0.20$ • أوامر FAK)
+                خطة التداول بالـ Z-Score فقط (Lookback: 20m • التركيز على 0.50 • الدخول &le; 0.80$ • أوامر FAK)
               </p>
             </div>
           </div>
@@ -573,14 +573,14 @@ export default function App() {
               </span>
             </div>
 
-            {/* مؤشر Z-Score السريع (التركيز على 2.0) */}
+            {/* مؤشر Z-Score السريع (التركيز على 0.50) */}
             <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800">
               <span className="text-slate-400 text-[10px]">Z-Score (20m):</span>
               <span
                 className={`font-mono font-bold text-xs ${
-                  currentSignal.zScore >= 2.0
+                  currentSignal.zScore >= 0.50
                     ? 'text-rose-400 animate-pulse font-extrabold'
-                    : currentSignal.zScore <= -2.0
+                    : currentSignal.zScore <= -0.50
                     ? 'text-emerald-400 animate-pulse font-extrabold'
                     : 'text-cyan-300'
                 }`}
@@ -601,9 +601,9 @@ export default function App() {
               />
               <span className="font-semibold text-slate-300">
                 {currentSignal.signal === 'OVERBOUGHT'
-                  ? 'إشارة هبوط (Z >= +2.0)'
+                  ? 'إشارة هبوط (Z >= +0.50)'
                   : currentSignal.signal === 'OVERSOLD'
-                  ? 'إشارة صعود (Z <= -2.0)'
+                  ? 'إشارة صعود (Z <= -0.50)'
                   : 'سوق محايد (Neutral)'}
               </span>
             </div>
@@ -713,7 +713,7 @@ export default function App() {
                   </div>
                   <p className="text-xs text-slate-300 mt-0.5">
                     {isBotRunning
-                      ? 'الروبوت يراقب بث أسعار بينانس ودفتر أوامر Limitless CLOB ويقتنص الفرص فور تحقق الشرط (≤ 0.20$).'
+                      ? 'الروبوت يراقب بث أسعار بينانس ودفتر أوامر Limitless CLOB ويقتنص الفرص فور تحقق الشرط (≤ 0.80$).'
                       : 'تم تعليق التداول التلقائي وإرسال الأوامر. يمكنك استئناف التشغيل في أي وقت.'}
                   </p>
                 </div>
@@ -766,7 +766,7 @@ export default function App() {
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs transition-all font-bold"
                 >
                   <TrendingUp className="w-3.5 h-3.5 text-rose-400" />
-                  <span>⚡ محاكاة قمة (Z-Score &ge; +2.0)</span>
+                  <span>⚡ محاكاة قمة (Z-Score &ge; +0.50)</span>
                 </button>
 
                 <button
@@ -774,7 +774,7 @@ export default function App() {
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs transition-all font-bold"
                 >
                   <TrendingDown className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>🚀 محاكاة قاع (Z-Score &le; -2.0)</span>
+                  <span>🚀 محاكاة قاع (Z-Score &le; -0.50)</span>
                 </button>
 
                 <button
@@ -791,9 +791,9 @@ export default function App() {
                 <button
                   onClick={toggleHighPrices}
                   className="px-2.5 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs transition-all"
-                  title="اختبار رفض الصفقة عند تجاوز سعر البيع 0.20$"
+                  title="اختبار رفض الصفقة عند تجاوز سعر البيع 0.80$"
                 >
-                  رفع السعر &gt; 0.20$ (اختبار الرفض)
+                  رفع السعر &gt; 0.80$ (اختبار الرفض)
                 </button>
               </div>
             </div>
@@ -825,9 +825,9 @@ export default function App() {
                       }`}
                     >
                       {currentSignal.signal === 'OVERBOUGHT'
-                        ? 'إشارة هبوط (Z >= +2.0)'
+                        ? 'إشارة هبوط (Z >= +0.50)'
                         : currentSignal.signal === 'OVERSOLD'
-                        ? 'إشارة صعود (Z <= -2.0)'
+                        ? 'إشارة صعود (Z <= -0.50)'
                         : 'حياد (NEUTRAL)'}
                     </span>
                   </h3>
@@ -852,7 +852,7 @@ export default function App() {
                     {latestReport.status === 'EXECUTED'
                       ? 'تم التنفيذ بنجاح'
                       : latestReport.status === 'PRICE_EXCEEDS_MAX'
-                      ? 'مرفوض: السعر > 0.20$'
+                      ? 'مرفوض: السعر > 0.80$'
                       : latestReport.status}
                   </span>
                   {latestReport.asymmetricMultiplier && (
@@ -942,7 +942,7 @@ export default function App() {
                               {log.status === 'EXECUTED'
                                 ? 'تم تنفيذ الأمر فورياً'
                                 : log.status === 'PRICE_EXCEEDS_MAX'
-                                ? 'إلغاء: السعر تجاوز 0.20$'
+                                ? 'إلغاء: السعر تجاوز 0.80$'
                                 : log.status}
                             </span>
                             {log.targetedToken && (
@@ -1001,7 +1001,7 @@ export default function App() {
         </div>
         <div className="flex items-center gap-4 text-slate-400">
           <span>الاستراتيجية: الارتداد المتوسط اللامتماثل</span>
-          <span>أقصى مخاطرة: &le; 0.20$ لكل عقد</span>
+          <span>أقصى مخاطرة: &le; 0.80$ لكل عقد</span>
         </div>
       </footer>
     </div>

@@ -46,14 +46,14 @@ try {
 const ZSCORE_STRATEGY = {
   marketSlug: 'btc-price-15m-now',
   lookbackPeriod: 20,         // نافذة الحساب: آخر 20 شمعة على فريم الدقيقة (1m)
-  upperThreshold: 2.0,        // إشارة هبوط إذا أصبح Z-Score >= +2.0 (انحراف معياري كامل 2x)
-  lowerThreshold: -2.0,       // إشارة صعود إذا أصبح Z-Score <= -2.0 (انحراف معياري كامل -2x)
-  maxEntryPrice: Number(process.env.MAX_ENTRY_PRICE) || 0.20, // سقف السعر اللامتماثل (حتى 0.20$ لعائد 5 أضعاف)
+  upperThreshold: 0.50,       // إشارة هبوط إذا أصبح Z-Score >= +0.50 (حساسية عالية لاقتناص الإشارات)
+  lowerThreshold: -0.50,      // إشارة صعود إذا أصبح Z-Score <= -0.50 (حساسية عالية لاقتناص الإشارات)
+  maxEntryPrice: Number(process.env.MAX_ENTRY_PRICE) || 0.80, // سقف سعر الدخول (حتى 0.80$)
   riskPercent: 1.0,           // نسبة المخاطرة للصفقة: 1% من رأس المال
   tradeSizeUsdc: Number(process.env.TRADE_SIZE_USDC) || 8.0,  // ميزانية كل صفقة بالدولار USDC
 };
 
-console.log(`📊 الاستراتيجية الحالية: خطة التداول بالـ Z-Score فقط (التركيز على 2.0)`);
+console.log(`📊 الاستراتيجية الحالية: خطة التداول بالـ Z-Score فقط (التركيز على 0.50)`);
 console.log(`⏱️ نافذة الحساب (Lookback Window): آخر ${ZSCORE_STRATEGY.lookbackPeriod} شمعة على فريم الدقيقة (1m)`);
 console.log(`📉 إشارة هبوط: Z-Score >= +${ZSCORE_STRATEGY.upperThreshold} -> شراء عقد NO (القمة) بسعر ≤ $${ZSCORE_STRATEGY.maxEntryPrice}`);
 console.log(`📈 إشارة صعود: Z-Score <= ${ZSCORE_STRATEGY.lowerThreshold} -> شراء عقد YES (الارتداد) بسعر ≤ $${ZSCORE_STRATEGY.maxEntryPrice}`);
@@ -262,19 +262,19 @@ async function evaluateTradingSignal(lastPrice: number) {
 
   console.log(`🔍 [فحص Z-Score]: السعر=$${lastPrice.toLocaleString()} | المتوسط(20m)=$${mean.toLocaleString()} | الانحراف=$${stdDev} | Z-Score=${zScore > 0 ? '+' : ''}${zScore}`);
 
-  // 1. إشارة هبوط: إذا أصبح Z-Score >= +2.0
-  // ابحث فوراً في Limitless عن عقد يراهن على الهبوط (عقد NO للقمة) بسعر ≤ 0.20$
+  // 1. إشارة هبوط: إذا أصبح Z-Score >= +0.50
+  // ابحث فوراً في Limitless عن عقد يراهن على الهبوط (عقد NO للقمة) بسعر ≤ 0.80$
   if (zScore >= ZSCORE_STRATEGY.upperThreshold) {
     console.log(`🚨 [إشارة هبوط Z-Score!]: القيمة = +${zScore} (تجاوزت سقف +${ZSCORE_STRATEGY.upperThreshold}). السعر متضخم فوق قمة 20 دقيقة. الهدف: شراء عقد NO للقمة بسعر ≤ $${ZSCORE_STRATEGY.maxEntryPrice} عبر أمر FAK.`);
     await checkAndExecuteLimitlessOrder('NO', lastPrice, zScore);
   }
-  // 2. إشارة صعود: إذا أصبح Z-Score <= -2.0
-  // ابحث فوراً عن عقد يراهن على الصعود (عقد YES للارتداد) بسعر ≤ 0.20$
+  // 2. إشارة صعود: إذا أصبح Z-Score <= -0.50
+  // ابحث فوراً عن عقد يراهن على الصعود (عقد YES للارتداد) بسعر ≤ 0.80$
   else if (zScore <= ZSCORE_STRATEGY.lowerThreshold) {
     console.log(`🚨 [إشارة صعود Z-Score!]: القيمة = ${zScore} (كسرت قاع ${ZSCORE_STRATEGY.lowerThreshold}). السعر انهار تحت قاع 20 دقيقة. الهدف: شراء عقد YES للارتداد بسعر ≤ $${ZSCORE_STRATEGY.maxEntryPrice} عبر أمر FAK.`);
     await checkAndExecuteLimitlessOrder('YES', lastPrice, zScore);
   } else {
-    console.log(`⚖️ [Z-Score محايد]: القيمة = ${zScore > 0 ? '+' : ''}${zScore} ضمن النطاق الطبيعي [${ZSCORE_STRATEGY.lowerThreshold} إلى +${ZSCORE_STRATEGY.upperThreshold}]. في انتظار اختراق العتبة 2.0.`);
+    console.log(`⚖️ [Z-Score محايد]: القيمة = ${zScore > 0 ? '+' : ''}${zScore} ضمن النطاق الطبيعي [${ZSCORE_STRATEGY.lowerThreshold} إلى +${ZSCORE_STRATEGY.upperThreshold}]. في انتظار اختراق العتبة 0.50.`);
   }
 }
 

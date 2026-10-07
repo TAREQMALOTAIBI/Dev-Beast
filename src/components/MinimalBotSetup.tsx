@@ -56,9 +56,9 @@ const CREDENTIALS = {
 const CONFIG = {
   marketSlug: 'btc-price-15m-now',
   lookback: 20,         // نافذة الحساب: آخر 20 شمعة على فريم الدقيقة (1m)
-  upperZScore: 2.0,     // إشارة هبوط: Z-Score >= +2.0 (تركيز كامل على 2.0)
-  lowerZScore: -2.0,    // إشارة صعود: Z-Score <= -2.0 (تركيز كامل على -2.0)
-  maxEntryPrice: ${config.maxEntryPrice}, // سقف السعر: عقود ≤ 0.20$
+  upperZScore: 0.50,    // إشارة هبوط: Z-Score >= +0.50 (حساسية عالية لاقتناص الإشارات)
+  lowerZScore: -0.50,   // إشارة صعود: Z-Score <= -0.50 (حساسية عالية لاقتناص الإشارات)
+  maxEntryPrice: ${config.maxEntryPrice}, // سقف السعر: عقود ≤ 0.80$
   tradeSizeUsdc: ${config.tradeSizeUsdc},  // ميزانية الصفقة بالدولار
 };
 
@@ -126,16 +126,16 @@ async function run() {
     if (candleCloses.length < CONFIG.lookback) return; // انتظار اكتمال 20 شمعة
 
     const bestAsk = data.orderbook.asks[0]?.price;
-    // شرط السعر: الدخول فقط إذا كان السعر ≤ 0.20$
+    // شرط السعر: الدخول فقط إذا كان السعر ≤ 0.80$
     if (!bestAsk || bestAsk > CONFIG.maxEntryPrice) return;
 
     // حساب الـ Z-Score اللحظي
     const { zScore } = computeZScore(candleCloses, CONFIG.lookback);
 
     let targetSide: 'YES' | 'NO' | null = null;
-    // إشارة هبوط: Z-Score >= +2.0 -> شراء عقد NO (القمة)
+    // إشارة هبوط: Z-Score >= +0.50 -> شراء عقد NO (القمة)
     if (zScore >= CONFIG.upperZScore) targetSide = 'NO';
-    // إشارة صعود: Z-Score <= -2.0 -> شراء عقد YES (الارتداد)
+    // إشارة صعود: Z-Score <= -0.50 -> شراء عقد YES (الارتداد)
     if (zScore <= CONFIG.lowerZScore) targetSide = 'YES';
 
     if (!targetSide) return;
@@ -202,7 +202,7 @@ run();`;
               </span>
             </h2>
             <p className="text-xs text-slate-300">
-              يستقبل أسعار شموع البيتكوين مباشرة من بينانس بدون قيود جغرافية، ويصطاد عروض أسعار ليمتلس &le; 0.20$ في اللحظة نفسها.
+              يستقبل أسعار شموع البيتكوين مباشرة من بينانس بدون قيود جغرافية، ويصطاد عروض أسعار ليمتلس &le; 0.80$ في اللحظة نفسها.
             </p>
           </div>
         </div>
@@ -318,14 +318,14 @@ run();`;
             <input
               type="range"
               min="0.05"
-              max="0.30"
+              max="0.95"
               step="0.01"
               value={config.maxEntryPrice}
               onChange={(e) => onUpdateConfig({ ...config, maxEntryPrice: parseFloat(e.target.value) })}
               className="w-full accent-cyan-500 cursor-pointer"
             />
             <p className="text-[11px] text-slate-400">
-              قاعدة عدم التماثل: الشراء بسعر &le; 0.20$ يضمن عائداً 5.0x (+400%). إذا كان السعر أعلى، يُلغى الأمر فورياً.
+              سقف السعر: الدخول في صفقات بأسعار &le; 0.80$ يقتنص الفرص فوراً. إذا كان السعر أعلى، يُلغى الأمر لحماية رأس المال.
             </p>
           </div>
 

@@ -9,8 +9,8 @@
  * 4. قيمة Z-Score: (السعر الحالي - المتوسط) / الانحراف المعياري.
  * 
  * شروط الدخول:
- * - إشارة هبوط: Z-Score > +1.8 أو +2.0 -> استهداف عقد يراهن على الهبوط (عقد NO للقمة) بسعر ≤ 0.20$.
- * - إشارة صعود: Z-Score < -1.8 أو -2.0 -> استهداف عقد يراهن على الصعود (عقد YES للقاع) بسعر ≤ 0.20$.
+ * - إشارة هبوط: Z-Score >= +0.50 -> استهداف عقد يراهن على الهبوط (عقد NO للقمة) بسعر ≤ 0.80$.
+ * - إشارة صعود: Z-Score <= -0.50 -> استهداف عقد يراهن على الصعود (عقد YES للقاع) بسعر ≤ 0.80$.
  */
 
 import { BollingerBands, RSI } from 'technicalindicators';
@@ -73,8 +73,8 @@ export function checkMeanReversionSignal(
   config: BotConfig
 ): SignalEvaluation {
   const lookbackPeriod = config.zScore?.period || 20; // 20 شمعة على فريم الدقيقة
-  const upperThreshold = config.zScore?.upperThreshold || 2.0; // التركيز على +2.0
-  const lowerThreshold = config.zScore?.lowerThreshold || -2.0; // التركيز على -2.0
+  const upperThreshold = config.zScore?.upperThreshold !== undefined ? config.zScore.upperThreshold : 0.50; // التركيز على +0.50
+  const lowerThreshold = config.zScore?.lowerThreshold !== undefined ? config.zScore.lowerThreshold : -0.50; // التركيز على -0.50
 
   // التحقق من كفاية بيانات الشموع (20 شمعة على الأقل)
   if (!candles || candles.length < lookbackPeriod) {
@@ -119,12 +119,12 @@ export function checkMeanReversionSignal(
   // شروط الدخول بالـ Z-Score فقط
   // ==========================================
 
-  // 1. إشارة هبوط: إذا أصبح Z-Score > +1.8 أو +2.0
-  // السعر تضخم إحصائياً بأكثر من 1.8 انحراف معياري فوق المتوسط -> استهداف عقد NO للقمة (مراهنة على الهبوط)
+  // 1. إشارة هبوط: إذا أصبح Z-Score >= +0.50
+  // السعر تضخم إحصائياً بأكثر من 0.50 انحراف معياري فوق المتوسط -> استهداف عقد NO للقمة (مراهنة على الهبوط)
   const isOverbought = zScore >= upperThreshold;
 
-  // 2. إشارة صعود: إذا أصبح Z-Score < -1.8 أو -2.0
-  // السعر انهار إحصائياً بأكثر من 1.8 انحراف معياري تحت المتوسط -> استهداف عقد YES للقاع (مراهنة على الصعود والارتداد)
+  // 2. إشارة صعود: إذا أصبح Z-Score <= -0.50
+  // السعر انهار إحصائياً بأكثر من 0.50 انحراف معياري تحت المتوسط -> استهداف عقد YES للقاع (مراهنة على الصعود والارتداد)
   const isOversold = zScore <= lowerThreshold;
 
   if (isOverbought) {
@@ -138,8 +138,8 @@ export function checkMeanReversionSignal(
       bollingerBands,
       isOverbought: true,
       isOversold: false,
-      explanationArabic: `🚨 [إشارة هبوط Z-Score]: القيمة الحالية = +${zScore} (تجاوزت سقف +${upperThreshold}). السعر ($${currentPrice.toLocaleString()}) أعلى من متوسط 20 دقيقة ($${mean.toLocaleString()}). الهدف: شراء عقد NO للقمة بسعر ≤ 0.20$ عبر أمر FAK فوراً.`,
-      explanationEnglish: `Bearish Z-Score Trigger! Z = +${zScore} (>= +${upperThreshold}). Price is ${zScore} standard deviations above 20m mean ($${mean}). Target: NO contract <= $0.20 via immediate FAK order.`,
+      explanationArabic: `🚨 [إشارة هبوط Z-Score]: القيمة الحالية = +${zScore} (تجاوزت سقف +${upperThreshold}). السعر ($${currentPrice.toLocaleString()}) أعلى من متوسط 20 دقيقة ($${mean.toLocaleString()}). الهدف: شراء عقد NO للقمة بسعر ≤ 0.80$ عبر أمر FAK فوراً.`,
+      explanationEnglish: `Bearish Z-Score Trigger! Z = +${zScore} (>= +${upperThreshold}). Price is ${zScore} standard deviations above 20m mean ($${mean}). Target: NO contract <= $0.80 via immediate FAK order.`,
       evaluatedAt: Date.now(),
     };
   }
@@ -155,8 +155,8 @@ export function checkMeanReversionSignal(
       bollingerBands,
       isOverbought: false,
       isOversold: true,
-      explanationArabic: `🚨 [إشارة صعود Z-Score]: القيمة الحالية = ${zScore} (كسرت قاع ${lowerThreshold}). السعر ($${currentPrice.toLocaleString()}) أدنى من متوسط 20 دقيقة ($${mean.toLocaleString()}). الهدف: شراء عقد YES للارتداد بسعر ≤ 0.20$ عبر أمر FAK فوراً.`,
-      explanationEnglish: `Bullish Z-Score Trigger! Z = ${zScore} (<= ${lowerThreshold}). Price is ${Math.abs(zScore)} standard deviations below 20m mean ($${mean}). Target: YES contract <= $0.20 via immediate FAK order.`,
+      explanationArabic: `🚨 [إشارة صعود Z-Score]: القيمة الحالية = ${zScore} (كسرت قاع ${lowerThreshold}). السعر ($${currentPrice.toLocaleString()}) أدنى من متوسط 20 دقيقة ($${mean.toLocaleString()}). الهدف: شراء عقد YES للارتداد بسعر ≤ 0.80$ عبر أمر FAK فوراً.`,
+      explanationEnglish: `Bullish Z-Score Trigger! Z = ${zScore} (<= ${lowerThreshold}). Price is ${Math.abs(zScore)} standard deviations below 20m mean ($${mean}). Target: YES contract <= $0.80 via immediate FAK order.`,
       evaluatedAt: Date.now(),
     };
   }

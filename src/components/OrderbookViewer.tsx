@@ -80,7 +80,7 @@ export const OrderbookViewer: React.FC<OrderbookViewerProps> = ({
                 : `أفضل عرض بيع ($${bestAsk?.price.toFixed(2) || 'N/A'}) يتجاوز الحد الأقصى $${maxEntryPrice.toFixed(2)}`}
             </span>
             <p className="text-[11px] text-slate-400">
-              القاعدة 1: يتم التنفيذ فقط عندما يكون سعر البيع &le; ${maxEntryPrice.toFixed(2)} لضمان عائد &ge; 5 أضعاف (+400%).
+              شرط السعر: يتم التنفيذ فقط عندما يكون سعر الشراء &le; ${maxEntryPrice.toFixed(2)} لحماية رأس المال.
             </p>
           </div>
         </div>

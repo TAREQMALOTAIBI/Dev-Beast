@@ -57,8 +57,8 @@ export async function executeAsymmetricMeanReversion(
   }
 
   // الخطوة 4: تحديد رمز العقد المستهدف (Contract Selection بناءً على Z-Score)
-  // - إشارة هبوط (Z-Score > +1.8 أو +2.0): السعر تضخم فوق قمة 20 دقيقة؛ نشتري عقد "NO" للمراهنة على الهبوط.
-  // - إشارة صعود (Z-Score < -1.8 أو -2.0): السعر انهار تحت قاع 20 دقيقة؛ نشتري عقد "YES" للمراهنة على الصعود والارتداد.
+  // - إشارة هبوط (Z-Score >= +0.50): السعر تضخم فوق قمة 20 دقيقة؛ نشتري عقد "NO" للمراهنة على الهبوط.
+  // - إشارة صعود (Z-Score <= -0.50): السعر انهار تحت قاع 20 دقيقة؛ نشتري عقد "YES" للمراهنة على الصعود والارتداد.
   let targetTokenType: ContractTokenType;
   let targetTokenId: string;
 
@@ -89,7 +89,7 @@ export async function executeAsymmetricMeanReversion(
     };
   }
 
-  // الخطوة 7: تطبيق قاعدة عدم التماثل الصارمة (Max Entry Price <= $0.20)
+  // الخطوة 7: تطبيق سقف سعر الدخول (Max Entry Price <= $0.80)
   const validAsks = sdk.filterAsymmetricAsks(orderbook, config.maxEntryPrice);
   const bestAsk = orderbook.asks.length > 0 ? orderbook.asks[0] : null;
 
