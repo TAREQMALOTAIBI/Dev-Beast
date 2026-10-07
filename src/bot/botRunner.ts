@@ -48,16 +48,16 @@ const ZSCORE_STRATEGY = {
   lookbackPeriod: 20,         // نافذة الحساب: آخر 20 شمعة على فريم الدقيقة (1m)
   upperThreshold: 2.0,        // إشارة هبوط إذا أصبح Z-Score >= +2.0 (انحراف معياري كامل 2x)
   lowerThreshold: -2.0,       // إشارة صعود إذا أصبح Z-Score <= -2.0 (انحراف معياري كامل -2x)
-  maxEntryPrice: 0.20,        // سقف السعر اللامتماثل: عقد بسعر ≤ 0.20$
-  riskPercent: 1.0,           // نسبة المخاطرة للصفقة: 1% من رأس المال (بدلاً من 0.50%)
-  tradeSizeUsdc: 8.0,         // ميزانية كل صفقة بالدولار USDC (1% من المحفظة)
+  maxEntryPrice: Number(process.env.MAX_ENTRY_PRICE) || 0.20, // سقف السعر اللامتماثل (حتى 0.20$ لعائد 5 أضعاف)
+  riskPercent: 1.0,           // نسبة المخاطرة للصفقة: 1% من رأس المال
+  tradeSizeUsdc: Number(process.env.TRADE_SIZE_USDC) || 8.0,  // ميزانية كل صفقة بالدولار USDC
 };
 
 console.log(`📊 الاستراتيجية الحالية: خطة التداول بالـ Z-Score فقط (التركيز على 2.0)`);
 console.log(`⏱️ نافذة الحساب (Lookback Window): آخر ${ZSCORE_STRATEGY.lookbackPeriod} شمعة على فريم الدقيقة (1m)`);
 console.log(`📉 إشارة هبوط: Z-Score >= +${ZSCORE_STRATEGY.upperThreshold} -> شراء عقد NO (القمة) بسعر ≤ $${ZSCORE_STRATEGY.maxEntryPrice}`);
 console.log(`📈 إشارة صعود: Z-Score <= ${ZSCORE_STRATEGY.lowerThreshold} -> شراء عقد YES (الارتداد) بسعر ≤ $${ZSCORE_STRATEGY.maxEntryPrice}`);
-console.log(`⚡ التنفيذ: أمر FAK فوري لخطف السيولة | نسبة الصفقة: ${ZSCORE_STRATEGY.riskPercent}% | حجم الصفقة: $${ZSCORE_STRATEGY.tradeSizeUsdc} USDC`);
+console.log(`⚡ التنفيذ: أمر FAK فوري لخطف السيولة | سقف الدخول: $${ZSCORE_STRATEGY.maxEntryPrice} | حجم الصفقة: $${ZSCORE_STRATEGY.tradeSizeUsdc} USDC`);
 console.log('----------------------------------------------------');
 
 // أسعار إغلاق الشموع الحية
@@ -393,8 +393,13 @@ async function checkAndExecuteLimitlessOrder(targetToken: 'YES' | 'NO', btcPrice
       return;
     }
 
-    const contractsCount = Math.floor(ZSCORE_STRATEGY.tradeSizeUsdc / bestAsk);
-    const totalCost = contractsCount * bestAsk;
+    // دعم تجزئة العقود والكسور العشرية بدقة (Fractional Contracts)
+    const contractsCount = Number((ZSCORE_STRATEGY.tradeSizeUsdc / bestAsk).toFixed(2));
+    if (contractsCount <= 0) {
+      console.log('⚠️ حجم العقد بعد التجزئة أصغر من الحد المسموح، تم تخطي الأمر.');
+      return;
+    }
+    const totalCost = Number((contractsCount * bestAsk).toFixed(2));
     const potentialPayout = contractsCount * 1.0;
     const multiplier = (1.0 / bestAsk).toFixed(1);
 
