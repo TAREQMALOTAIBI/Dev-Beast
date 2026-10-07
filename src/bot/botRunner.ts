@@ -117,6 +117,8 @@ async function startPriceFeed() {
       console.log('🟢 متصل ببث بينانس الحي (BTC/USDT 1m). مراقبة مستمرة للأسعار وإغلاق الشموع...');
     });
 
+    let lastEvaluatedTime = 0;
+
     ws.on('message', async (raw: string) => {
       try {
         const payload = JSON.parse(raw);
@@ -125,6 +127,7 @@ async function startPriceFeed() {
         const kline = payload.k;
         const currentPrice = parseFloat(kline.c);
         const isClosed = kline.x; // هل اكتمل إغلاق شمعة الدقيقة؟
+        const now = Date.now();
 
         if (isClosed) {
           candleCloses.push(currentPrice);
@@ -132,6 +135,11 @@ async function startPriceFeed() {
 
           console.log(`📈 إغلاق شمعة دقيقة: $${currentPrice.toLocaleString()} | إجمالي الشموع في الذاكرة: ${candleCloses.length}`);
           await evaluateTradingSignal(currentPrice);
+          lastEvaluatedTime = now;
+        } else if (now - lastEvaluatedTime >= 2000 && candleCloses.length >= ZSCORE_STRATEGY.lookbackPeriod) {
+          // فحص الإشارات اللحظية كل ثانيتين أثناء حركة السعر
+          await evaluateTradingSignal(currentPrice);
+          lastEvaluatedTime = now;
         }
       } catch (err: any) {
         // تجاهل أخطاء التحليل الفردية
@@ -308,37 +316,39 @@ if (LMTS_TOKEN_ID && LMTS_TOKEN_SECRET && !LMTS_TOKEN_ID.includes('ضع_رمز')
   }
 }
 
-async function getLiveActiveBtcMarket(): Promise<{ slug: string; title: string }> {
+// ==========================================
+// 5. اكتشاف سوق BTC 15 دقيقة النشط حصرياً وفحص دفتر الأوامر وتنفيذ أمر FAK فوري
+// ==========================================
+
+async function getLiveActiveBtc15mMarket(): Promise<any | null> {
   try {
-    const { data: markets } = await marketFetcher.getActiveMarkets({
-      limit: 25,
-      page: 1,
-      sortBy: 'newest',
-    });
+    for (let page = 1; page <= 3; page++) {
+      const res = await marketFetcher.getActiveMarkets({
+        limit: 25,
+        page,
+        sortBy: 'newest',
+      }).catch(() => null);
 
-    if (Array.isArray(markets) && markets.length > 0) {
-      const btc15m = markets.find(
-        (m: any) =>
-          m.slug.includes('btc') &&
-          (m.slug.includes('15-min') || m.title.includes('15 Min'))
-      );
-      const btc5m = markets.find(
-        (m: any) =>
-          m.slug.includes('btc') &&
-          (m.slug.includes('5-min') || m.title.includes('5 Min'))
-      );
-      const btcAny = markets.find((m: any) => m.slug.includes('btc'));
+      if (res && Array.isArray(res.data) && res.data.length > 0) {
+        // البحث عن سوق البيتكوين 15 دقيقة النشط وغير المنتهي
+        const btc15m = res.data.filter(
+          (m: any) =>
+            !m.closed &&
+            !m.expired &&
+            (m.slug.includes('btc') || m.title.toLowerCase().includes('btc')) &&
+            (m.slug.includes('15-min') || m.title.includes('15 Min') || m.title.includes('15m'))
+        );
 
-      const chosen = btc15m || btc5m || btcAny;
-      if (chosen) {
-        return { slug: chosen.slug, title: chosen.title };
+        if (btc15m.length > 0) {
+          return btc15m[0];
+        }
       }
     }
   } catch (err: any) {
-    console.warn('⚠️ تنبيه أثناء جلب السوق عبر MarketFetcher:', err.message);
+    console.warn('⚠️ تنبيه أثناء جلب سوق BTC 15m عبر MarketFetcher:', err.message);
   }
 
-  return { slug: ZSCORE_STRATEGY.marketSlug, title: 'BTC Up or Down 15m' };
+  return null;
 }
 
 async function checkAndExecuteLimitlessOrder(targetToken: 'YES' | 'NO', btcPrice: number, currentZScore: number) {
@@ -346,54 +356,55 @@ async function checkAndExecuteLimitlessOrder(targetToken: 'YES' | 'NO', btcPrice
   isProcessingOrder = true;
 
   try {
-    console.log(`📡 جاري البحث عن سوق BTC نشط في Limitless عبر MarketFetcher (إشارة Z-Score: ${currentZScore})...`);
+    console.log(`📡 [سوق BTC 15 دقيقة] جاري فحص دفتر أوامر عقد 15m لشراء ${targetToken} (إشارة Z-Score: ${currentZScore})...`);
 
-    const activeMarket = await getLiveActiveBtcMarket();
-    console.log(`🎯 السوق النشط المستهدف: ${activeMarket.title} (${activeMarket.slug})`);
-
-    // 1. جلب بيانات السوق والرموز وعقد التسوية (Venue Caching)
-    const marketDetails = await marketFetcher.getMarket(activeMarket.slug).catch(() => null);
-    const venueExchange = marketDetails?.venue?.exchange || '0x05c748E2f4DcDe0ec9Fa8DDc40DE6b867f923fa5';
-    const yesTokenId = marketDetails?.tokens?.yes;
-    const noTokenId = marketDetails?.tokens?.no;
-    const selectedTokenId = targetToken === 'YES' ? yesTokenId : noTokenId;
-
-    // 2. جلب دفتر الأوامر عبر MarketFetcher
-    let bestAsk: number | null = null;
-    const orderbook = await marketFetcher.getOrderBook(activeMarket.slug).catch(() => null);
-
-    if (!orderbook) {
-      console.log(`ℹ️ لم يتم العثور على دفتر أوامر مفتوح للعقد ${activeMarket.slug}.`);
+    const activeMarket = await getLiveActiveBtc15mMarket();
+    if (!activeMarket) {
+      console.log('ℹ️ لم يتم العثور على سوق BTC 15 دقيقة نشط حالياً على Limitless.');
       return;
     }
 
-    // في عقود التنبؤ الثنائية (Binary Prediction):
-    // - لشراء YES: نأخذ أقل سعر بيع معروض لـ YES من orderbook.asks
-    // - لشراء NO: نأخذ (1 - أعلى طلب شراء لـ YES من orderbook.bids)
+    console.log(`🎯 السوق المستهدف: ${activeMarket.title} (${activeMarket.slug})`);
+
+    // 1. جلب دفتر الأوامر الخاص بسوق الـ 15 دقيقة
+    const orderbook = await marketFetcher.getOrderBook(activeMarket.slug).catch(() => null);
+    if (!orderbook) {
+      console.log(`ℹ️ لم يتم العثور على دفتر أوامر مفتوح لسوق (${activeMarket.slug}).`);
+      return;
+    }
+
+    let bestAsk: number | null = null;
     if (targetToken === 'YES') {
       bestAsk = orderbook.asks?.[0]?.price || null;
     } else {
       if (orderbook.bids?.[0]?.price) {
         bestAsk = Number((1.0 - orderbook.bids[0].price).toFixed(3));
-      } else {
-        bestAsk = orderbook.asks?.[0]?.price ? Number((1.0 - orderbook.asks[0].price).toFixed(3)) : null;
+      } else if (orderbook.asks?.[0]?.price) {
+        bestAsk = Number((1.0 - orderbook.asks[0].price).toFixed(3));
       }
     }
 
-    console.log(`💰 أفضل سعر متاح لشراء عقد ${targetToken}: $${bestAsk !== null ? bestAsk : 'غير متوفر'}`);
+    console.log(`💰 [سوق BTC 15m] أفضل سعر متاح لشراء عقد ${targetToken}: $${bestAsk !== null ? bestAsk : 'غير متوفر'} (سقف الدخول: $${ZSCORE_STRATEGY.maxEntryPrice})`);
 
     if (bestAsk === null || bestAsk <= 0) {
       console.log('⚠️ تعذر تحديد أفضل سعر شراء حالياً، تم تخطي الأمر لحماية رأس المال.');
       return;
     }
 
-    // شرط الاستراتيجية: الدخول فقط إذا كان السعر ≤ 0.20$
+    // شرط السعر: الدخول فقط إذا كان السعر ≤ 0.80$
     if (bestAsk > ZSCORE_STRATEGY.maxEntryPrice) {
-      console.log(`⛔ [سعر العقد مرتفع]: أفضل سعر متاح ($${bestAsk}) أعلى من سقف الاستراتيجية ($${ZSCORE_STRATEGY.maxEntryPrice}). تم الانتظار لحماية رأس المال واقتناص فرصة رخيصة.`);
+      console.log(`⛔ [سعر العقد مرتفع في سوق 15m]: السعر المتاح ($${bestAsk}) أعلى من سقف الاستراتيجية ($${ZSCORE_STRATEGY.maxEntryPrice}). تم الانتظار لاقتناص فرصة رخيصة.`);
       return;
     }
 
-    // دعم تجزئة العقود والكسور العشرية بدقة (Fractional Contracts)
+    // 2. جلب بيانات السوق وعقد التسوية (Venue)
+    const marketDetails = await marketFetcher.getMarket(activeMarket.slug).catch(() => null);
+    const venueExchange = marketDetails?.venue?.exchange || activeMarket.venue?.exchange || '0x05c748E2f4DcDe0ec9Fa8DDc40DE6b867f923fa5';
+    const yesTokenId = marketDetails?.tokens?.yes || activeMarket.tokens?.yes;
+    const noTokenId = marketDetails?.tokens?.no || activeMarket.tokens?.no;
+    const selectedTokenId = targetToken === 'YES' ? yesTokenId : noTokenId;
+
+    // دعم تجزئة العقود والكسور بدقة (Fractional Contracts)
     const contractsCount = Number((ZSCORE_STRATEGY.tradeSizeUsdc / bestAsk).toFixed(2));
     if (contractsCount <= 0) {
       console.log('⚠️ حجم العقد بعد التجزئة أصغر من الحد المسموح، تم تخطي الأمر.');
@@ -403,16 +414,17 @@ async function checkAndExecuteLimitlessOrder(targetToken: 'YES' | 'NO', btcPrice
     const potentialPayout = contractsCount * 1.0;
     const multiplier = (1.0 / bestAsk).toFixed(1);
 
-    console.log(`🚀 [فرصة Z-Score مؤهلة]: تم استيفاء جميع الشروط!`);
+    console.log(`🚀 [فرصة Z-Score مؤهلة في سوق BTC 15m]: تم استيفاء جميع الشروط!`);
+    console.log(`   - السوق: ${activeMarket.title} (${activeMarket.slug})`);
     console.log(`   - نوع العقد: ${targetToken} (${targetToken === 'NO' ? 'مراهنة على الهبوط من القمة' : 'مراهنة على الصعود والارتداد'})`);
     console.log(`   - قيمة Z-Score: ${currentZScore}`);
     console.log(`   - السعر: $${bestAsk} (أقل من الحد $${ZSCORE_STRATEGY.maxEntryPrice})`);
     console.log(`   - الكمية: ${contractsCount} عقد`);
     console.log(`   - التكلفة الإجمالية: $${totalCost.toFixed(2)} USDC`);
     console.log(`   - العائد المتوقع: $${potentialPayout.toFixed(2)} USDC (+${((potentialPayout - totalCost) / totalCost * 100).toFixed(0)}% / مضاعف ${multiplier}x)`);
-    console.log(`⚡ [نوع التنفيذ]: أمر FAK فوري (Fill-and-Kill) لخطف السيولة المتاحة`);
+    console.log(`⚡ [نوع التنفيذ]: أمر FAK فوري (Fill-and-Kill) لخطف السيولة`);
 
-    // تنفيذ الأمر عبر OrderClient إذا كان مفعل بـ HMAC أو التوقيع المباشر
+    // تنفيذ الأمر عبر OrderClient إذا كان مفعل بـ HMAC أو التوقيع المباشر EIP-712
     if (orderClient && selectedTokenId) {
       console.log(`📤 تنفيذ الأمر عبر OrderClient الرسمي بـ Limitless SDK...`);
       const result = await orderClient.createOrder({
@@ -516,8 +528,8 @@ async function initAndStart() {
 
   // تشغيل المحرك المزدوج للبث المباشر (Binance WS + Limitless WS)
   startPriceFeed();          // 1. بث بينانس المباشر لأسعار BTC والشموع
-  const initialMarket = await getLiveActiveBtcMarket();
-  startLimitlessWebSocket(initialMarket.slug); // 2. بث Limitless WebSocket المباشر للسوق النشط
+  const initialMarket = await getLiveActiveBtc15mMarket();
+  startLimitlessWebSocket(initialMarket ? initialMarket.slug : undefined); // 2. بث Limitless WebSocket المباشر للسوق النشط
 }
 
 initAndStart();

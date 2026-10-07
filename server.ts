@@ -230,82 +230,84 @@ const serverLimitlessHttp = new HttpClient({
 });
 const serverMarketFetcher = new MarketFetcher(serverLimitlessHttp);
 
-async function getServerActiveBtcMarket(): Promise<{ slug: string; title: string }> {
+async function getServerActiveBtc15mMarket(): Promise<any | null> {
   try {
-    const { data: markets } = await serverMarketFetcher.getActiveMarkets({
-      limit: 25,
-      page: 1,
-      sortBy: 'newest',
-    });
+    for (let page = 1; page <= 3; page++) {
+      const res = await serverMarketFetcher.getActiveMarkets({
+        limit: 25,
+        page,
+        sortBy: 'newest',
+      }).catch(() => null);
 
-    if (Array.isArray(markets) && markets.length > 0) {
-      const btc15m = markets.find(
-        (m: any) =>
-          m.slug.includes('btc') &&
-          (m.slug.includes('15-min') || m.title.includes('15 Min'))
-      );
-      const btc5m = markets.find(
-        (m: any) =>
-          m.slug.includes('btc') &&
-          (m.slug.includes('5-min') || m.title.includes('5 Min'))
-      );
-      const btcAny = markets.find((m: any) => m.slug.includes('btc'));
+      if (res && Array.isArray(res.data) && res.data.length > 0) {
+        const btc15m = res.data.filter(
+          (m: any) =>
+            !m.closed &&
+            !m.expired &&
+            (m.slug.includes('btc') || m.title.toLowerCase().includes('btc')) &&
+            (m.slug.includes('15-min') || m.title.includes('15 Min') || m.title.includes('15m'))
+        );
 
-      const chosen = btc15m || btc5m || btcAny;
-      if (chosen) {
-        return { slug: chosen.slug, title: chosen.title };
+        if (btc15m.length > 0) {
+          return btc15m[0];
+        }
       }
     }
   } catch (err: any) {
-    console.warn('⚠️ [Server Bot] تعذر جلب السوق عبر MarketFetcher:', err.message);
+    console.warn('⚠️ [Server Bot] تعذر جلب سوق BTC 15m عبر MarketFetcher:', err.message);
   }
 
-  return { slug: ZSCORE_STRATEGY.marketSlug, title: 'BTC Up or Down 15m' };
+  return null;
 }
 
 async function executeLimitlessTrade(targetToken: 'YES' | 'NO', btcPrice: number, currentZScore: number) {
   if (!serverWallet || !isServerBotRunning) return;
 
   try {
-    const activeMarket = await getServerActiveBtcMarket();
-    console.log(`🤖 [Server Bot] فحص السوق النشط (${activeMarket.title} - ${activeMarket.slug}) لشراء عقد ${targetToken} (Z-Score: ${currentZScore})...`);
+    console.log(`🤖 [Server Bot] فحص سوق BTC 15 دقيقة لشراء عقد ${targetToken} (Z-Score: ${currentZScore})...`);
     
-    // 1. جلب بيانات السوق والـ Venue وعناوين العقود عبر MarketFetcher
-    const marketDetails = await serverMarketFetcher.getMarket(activeMarket.slug).catch(() => null);
-    const venueExchange = marketDetails?.venue?.exchange || '0x05c748E2f4DcDe0ec9Fa8DDc40DE6b867f923fa5';
-    const yesTokenId = marketDetails?.tokens?.yes;
-    const noTokenId = marketDetails?.tokens?.no;
-    const selectedTokenId = targetToken === 'YES' ? yesTokenId : noTokenId;
+    const activeMarket = await getServerActiveBtc15mMarket();
+    if (!activeMarket) {
+      currentWaitReason = 'لم يتم العثور على سوق BTC 15 دقيقة نشط حالياً في Limitless';
+      return;
+    }
 
-    // 2. جلب دفتر الأوامر عبر MarketFetcher
     const orderbook = await serverMarketFetcher.getOrderBook(activeMarket.slug).catch(() => null);
     if (!orderbook) {
-      currentWaitReason = `تعذر العثور على دفتر أوامر نشط للسوق (${activeMarket.slug})`;
+      currentWaitReason = `دفتر الأوامر غير متوفر لسوق BTC 15m (${activeMarket.slug})`;
       return;
     }
 
     let bestAsk: number | null = null;
-
     if (targetToken === 'YES') {
       bestAsk = orderbook.asks?.[0]?.price || null;
     } else {
       if (orderbook.bids?.[0]?.price) {
         bestAsk = Number((1.0 - orderbook.bids[0].price).toFixed(3));
-      } else {
-        bestAsk = orderbook.asks?.[0]?.price ? Number((1.0 - orderbook.asks[0].price).toFixed(3)) : null;
+      } else if (orderbook.asks?.[0]?.price) {
+        bestAsk = Number((1.0 - orderbook.asks[0].price).toFixed(3));
       }
     }
 
     if (bestAsk === null || bestAsk <= 0) {
-      currentWaitReason = `دفتر الأوامر غير متوفر لعقد ${targetToken} حالياً`;
+      currentWaitReason = `سعر عقد ${targetToken} في سوق BTC 15m غير متاح حالياً`;
       return;
     }
 
     if (bestAsk > ZSCORE_STRATEGY.maxEntryPrice) {
-      currentWaitReason = `أفضل سعر متاح لعقد ${targetToken} ($${bestAsk}) أعلى من سقف الاستراتيجية ($${ZSCORE_STRATEGY.maxEntryPrice}). تم الانتظار لاقتناص فرصة رخيصة.`;
+      currentWaitReason = `سعر عقد ${targetToken} في سوق BTC 15m ($${bestAsk}) أعلى من سقف الاستراتيجية ($${ZSCORE_STRATEGY.maxEntryPrice}). تم الانتظار لاقتناص فرصة رخيصة.`;
       console.log(`⛔ [Server Bot] ${currentWaitReason}`);
       return;
     }
+
+    console.log(`🎯 [Server Bot] تم اقتناص فرصة في سوق 15m: ${activeMarket.title} (${activeMarket.slug}) بسعر $${bestAsk}`);
+
+    // 1. جلب بيانات السوق والـ Venue وعناوين العقود عبر MarketFetcher
+    const marketDetails = await serverMarketFetcher.getMarket(activeMarket.slug).catch(() => null);
+    const venueExchange = marketDetails?.venue?.exchange || activeMarket.venue?.exchange || '0x05c748E2f4DcDe0ec9Fa8DDc40DE6b867f923fa5';
+    const yesTokenId = marketDetails?.tokens?.yes || activeMarket.tokens?.yes;
+    const noTokenId = marketDetails?.tokens?.no || activeMarket.tokens?.no;
+    const selectedTokenId = targetToken === 'YES' ? yesTokenId : noTokenId;
 
     // دعم تجزئة العقود والكسور بدقة (Fractional Contracts)
     const contracts = Number((ZSCORE_STRATEGY.tradeSizeUsdc / bestAsk).toFixed(2));
@@ -345,7 +347,7 @@ async function executeLimitlessTrade(targetToken: 'YES' | 'NO', btcPrice: number
 
     const signature = await serverWallet.signTypedData(domain, types, orderValue);
     console.log(`✍️ [Server Bot] تم توقيع EIP-712 بنجاح على عقد Venue (${venueExchange}).`);
-    currentWaitReason = `تم إرسال أمر شراء ${contracts} عقد ${targetToken} بنجاح!`;
+    currentWaitReason = `تم إرسال أمر شراء ${contracts} عقد ${targetToken} في (${activeMarket.title}) بنجاح!`;
 
     executedTradesLog.unshift({
       timestamp: Date.now(),

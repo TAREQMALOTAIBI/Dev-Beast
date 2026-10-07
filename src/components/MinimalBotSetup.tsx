@@ -31,7 +31,7 @@ export const MinimalBotSetup: React.FC<MinimalBotSetupProps> = ({
       ? 'wss://data-stream.binance.vision/ws/btcusdt@kline_1m'
       : 'wss://stream.binance.us:9443/ws/btcusdt@kline_1m';
 
-// كود البوت الكامل والمستقل مع خطة التداول بالـ Z-Score فقط وأمر FAK الفوري
+// كود البوت الكامل والمستقل مع خطة التداول بالـ Z-Score ومسح جميع أسواق BTC وأمر FAK الفوري
   const dualWsBotScript = `import WebSocket from 'ws';
 import { ethers } from 'ethers';
 import {
@@ -42,28 +42,27 @@ import {
   OrderType,
   Side,
   withRetry,
-  APIError,
 } from '@limitless-exchange/sdk';
 
 // 1. بيانات الاعتماد والمفاتيح
 const CREDENTIALS = {
-  tokenId: process.env.LMTS_TOKEN_ID || '${config.lmtsTokenId || 'your-token-id'}',
-  secret: process.env.LMTS_TOKEN_SECRET || 'your-token-secret',
+  tokenId: process.env.LMTS_TOKEN_ID || '${config.lmtsTokenId || ''}',
+  secret: process.env.LMTS_TOKEN_SECRET || '${config.lmtsTokenSecret || ''}',
   privateKey: process.env.PRIVATE_KEY || '${config.privateKey || '0x...'}',
 };
 
-// 2. إعدادات خطة الـ Z-Score فقط
+// 2. إعدادات خطة الـ Z-Score المحدثة
 const CONFIG = {
-  marketSlug: 'btc-price-15m-now',
   lookback: 20,         // نافذة الحساب: آخر 20 شمعة على فريم الدقيقة (1m)
-  upperZScore: 0.50,    // إشارة هبوط: Z-Score >= +0.50 (حساسية عالية لاقتناص الإشارات)
-  lowerZScore: -0.50,   // إشارة صعود: Z-Score <= -0.50 (حساسية عالية لاقتناص الإشارات)
+  upperZScore: 0.50,    // إشارة هبوط: Z-Score >= +0.50
+  lowerZScore: -0.50,   // إشارة صعود: Z-Score <= -0.50
   maxEntryPrice: ${config.maxEntryPrice}, // سقف السعر: عقود ≤ 0.80$
   tradeSizeUsdc: ${config.tradeSizeUsdc},  // ميزانية الصفقة بالدولار
+  apiBaseUrl: '${config.apiBaseUrl || 'https://api.limitless.exchange'}',
 };
 
-// 3. ذاكرة أسعار إغلاق الشموع في الوقت الفعلي
 const candleCloses: number[] = [];
+let isExecuting = false;
 
 // دالة حساب Z-Score بدقة إحصائية
 function computeZScore(prices: number[], period: number = 20) {
@@ -76,105 +75,197 @@ function computeZScore(prices: number[], period: number = 20) {
   return { zScore, mean, stdDev, current };
 }
 
-// 4. الاتصال بـ Binance WebSocket للشموع اللحظية
-const binanceWs = new WebSocket('${selectedBinanceWs}');
-
-binanceWs.on('open', () => {
-  console.log('⚡ متصل ببث بينانس المباشر لأسعار BTC');
-});
-
-binanceWs.on('message', (raw: string) => {
-  try {
-    const data = JSON.parse(raw);
-    const kline = data.k; // شمعة الدقيقة
-    const closePrice = parseFloat(kline.c);
-
-    // إضافة السعر لقائمة الشموع عند اكتمال إغلاق الشمعة
-    if (kline.x) {
-      candleCloses.push(closePrice);
-      if (candleCloses.length > 50) candleCloses.shift();
-      console.log(\`📊 إغلاق شمعة دقيقة: \${closePrice}\`);
-    }
-  } catch (e) {}
-});
-
-// 5. إعداد اتصال Limitless WebSocket ومحرك الأوامر
+// 3. إعداد عملاء SDK والمحفظة
 const httpClient = new HttpClient({
-  baseURL: '${config.apiBaseUrl}',
-  hmacCredentials: { tokenId: CREDENTIALS.tokenId, secret: CREDENTIALS.secret },
+  baseURL: CONFIG.apiBaseUrl,
+  hmacCredentials: CREDENTIALS.tokenId && CREDENTIALS.secret ? { tokenId: CREDENTIALS.tokenId, secret: CREDENTIALS.secret } : undefined,
 });
 const wallet = new ethers.Wallet(CREDENTIALS.privateKey);
 const marketFetcher = new MarketFetcher(httpClient);
-const orderClient = new OrderClient({ httpClient, wallet, marketFetcher });
+let orderClient: OrderClient | null = null;
 
-const limitlessWs = new WebSocketClient({
-  url: 'wss://ws.limitless.exchange',
-  hmacCredentials: { tokenId: CREDENTIALS.tokenId, secret: CREDENTIALS.secret },
-  autoReconnect: true,
-});
+if (CREDENTIALS.tokenId && CREDENTIALS.secret) {
+  orderClient = new OrderClient({ httpClient, wallet, marketFetcher });
+}
 
-async function run() {
-  await limitlessWs.connect();
-  console.log('⚡ متصل بـ Limitless CLOB WebSocket');
+// 4. دالة استهداف سوق BTC 15 دقيقة النشط واقتناص السعر وتنفيذ الأمر
+async function findAndExecuteBestBtcTrade(targetSide: 'YES' | 'NO', zScore: number) {
+  if (isExecuting) return;
+  isExecuting = true;
 
-  await limitlessWs.subscribe('subscribe_market_prices', { marketSlugs: [CONFIG.marketSlug] });
-  await limitlessWs.subscribe('subscribe_order_events');
+  try {
+    console.log(\`🔍 [سوق BTC 15 دقيقة] جاري فحص عقد 15m في Limitless لشراء \${targetSide} (Z-Score=\${zScore.toFixed(2)})...\`);
 
-  // استماع فوري لأي تحديث في دفتر الأوامر وفحص شروط Z-Score
-  limitlessWs.on('orderbookUpdate', async (data) => {
-    if (data.marketSlug !== CONFIG.marketSlug) return;
-    if (candleCloses.length < CONFIG.lookback) return; // انتظار اكتمال 20 شمعة
+    let btc15mMarket: any = null;
+    for (let page = 1; page <= 3; page++) {
+      const res = await marketFetcher.getActiveMarkets({ limit: 25, page, sortBy: 'newest' }).catch(() => null);
+      if (res && Array.isArray(res.data)) {
+        const found = res.data.find(
+          (m: any) =>
+            !m.closed &&
+            !m.expired &&
+            (m.slug.includes('btc') || m.title.toLowerCase().includes('btc')) &&
+            (m.slug.includes('15-min') || m.title.includes('15 Min') || m.title.includes('15m'))
+        );
+        if (found) {
+          btc15mMarket = found;
+          break;
+        }
+      }
+    }
 
-    const bestAsk = data.orderbook.asks[0]?.price;
-    // شرط السعر: الدخول فقط إذا كان السعر ≤ 0.80$
-    if (!bestAsk || bestAsk > CONFIG.maxEntryPrice) return;
+    if (!btc15mMarket) {
+      console.log('ℹ️ لا يوجد سوق BTC 15 دقيقة نشط حالياً.');
+      return;
+    }
 
-    // حساب الـ Z-Score اللحظي
-    const { zScore } = computeZScore(candleCloses, CONFIG.lookback);
+    const ob = await marketFetcher.getOrderBook(btc15mMarket.slug).catch(() => null);
+    if (!ob) {
+      console.log(\`ℹ️ تعذر جلب دفتر الأوامر لسوق (\${btc15mMarket.slug}).\`);
+      return;
+    }
 
-    let targetSide: 'YES' | 'NO' | null = null;
-    // إشارة هبوط: Z-Score >= +0.50 -> شراء عقد NO (القمة)
-    if (zScore >= CONFIG.upperZScore) targetSide = 'NO';
-    // إشارة صعود: Z-Score <= -0.50 -> شراء عقد YES (الارتداد)
-    if (zScore <= CONFIG.lowerZScore) targetSide = 'YES';
+    let bestAsk: number | null = null;
+    if (targetSide === 'YES') {
+      bestAsk = ob.asks?.[0]?.price || null;
+    } else {
+      if (ob.bids?.[0]?.price) {
+        bestAsk = Number((1.0 - ob.bids[0].price).toFixed(3));
+      } else if (ob.asks?.[0]?.price) {
+        bestAsk = Number((1.0 - ob.asks[0].price).toFixed(3));
+      }
+    }
 
-    if (!targetSide) return;
+    console.log(\`   - \${btc15mMarket.title} (\${btc15mMarket.slug}): سعر \${targetSide} = $\${bestAsk !== null ? bestAsk : 'N/A'} (السقف: $\${CONFIG.maxEntryPrice})\`);
 
-    // تنفيذ أمر FAK فوري لخطف السيولة
-    try {
-      const market = await marketFetcher.getMarket(CONFIG.marketSlug);
-      const tokenId = targetSide === 'YES' ? market.tokens.yes : market.tokens.no;
-      const contracts = Math.floor(CONFIG.tradeSizeUsdc / bestAsk);
+    if (!bestAsk || bestAsk <= 0 || bestAsk > CONFIG.maxEntryPrice) {
+      console.log(\`⛔ السعر المتاح ($\${bestAsk}) أعلى من سقف الدخول ($\${CONFIG.maxEntryPrice}). تم الانتظار لحماية رأس المال.\`);
+      return;
+    }
 
-      console.log(\`🎯 [اقتناص فرصة Z-Score]: Z=\${zScore.toFixed(2)} | السعر: $\${bestAsk} | العقد: \${targetSide}\`);
+    console.log(\`🎯 [اقتناص فرصة في سوق BTC 15m]: تم اختيار \${btc15mMarket.title} بسعر $\${bestAsk} (أقل من السقف $\${CONFIG.maxEntryPrice})\`);
 
-      // إرسال أمر FAK فوري
-      const result = await withRetry(
-        () => orderClient.createOrder({
-          marketSlug: market.slug,
+    const contracts = Number((CONFIG.tradeSizeUsdc / bestAsk).toFixed(2));
+    const marketDetails = await marketFetcher.getMarket(btc15mMarket.slug).catch(() => null);
+    const tokenId = targetSide === 'YES'
+      ? (marketDetails?.tokens?.yes || btc15mMarket.tokens?.yes)
+      : (marketDetails?.tokens?.no || btc15mMarket.tokens?.no);
+    const venueExchange = marketDetails?.venue?.exchange || btc15mMarket.venue?.exchange || '0x05c748E2f4DcDe0ec9Fa8DDc40DE6b867f923fa5';
+
+    if (orderClient && tokenId) {
+      console.log(\`🚀 إرسال أمر FAK عبر OrderClient إلى سوق 15m...\`);
+      const res = await withRetry(
+        () => orderClient!.createOrder({
+          marketSlug: btc15mMarket.slug,
           tokenId,
           side: Side.BUY,
-          price: bestAsk,
+          price: bestAsk!,
           size: contracts,
-          orderType: OrderType.FAK, // أمر FAK فوري
+          orderType: OrderType.FAK,
         }),
-        {
-          statusCodes: [429, 500, 502, 503, 504],
-          maxRetries: 3,
-          delays: [1, 2, 4],
-        }
+        { statusCodes: [429, 500, 502, 503, 504], maxRetries: 3, delays: [1, 2, 4] }
       );
-
-      console.log('✅ تم تنفيذ أمر FAK بنجاح:', result.order?.id);
-    } catch (error) {
-      console.error('❌ خطأ في تنفيذ أمر FAK:', error);
+      console.log('✅ تم تنفيذ أمر FAK بنجاح!', res.order?.id);
+    } else {
+      console.log(\`✍️ توقيع مشفر EIP-712 بالمحفظة (\${wallet.address}) على عقد Venue (\${venueExchange})...\`);
+      const domain = { name: 'Limitless OrderBook', version: '1', chainId: 8453, verifyingContract: venueExchange };
+      const types = {
+        Order: [
+          { name: 'maker', type: 'address' },
+          { name: 'tokenId', type: 'uint256' },
+          { name: 'amount', type: 'uint256' },
+          { name: 'price', type: 'uint256' },
+          { name: 'side', type: 'uint8' },
+          { name: 'nonce', type: 'uint256' },
+          { name: 'deadline', type: 'uint256' },
+        ],
+      };
+      const numTokenId = tokenId ? BigInt(tokenId) : (targetSide === 'YES' ? 1n : 2n);
+      const orderValue = {
+        maker: wallet.address,
+        tokenId: numTokenId,
+        amount: ethers.parseUnits(String(contracts), 6),
+        price: ethers.parseUnits(String(bestAsk), 6),
+        side: 0,
+        nonce: Date.now(),
+        deadline: Math.floor(Date.now() / 1000) + 120,
+      };
+      const signature = await wallet.signTypedData(domain, types, orderValue);
+      const payload = {
+        order: { ...orderValue, tokenId: orderValue.tokenId.toString(), amount: orderValue.amount.toString(), price: orderValue.price.toString() },
+        signature,
+        orderType: 'FAK',
+      };
+      const submitRes = await fetch(\`\${CONFIG.apiBaseUrl}/orders\`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      console.log('✅ تم إرسال أمر FAK إلى Match Engine! الحالة:', submitRes.status);
     }
+  } catch (err: any) {
+    console.error('❌ خطأ أثناء التنفيذ:', err.message);
+  } finally {
+    isExecuting = false;
+  }
+}
+
+// 5. جلب الشموع السابقة فوراً عبر Binance REST API
+async function initHistoricalCandles() {
+  try {
+    const res = await fetch('https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=50', { signal: AbortSignal.timeout(5000) });
+    if (res.ok) {
+      const data = await res.json();
+      const closes = data.map((k: any) => parseFloat(k[4]));
+      candleCloses.push(...closes);
+      console.log(\`✅ تم جلب \${closes.length} شمعة دقيقة سابقة بنجاح. البوت جاهز فوراً!\`);
+    }
+  } catch {}
+}
+
+// 6. تشغيل بث بينانس الحي وفحص الإشارات فورياً
+async function run() {
+  await initHistoricalCandles();
+
+  const binanceWs = new WebSocket('${selectedBinanceWs}');
+  let lastEval = 0;
+
+  binanceWs.on('open', () => {
+    console.log('⚡ متصل ببث بينانس المباشر لأسعار BTC (BTCUSDT 1m)');
   });
 
-  limitlessWs.on('orderEvent', (event) => {
-    if (event.source === 'OME' && event.type === 'EXECUTION') {
-      console.log(\`✅ حالة التنفيذ: \${event.status} | المعرف: \${event.orderId}\`);
-    }
+  binanceWs.on('message', async (raw: string) => {
+    try {
+      const data = JSON.parse(raw);
+      if (!data.k) return;
+      const kline = data.k;
+      const closePrice = parseFloat(kline.c);
+      const isClosed = kline.x;
+      const now = Date.now();
+
+      if (isClosed) {
+        candleCloses.push(closePrice);
+        if (candleCloses.length > 50) candleCloses.shift();
+      }
+
+      if (candleCloses.length >= CONFIG.lookback && (isClosed || now - lastEval >= 2000)) {
+        lastEval = now;
+        const { zScore, mean, stdDev } = computeZScore(candleCloses, CONFIG.lookback);
+        console.log(\`📊 [فحص Z-Score]: السعر=$\${closePrice} | المتوسط=$\${mean.toFixed(2)} | Z-Score=\${zScore > 0 ? '+' : ''}\${zScore.toFixed(3)}\`);
+
+        if (zScore >= CONFIG.upperZScore) {
+          console.log(\`🚨 إشارة هبوط! Z = +\${zScore.toFixed(2)} (>= +\${CONFIG.upperZScore})\`);
+          await findAndExecuteBestBtcTrade('NO', zScore);
+        } else if (zScore <= CONFIG.lowerZScore) {
+          console.log(\`🚨 إشارة صعود! Z = \${zScore.toFixed(2)} (<= \${CONFIG.lowerZScore})\`);
+          await findAndExecuteBestBtcTrade('YES', zScore);
+        }
+      }
+    } catch (e) {}
+  });
+
+  binanceWs.on('close', () => {
+    setTimeout(run, 5000);
   });
 }
 
