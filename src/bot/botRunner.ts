@@ -7,10 +7,16 @@ import { HttpClient, MarketFetcher, OrderClient, Side, OrderType, WebSocketClien
 // 1. قراءة مفاتيح المحفظة و Limitless من ملف .env
 // ==========================================
 
-let rawPrivateKey = process.env.PRIVATE_KEY?.trim() || '';
-if (rawPrivateKey && !rawPrivateKey.startsWith('0x') && rawPrivateKey.length === 64) {
-  rawPrivateKey = `0x${rawPrivateKey}`;
+function cleanPrivateKey(rawKey: string): string {
+  if (!rawKey) return '';
+  let clean = rawKey.trim().replace(/['"`\s]/g, '');
+  if (clean.startsWith('0x') || clean.startsWith('0X')) {
+    clean = clean.slice(2);
+  }
+  return clean ? `0x${clean}` : '';
 }
+
+let rawPrivateKey = cleanPrivateKey(process.env.PRIVATE_KEY || '');
 
 const LMTS_TOKEN_ID = process.env.LMTS_TOKEN_ID?.trim() || '';
 const LMTS_TOKEN_SECRET = process.env.LMTS_TOKEN_SECRET?.trim() || '';
@@ -33,10 +39,43 @@ try {
   wallet = new ethers.Wallet(rawPrivateKey, provider);
   console.log(`✅ تم تحميل المحفظة الحقيقية بنجاح: ${wallet.address}`);
   console.log(`🌐 شبكة التداول: Base Mainnet (Chain ID: 8453)`);
-  console.log(`🔑 معرف رمز Limitless API: ${LMTS_TOKEN_ID ? LMTS_TOKEN_ID.substring(0, 8) + '...' : 'غير محدد (وضع محاكاة)'}`);
+  console.log(`🔑 معرف رمز Limitless API: ${LMTS_TOKEN_ID ? LMTS_TOKEN_ID.substring(0, 8) + '...' : '⚠️ غير محدد (مطلوب للتنفيذ الحقيقي)'}`);
 } catch (e: any) {
   console.error('❌ فشل تحميل المحفظة من المفتاح الخاص:', e.message);
   process.exit(1);
+}
+
+// ==========================================
+// 1.1 فحص رصيد واعتماد USDC لعقد التداول على شبكة Base
+// ==========================================
+
+const USDC_ADDRESS_BASE = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+const ERC20_ABI = [
+  'function allowance(address owner, address spender) view returns (uint256)',
+  'function approve(address spender, uint256 amount) returns (bool)',
+  'function balanceOf(address account) view returns (uint256)',
+];
+
+async function ensureVenueApproval(venueExchange: string) {
+  try {
+    const usdc = new ethers.Contract(USDC_ADDRESS_BASE, ERC20_ABI, wallet);
+    const balance = await usdc.balanceOf(wallet.address);
+    const formattedBalance = ethers.formatUnits(balance, 6);
+    console.log(`💵 رصيد USDC في المحفظة: $${formattedBalance}`);
+
+    const allowance = await usdc.allowance(wallet.address, venueExchange);
+    if (allowance < ethers.parseUnits('1000', 6)) {
+      console.log(`✍️ جاري اعتماد عقد Venue (${venueExchange}) لعملة USDC على Base Mainnet...`);
+      const tx = await usdc.approve(venueExchange, ethers.MaxUint256);
+      console.log(`⛓️ تم إرسال معاملة الاعتماد: ${tx.hash}. في انتظار التأكيد...`);
+      await tx.wait(1);
+      console.log('✅ تم اعتماد USDC بنجاح للتداول على Limitless!');
+    } else {
+      console.log(`✅ عقد التداول (${venueExchange.substring(0, 10)}...) معتمد مسبقاً لـ USDC.`);
+    }
+  } catch (err: any) {
+    console.warn(`⚠️ تنبيه أثناء فحص اعتماد USDC:`, err.message);
+  }
 }
 
 // ==========================================
@@ -134,11 +173,11 @@ async function startPriceFeed() {
           if (candleCloses.length > 50) candleCloses.shift();
 
           console.log(`📈 إغلاق شمعة دقيقة: $${currentPrice.toLocaleString()} | إجمالي الشموع في الذاكرة: ${candleCloses.length}`);
-          await evaluateTradingSignal(currentPrice);
+          await evaluateTradingSignal(currentPrice, true);
           lastEvaluatedTime = now;
-        } else if (now - lastEvaluatedTime >= 2000 && candleCloses.length >= ZSCORE_STRATEGY.lookbackPeriod) {
+        } else if (now - lastEvaluatedTime >= 2000 && candleCloses.length >= (ZSCORE_STRATEGY.lookbackPeriod - 1)) {
           // فحص الإشارات اللحظية كل ثانيتين أثناء حركة السعر
-          await evaluateTradingSignal(currentPrice);
+          await evaluateTradingSignal(currentPrice, false);
           lastEvaluatedTime = now;
         }
       } catch (err: any) {
@@ -260,13 +299,17 @@ function computeZScore(prices: number[], lookback: number = 20) {
   };
 }
 
-async function evaluateTradingSignal(lastPrice: number) {
-  if (candleCloses.length < ZSCORE_STRATEGY.lookbackPeriod) {
+async function evaluateTradingSignal(lastPrice: number, isClosed: boolean = true) {
+  if (candleCloses.length < (ZSCORE_STRATEGY.lookbackPeriod - 1)) {
     console.log(`⏳ في انتظار تجميع 20 شمعة دقيقة لحساب الـ Z-Score (${candleCloses.length}/${ZSCORE_STRATEGY.lookbackPeriod})...`);
     return;
   }
 
-  const { zScore, mean, stdDev } = computeZScore(candleCloses, ZSCORE_STRATEGY.lookbackPeriod);
+  const livePrices = isClosed
+    ? candleCloses
+    : [...candleCloses.slice(-(ZSCORE_STRATEGY.lookbackPeriod - 1)), lastPrice];
+
+  const { zScore, mean, stdDev } = computeZScore(livePrices, ZSCORE_STRATEGY.lookbackPeriod);
 
   console.log(`🔍 [فحص Z-Score]: السعر=$${lastPrice.toLocaleString()} | المتوسط(20m)=$${mean.toLocaleString()} | الانحراف=$${stdDev} | Z-Score=${zScore > 0 ? '+' : ''}${zScore}`);
 
@@ -529,6 +572,10 @@ async function initAndStart() {
   // تشغيل المحرك المزدوج للبث المباشر (Binance WS + Limitless WS)
   startPriceFeed();          // 1. بث بينانس المباشر لأسعار BTC والشموع
   const initialMarket = await getLiveActiveBtc15mMarket();
+  if (initialMarket) {
+    const venue = initialMarket.venue?.exchange || '0x05c748E2f4DcDe0ec9Fa8DDc40DE6b867f923fa5';
+    await ensureVenueApproval(venue);
+  }
   startLimitlessWebSocket(initialMarket ? initialMarket.slug : undefined); // 2. بث Limitless WebSocket المباشر للسوق النشط
 }
 

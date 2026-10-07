@@ -44,11 +44,23 @@ import {
   withRetry,
 } from '@limitless-exchange/sdk';
 
-// 1. بيانات الاعتماد والمفاتيح
+// 1. معالجة وتنسيق المفتاح الخاص وبيانات الاعتماد (يدعم جميع صيغ المفاتيح مع أو بدون 0x)
+function cleanPrivateKey(rawKey: string): string {
+  if (!rawKey) return '';
+  let clean = rawKey.trim().replace(/['"\`\\s]/g, '');
+  if (clean.startsWith('0x') || clean.startsWith('0X')) {
+    clean = clean.slice(2);
+  }
+  return clean ? \`0x\${clean}\` : '';
+}
+
+const rawPkInput = process.env.PRIVATE_KEY || '${config.privateKey || '0x...'}';
+const formattedPk = cleanPrivateKey(rawPkInput);
+
 const CREDENTIALS = {
-  tokenId: process.env.LMTS_TOKEN_ID || '${config.lmtsTokenId || ''}',
-  secret: process.env.LMTS_TOKEN_SECRET || '${config.lmtsTokenSecret || ''}',
-  privateKey: process.env.PRIVATE_KEY || '${config.privateKey || '0x...'}',
+  tokenId: (process.env.LMTS_TOKEN_ID || '${config.lmtsTokenId || ''}').trim(),
+  secret: (process.env.LMTS_TOKEN_SECRET || '${config.lmtsTokenSecret || ''}').trim(),
+  privateKey: formattedPk,
 };
 
 // 2. إعدادات خطة الـ Z-Score المحدثة
@@ -59,7 +71,15 @@ const CONFIG = {
   maxEntryPrice: ${config.maxEntryPrice}, // سقف السعر: عقود ≤ 0.80$
   tradeSizeUsdc: ${config.tradeSizeUsdc},  // ميزانية الصفقة بالدولار
   apiBaseUrl: '${config.apiBaseUrl || 'https://api.limitless.exchange'}',
+  baseRpcUrl: process.env.BASE_RPC_URL || 'https://mainnet.base.org',
 };
+
+const USDC_BASE = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+const ERC20_ABI = [
+  'function allowance(address owner, address spender) view returns (uint256)',
+  'function approve(address spender, uint256 amount) returns (bool)',
+  'function balanceOf(address account) view returns (uint256)',
+];
 
 const candleCloses: number[] = [];
 let isExecuting = false;
@@ -68,19 +88,28 @@ let isExecuting = false;
 function computeZScore(prices: number[], period: number = 20) {
   const window = prices.slice(-period);
   const current = window[window.length - 1];
-  const mean = window.reduce((a, b) => a + b, 0) / period;
-  const variance = window.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / period;
+  const mean = window.reduce((a, b) => a + b, 0) / window.length;
+  const variance = window.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / window.length;
   const stdDev = Math.sqrt(variance);
   const zScore = stdDev > 0 ? (current - mean) / stdDev : 0;
   return { zScore, mean, stdDev, current };
 }
 
 // 3. إعداد عملاء SDK والمحفظة
+let wallet: ethers.Wallet;
+try {
+  const provider = new ethers.JsonRpcProvider(CONFIG.baseRpcUrl, 8453, { staticNetwork: true });
+  wallet = new ethers.Wallet(CREDENTIALS.privateKey, provider);
+} catch (e: any) {
+  console.error('❌ خطأ في المفتاح الخاص:', e.message);
+  console.error('تأكد من إدخال 64 رمز HEX صالح في متغير PRIVATE_KEY.');
+  process.exit(1);
+}
+
 const httpClient = new HttpClient({
   baseURL: CONFIG.apiBaseUrl,
   hmacCredentials: CREDENTIALS.tokenId && CREDENTIALS.secret ? { tokenId: CREDENTIALS.tokenId, secret: CREDENTIALS.secret } : undefined,
 });
-const wallet = new ethers.Wallet(CREDENTIALS.privateKey);
 const marketFetcher = new MarketFetcher(httpClient);
 let orderClient: OrderClient | null = null;
 
@@ -88,7 +117,24 @@ if (CREDENTIALS.tokenId && CREDENTIALS.secret) {
   orderClient = new OrderClient({ httpClient, wallet, marketFetcher });
 }
 
-// 4. دالة استهداف سوق BTC 15 دقيقة النشط واقتناص السعر وتنفيذ الأمر
+// فحص رصيد المحفظة والاعتماد المسبق
+async function checkWalletAndApproval() {
+  try {
+    const usdc = new ethers.Contract(USDC_BASE, ERC20_ABI, wallet);
+    const bal = await usdc.balanceOf(wallet.address);
+    const ethBal = await wallet.provider!.getBalance(wallet.address);
+    console.log(\`💼 المحفظة: \${wallet.address}\`);
+    console.log(\`💵 رصيد USDC: \${ethers.formatUnits(bal, 6)} USDC\`);
+    console.log(\`⛽ رصيد ETH (الغاز): \${ethers.formatEther(ethBal)} ETH\`);
+    if (bal === 0n) {
+      console.warn('⚠️ تنبيه: رصيد USDC صفر! لن يتم تنفيذ صفقات بدون رصيد.');
+    }
+  } catch (err: any) {
+    console.warn('⚠️ تعذر قراءة الرصيد:', err.message);
+  }
+}
+
+// 4. استهداف سوق BTC 15 دقيقة النشط واقتناص السعر وتنفيذ الأمر
 async function findAndExecuteBestBtcTrade(targetSide: 'YES' | 'NO', zScore: number) {
   if (isExecuting) return;
   isExecuting = true;
@@ -115,9 +161,11 @@ async function findAndExecuteBestBtcTrade(targetSide: 'YES' | 'NO', zScore: numb
     }
 
     if (!btc15mMarket) {
-      console.log('ℹ️ لا يوجد سوق BTC 15 دقيقة نشط حالياً.');
+      console.log('ℹ️ لا يوجد سوق BTC 15 دقيقة نشط حالياً على Limitless.');
       return;
     }
+
+    console.log(\`🎯 السوق المستهدف: \${btc15mMarket.title} (\${btc15mMarket.slug})\`);
 
     const ob = await marketFetcher.getOrderBook(btc15mMarket.slug).catch(() => null);
     if (!ob) {
@@ -136,14 +184,14 @@ async function findAndExecuteBestBtcTrade(targetSide: 'YES' | 'NO', zScore: numb
       }
     }
 
-    console.log(\`   - \${btc15mMarket.title} (\${btc15mMarket.slug}): سعر \${targetSide} = $\${bestAsk !== null ? bestAsk : 'N/A'} (السقف: $\${CONFIG.maxEntryPrice})\`);
+    console.log(\`   - سعر \${targetSide} المتاح = $\${bestAsk !== null ? bestAsk : 'N/A'} (سقف الدخول: $\${CONFIG.maxEntryPrice})\`);
 
     if (!bestAsk || bestAsk <= 0 || bestAsk > CONFIG.maxEntryPrice) {
       console.log(\`⛔ السعر المتاح ($\${bestAsk}) أعلى من سقف الدخول ($\${CONFIG.maxEntryPrice}). تم الانتظار لحماية رأس المال.\`);
       return;
     }
 
-    console.log(\`🎯 [اقتناص فرصة في سوق BTC 15m]: تم اختيار \${btc15mMarket.title} بسعر $\${bestAsk} (أقل من السقف $\${CONFIG.maxEntryPrice})\`);
+    console.log(\`🎯 [اقتناص فرصة مؤهلة]: تم اختيار \${btc15mMarket.title} بسعر $\${bestAsk} (أقل من السقف $\${CONFIG.maxEntryPrice})\`);
 
     const contracts = Number((CONFIG.tradeSizeUsdc / bestAsk).toFixed(2));
     const marketDetails = await marketFetcher.getMarket(btc15mMarket.slug).catch(() => null);
@@ -165,7 +213,7 @@ async function findAndExecuteBestBtcTrade(targetSide: 'YES' | 'NO', zScore: numb
         }),
         { statusCodes: [429, 500, 502, 503, 504], maxRetries: 3, delays: [1, 2, 4] }
       );
-      console.log('✅ تم تنفيذ أمر FAK بنجاح!', res.order?.id);
+      console.log('✅ تم تنفيذ أمر FAK بنجاح!', res.order?.id || JSON.stringify(res));
     } else {
       console.log(\`✍️ توقيع مشفر EIP-712 بالمحفظة (\${wallet.address}) على عقد Venue (\${venueExchange})...\`);
       const domain = { name: 'Limitless OrderBook', version: '1', chainId: 8453, verifyingContract: venueExchange };
@@ -201,7 +249,8 @@ async function findAndExecuteBestBtcTrade(targetSide: 'YES' | 'NO', zScore: numb
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      console.log('✅ تم إرسال أمر FAK إلى Match Engine! الحالة:', submitRes.status);
+      const resText = await submitRes.text();
+      console.log(\`✅ إرسال أمر FAK إلى محرك Limitless! الحالة: \${submitRes.status} | الرد: \${resText}\`);
     }
   } catch (err: any) {
     console.error('❌ خطأ أثناء التنفيذ:', err.message);
@@ -220,12 +269,24 @@ async function initHistoricalCandles() {
       candleCloses.push(...closes);
       console.log(\`✅ تم جلب \${closes.length} شمعة دقيقة سابقة بنجاح. البوت جاهز فوراً!\`);
     }
-  } catch {}
+  } catch {
+    console.log('ℹ️ جاري تجميع الشموع مباشرة عبر البث المباشر...');
+  }
 }
 
-// 6. تشغيل بث بينانس الحي وفحص الإشارات فورياً
+// 6. تشغيل بث بينانس الحي وفحص الإشارات اللحظية
 async function run() {
+  console.log('====================================================');
+  console.log('🤖 بدء تشغيل روبوت التداول الآلي Limitless Trading Bot');
+  console.log('====================================================');
+  await checkWalletAndApproval();
   await initHistoricalCandles();
+
+  if (!CREDENTIALS.tokenId || !CREDENTIALS.secret) {
+    console.log('ℹ️ تشغيل بدون مفاتيح LMTS API: سيتم توقيع الأوامر عبر المحفظة مباشرة (EIP-712).');
+  } else {
+    console.log('🔑 تم تفعيل مفاتيح Limitless API الرسمية بنجاح.');
+  }
 
   const binanceWs = new WebSocket('${selectedBinanceWs}');
   let lastEval = 0;
@@ -248,10 +309,15 @@ async function run() {
         if (candleCloses.length > 50) candleCloses.shift();
       }
 
-      if (candleCloses.length >= CONFIG.lookback && (isClosed || now - lastEval >= 2000)) {
+      // فحص الإشارة اللحظية فوراً مع دمج سعر التكة الحالية مع الشموع السابقة
+      if (candleCloses.length >= (CONFIG.lookback - 1) && (isClosed || now - lastEval >= 2000)) {
         lastEval = now;
-        const { zScore, mean, stdDev } = computeZScore(candleCloses, CONFIG.lookback);
-        console.log(\`📊 [فحص Z-Score]: السعر=$\${closePrice} | المتوسط=$\${mean.toFixed(2)} | Z-Score=\${zScore > 0 ? '+' : ''}\${zScore.toFixed(3)}\`);
+        const liveWindow = isClosed
+          ? candleCloses
+          : [...candleCloses.slice(-(CONFIG.lookback - 1)), closePrice];
+
+        const { zScore, mean, stdDev } = computeZScore(liveWindow, CONFIG.lookback);
+        console.log(\`📊 [فحص Z-Score]: السعر=$\${closePrice} | المتوسط=$\${mean.toFixed(2)} | الانحراف=$\${stdDev.toFixed(2)} | Z-Score=\${zScore > 0 ? '+' : ''}\${zScore.toFixed(3)}\`);
 
         if (zScore >= CONFIG.upperZScore) {
           console.log(\`🚨 إشارة هبوط! Z = +\${zScore.toFixed(2)} (>= +\${CONFIG.upperZScore})\`);
@@ -265,6 +331,7 @@ async function run() {
   });
 
   binanceWs.on('close', () => {
+    console.warn('🔄 انقطع الاتصال، جاري إعادة الاتصال بعد 5 ثوانٍ...');
     setTimeout(run, 5000);
   });
 }

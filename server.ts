@@ -72,8 +72,8 @@ async function fetchErc20Balance(
 // إدارة المحفظة واستعلام الرصيد من .env
 // ==========================================
 
-let rawPrivateKey = process.env.PRIVATE_KEY?.trim() || '';
-if (rawPrivateKey && !rawPrivateKey.startsWith('0x') && rawPrivateKey.length === 64) {
+let rawPrivateKey = process.env.PRIVATE_KEY?.trim().replace(/['"`]/g, '') || '';
+if (rawPrivateKey && !rawPrivateKey.startsWith('0x')) {
   rawPrivateKey = `0x${rawPrivateKey}`;
 }
 
@@ -94,9 +94,9 @@ if (rawPrivateKey && !rawPrivateKey.includes('ضع_مفتاح')) {
 app.get('/api/wallet', async (req, res) => {
   try {
     if (!serverWallet) {
-      const currentPk = process.env.PRIVATE_KEY?.trim() || '';
+      const currentPk = process.env.PRIVATE_KEY?.trim().replace(/['"`]/g, '') || '';
       let formattedPk = currentPk;
-      if (formattedPk && !formattedPk.startsWith('0x') && formattedPk.length === 64) {
+      if (formattedPk && !formattedPk.startsWith('0x')) {
         formattedPk = `0x${formattedPk}`;
       }
       if (formattedPk && !formattedPk.includes('ضع_مفتاح')) {
@@ -183,6 +183,7 @@ app.get('/api/wallet', async (req, res) => {
 // ==========================================
 
 let isServerBotRunning = true;
+let lastServerEvalTime = 0;
 const candleCloses: number[] = [];
 let lastEvaluatedSignal: string = 'NEUTRAL';
 let lastBtcPrice: number = 94500;
@@ -416,28 +417,34 @@ async function startServerPriceFeed() {
         if (kline.x) {
           candleCloses.push(lastBtcPrice);
           if (candleCloses.length > 50) candleCloses.shift();
+        }
 
-          if (candleCloses.length >= ZSCORE_STRATEGY.lookbackPeriod && isServerBotRunning) {
-            const { zScore, mean, stdDev } = calculateServerZScore(candleCloses, ZSCORE_STRATEGY.lookbackPeriod);
-            lastCalculatedZScore = zScore;
-            lastCalculatedMean = mean;
-            lastCalculatedStdDev = stdDev;
+        const now = Date.now();
+        if (candleCloses.length >= (ZSCORE_STRATEGY.lookbackPeriod - 1) && isServerBotRunning && (kline.x || now - lastServerEvalTime >= 2000)) {
+          lastServerEvalTime = now;
+          const livePrices = kline.x
+            ? candleCloses
+            : [...candleCloses.slice(-(ZSCORE_STRATEGY.lookbackPeriod - 1)), lastBtcPrice];
 
-            // 1. إشارة هبوط: Z-Score >= +0.50 -> شراء عقد NO (القمة)
-            if (zScore >= ZSCORE_STRATEGY.upperThreshold) {
-              lastEvaluatedSignal = 'OVERBOUGHT';
-              console.log(`🚨 [Server Bot]: إشارة هبوط Z-Score! Z = +${zScore} (أعلى من +${ZSCORE_STRATEGY.upperThreshold}). جاري شراء عقد NO...`);
-              await executeLimitlessTrade('NO', lastBtcPrice, zScore);
-            }
-            // 2. إشارة صعود: Z-Score <= -0.50 -> شراء عقد YES (الارتداد)
-            else if (zScore <= ZSCORE_STRATEGY.lowerThreshold) {
-              lastEvaluatedSignal = 'OVERSOLD';
-              console.log(`🚨 [Server Bot]: إشارة صعود Z-Score! Z = ${zScore} (أدنى من ${ZSCORE_STRATEGY.lowerThreshold}). جاري شراء عقد YES...`);
-              await executeLimitlessTrade('YES', lastBtcPrice, zScore);
-            } else {
-              lastEvaluatedSignal = 'NEUTRAL';
-              currentWaitReason = `سوق محايد: مؤشر Z-Score = ${zScore > 0 ? '+' : ''}${zScore} (المطلوب: > +${ZSCORE_STRATEGY.upperThreshold} للهبوط أو < ${ZSCORE_STRATEGY.lowerThreshold} للصعود) | متوسط 20 دقيقة = $${mean.toLocaleString()}`;
-            }
+          const { zScore, mean, stdDev } = calculateServerZScore(livePrices, ZSCORE_STRATEGY.lookbackPeriod);
+          lastCalculatedZScore = zScore;
+          lastCalculatedMean = mean;
+          lastCalculatedStdDev = stdDev;
+
+          // 1. إشارة هبوط: Z-Score >= +0.50 -> شراء عقد NO (القمة)
+          if (zScore >= ZSCORE_STRATEGY.upperThreshold) {
+            lastEvaluatedSignal = 'OVERBOUGHT';
+            console.log(`🚨 [Server Bot]: إشارة هبوط Z-Score! Z = +${zScore} (أعلى من +${ZSCORE_STRATEGY.upperThreshold}). جاري شراء عقد NO...`);
+            await executeLimitlessTrade('NO', lastBtcPrice, zScore);
+          }
+          // 2. إشارة صعود: Z-Score <= -0.50 -> شراء عقد YES (الارتداد)
+          else if (zScore <= ZSCORE_STRATEGY.lowerThreshold) {
+            lastEvaluatedSignal = 'OVERSOLD';
+            console.log(`🚨 [Server Bot]: إشارة صعود Z-Score! Z = ${zScore} (أدنى من ${ZSCORE_STRATEGY.lowerThreshold}). جاري شراء عقد YES...`);
+            await executeLimitlessTrade('YES', lastBtcPrice, zScore);
+          } else {
+            lastEvaluatedSignal = 'NEUTRAL';
+            currentWaitReason = `سوق محايد: مؤشر Z-Score = ${zScore > 0 ? '+' : ''}${zScore} (المطلوب: > +${ZSCORE_STRATEGY.upperThreshold} للهبوط أو < ${ZSCORE_STRATEGY.lowerThreshold} للصعود) | متوسط 20 دقيقة = $${mean.toLocaleString()}`;
           }
         }
       } catch {}
