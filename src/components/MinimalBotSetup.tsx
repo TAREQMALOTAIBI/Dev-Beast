@@ -146,13 +146,18 @@ async function findAndExecuteBestBtcTrade(targetSide: 'YES' | 'NO', zScore: numb
     for (let page = 1; page <= 3; page++) {
       const res = await marketFetcher.getActiveMarkets({ limit: 25, page, sortBy: 'newest' }).catch(() => null);
       if (res && Array.isArray(res.data)) {
-        const found = res.data.find(
-          (m: any) =>
-            !m.closed &&
-            !m.expired &&
-            (m.slug.includes('btc') || m.title.toLowerCase().includes('btc')) &&
-            (m.slug.includes('15-min') || m.title.includes('15 Min') || m.title.includes('15m'))
-        );
+        const found = res.data.find((m: any) => {
+          if (m.closed || m.expired) return false;
+          const s = (m.slug || '').toLowerCase();
+          const t = (m.title || '').toLowerCase();
+          const isBtc = s.includes('btc') || t.includes('btc');
+          const is15m = s.includes('15-min') || s.includes('15min') || t.includes('15 min') || t.includes('15-min');
+          const isExcluded = s.includes('daily') || t.includes('daily') ||
+                             s.includes('hourly') || t.includes('hourly') ||
+                             s.includes('weekly') || t.includes('weekly') ||
+                             (!is15m && (s.includes('5-min') || t.includes('5 min')));
+          return isBtc && is15m && !isExcluded;
+        });
         if (found) {
           btc15mMarket = found;
           break;

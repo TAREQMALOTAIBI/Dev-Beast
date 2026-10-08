@@ -513,10 +513,23 @@ const serverLimitlessHttp = new HttpClient({
 const serverMarketFetcher = new MarketFetcher(serverLimitlessHttp);
 
 let lastExecutedTradeTime = 0;
+let cachedActive15mMarket: any = null;
+let lastMarketFetchTime = 0;
 
 async function getServerActiveBtcMarket(): Promise<any | null> {
+  const now = Date.now();
+  // استخدام السوق المخزن إذا كان صالحاً ومتبقياً عليه أكثر من 20 ثانية
+  if (
+    cachedActive15mMarket &&
+    now - lastMarketFetchTime < 10000 &&
+    cachedActive15mMarket.expirationTimestamp &&
+    Number(cachedActive15mMarket.expirationTimestamp) > now + 20000
+  ) {
+    return cachedActive15mMarket;
+  }
+
   try {
-    for (let page = 1; page <= 3; page++) {
+    for (let page = 1; page <= 4; page++) {
       const res = await serverMarketFetcher.getActiveMarkets({
         limit: 25,
         page,
@@ -524,37 +537,44 @@ async function getServerActiveBtcMarket(): Promise<any | null> {
       }).catch(() => null);
 
       if (res && Array.isArray(res.data) && res.data.length > 0) {
-        const now = Date.now();
-        const validMarkets = res.data.filter(
-          (m: any) =>
-            !m.closed &&
-            !m.expired &&
-            (!m.expirationDate || new Date(m.expirationDate).getTime() > now + 30000)
-        );
+        const validMarkets = res.data.filter((m: any) => {
+          if (m.closed || m.expired) return false;
+          const expTime = m.expirationTimestamp ? Number(m.expirationTimestamp) : 0;
+          if (expTime > 0 && expTime <= now + 20000) return false;
+          return true;
+        });
 
-        // 1. أولوية لأسواق 15 دقيقة
-        const btc15m = validMarkets.filter(
-          (m: any) =>
-            (m.slug.includes('btc') || m.title?.toLowerCase().includes('btc')) &&
-            (m.slug.includes('15-min') || m.title?.includes('15 Min') || m.title?.includes('15m'))
-        );
-        if (btc15m.length > 0) return btc15m[0];
+        // قصر الاختيار حصراً وبشكل صارم على عقود بيتكوين 15 دقيقة فقط (BTC 15 Min)
+        const btc15m = validMarkets.filter((m: any) => {
+          const s = (m.slug || '').toLowerCase();
+          const t = (m.title || '').toLowerCase();
+          const cats = Array.isArray(m.categories) ? m.categories.map((c: any) => String(c).toLowerCase()) : [];
 
-        // 2. أسواق 5 دقائق
-        const btc5m = validMarkets.filter(
-          (m: any) =>
-            (m.slug.includes('btc') || m.title?.toLowerCase().includes('btc')) &&
-            (m.slug.includes('5-min') || m.title?.includes('5 Min') || m.title?.includes('5m'))
-        );
-        if (btc5m.length > 0) return btc5m[0];
+          const isBtc = s.includes('btc') || t.includes('btc') || cats.some((c: string) => c.includes('bitcoin') || c.includes('btc'));
+          const is15m = s.includes('15-min') || s.includes('15min') || t.includes('15 min') || t.includes('15-min') ||
+                        cats.some((c: string) => c.includes('15 min'));
 
-        // تم إلغاء أسواق Daily و Hourly لمنع أي تداول غير مقصود على الأسواق الطويلة
+          // استبعاد صريح ومطلق لأي عقود يومية (Daily) أو ساعية (Hourly) أو أسبوعية
+          const isExcluded = s.includes('daily') || t.includes('daily') ||
+                             s.includes('hourly') || t.includes('hourly') ||
+                             s.includes('weekly') || t.includes('weekly') ||
+                             (!is15m && (s.includes('5-min') || t.includes('5 min')));
+
+          return isBtc && is15m && !isExcluded;
+        });
+
+        if (btc15m.length > 0) {
+          cachedActive15mMarket = btc15m[0];
+          lastMarketFetchTime = now;
+          return cachedActive15mMarket;
+        }
       }
     }
   } catch (err: any) {
-    console.warn('⚠️ [Server Bot] تعذر جلب سوق BTC عبر MarketFetcher:', err.message);
+    console.warn('⚠️ [Server Bot] تعذر جلب سوق BTC 15m عبر MarketFetcher:', err.message);
   }
 
+  cachedActive15mMarket = null;
   return null;
 }
 
@@ -574,17 +594,35 @@ async function executeLimitlessTrade(targetToken: 'YES' | 'NO', btcPrice: number
   }
 
   try {
-    console.log(`🤖 [Server Bot] فحص سوق BTC لشراء عقد ${targetToken} (Z-Score: ${currentZScore})...`);
+    console.log(`🤖 [Server Bot] فحص عقد BTC 15 دقيقة الحصري لشراء عقد ${targetToken} (Z-Score: ${currentZScore})...`);
     
     const activeMarket = await getServerActiveBtcMarket();
     if (!activeMarket) {
-      currentWaitReason = 'لم يتم العثور على سوق BTC نشط وصالح حالياً في Limitless';
+      currentWaitReason = 'بانتظار توفر عقد بيتكوين 15 دقيقة (BTC 15 Min) نشط في منصة Limitless - تم حظر أي أسواق أخرى';
+      console.log(`⏳ [Server Bot] ${currentWaitReason}`);
+      return;
+    }
+
+    // التحقق الصارم النهائي من أن السوق المستهدف هو عقد بيتكوين 15 دقيقة حصراً
+    const slugLower = (activeMarket.slug || '').toLowerCase();
+    const titleLower = (activeMarket.title || '').toLowerCase();
+    const isStrict15mBtc =
+      (slugLower.includes('btc') || titleLower.includes('btc')) &&
+      (slugLower.includes('15-min') || slugLower.includes('15m') || slugLower.includes('15min') ||
+       titleLower.includes('15 min') || titleLower.includes('15-min') || titleLower.includes('15m')) &&
+      !slugLower.includes('daily') && !titleLower.includes('daily') &&
+      !slugLower.includes('hourly') && !titleLower.includes('hourly') &&
+      !slugLower.includes('5-min') && !titleLower.includes('5 min');
+
+    if (!isStrict15mBtc) {
+      console.warn(`⛔ [Server Bot] تم حظر التداول: السوق (${activeMarket.title}) ليس عقد بيتكوين 15 دقيقة! تم حصر الروبوت حصراً على عقود 15m.`);
+      currentWaitReason = 'تم إلغاء التداول: السوق المتاح ليس عقد بيتكوين 15 دقيقة. بانتظار توفر عقد BTC 15m الحصري.';
       return;
     }
 
     const orderbook = await serverMarketFetcher.getOrderBook(activeMarket.slug).catch(() => null);
     if (!orderbook) {
-      currentWaitReason = `دفتر الأوامر غير متوفر لسوق BTC (${activeMarket.slug})`;
+      currentWaitReason = `دفتر الأوامر غير متوفر لعقد BTC 15m (${activeMarket.slug})`;
       return;
     }
 
@@ -602,7 +640,7 @@ async function executeLimitlessTrade(targetToken: 'YES' | 'NO', btcPrice: number
     }
 
     if (rawPrice === null || rawPrice <= 0) {
-      currentWaitReason = `سعر عقد ${targetToken} في سوق BTC غير متاح حالياً`;
+      currentWaitReason = `سعر عقد ${targetToken} في سوق BTC 15m غير متاح حالياً`;
       return;
     }
 
@@ -610,12 +648,12 @@ async function executeLimitlessTrade(targetToken: 'YES' | 'NO', btcPrice: number
     const alignedPrice = Math.min(0.999, Math.max(0.001, Number((Math.round(rawPrice / 0.001) * 0.001).toFixed(3))));
 
     if (alignedPrice > ZSCORE_STRATEGY.maxEntryPrice) {
-      currentWaitReason = `سعر عقد ${targetToken} ($${alignedPrice}) أعلى من سقف الاستراتيجية ($${ZSCORE_STRATEGY.maxEntryPrice} - 20 سنت وتحت). بانتظار فرصة مناسبة.`;
+      currentWaitReason = `سعر عقد ${targetToken} ($${alignedPrice}) في سوق 15m أعلى من سقف الاستراتيجية ($${ZSCORE_STRATEGY.maxEntryPrice} - 20 سنت وتحت). بانتظار فرصة مناسبة.`;
       console.log(`⛔ [Server Bot] ${currentWaitReason}`);
       return;
     }
 
-    console.log(`🎯 [Server Bot] تم اقتناص فرصة في سوق: ${activeMarket.title} (${activeMarket.slug}) بسعر $${alignedPrice}`);
+    console.log(`🎯 [Server Bot] تم اقتناص فرصة في سوق BTC 15m: ${activeMarket.title} (${activeMarket.slug}) بسعر $${alignedPrice}`);
 
     // 1. جلب بيانات السوق والـ Venue وعناوين العقود عبر MarketFetcher
     const marketDetails = await serverMarketFetcher.getMarket(activeMarket.slug).catch(() => null);
@@ -928,6 +966,15 @@ app.get('/api/bot/status', (req, res) => {
   res.json({
     running: isServerBotRunning,
     strategy: 'Z-Score Only (Lookback: 20m)',
+    targetMarketFocus: 'BTC 15 Min Only (عقود بيتكوين 15 دقيقة حصراً)',
+    active15mMarket: cachedActive15mMarket
+      ? {
+          title: cachedActive15mMarket.title,
+          slug: cachedActive15mMarket.slug,
+          expirationTimestamp: cachedActive15mMarket.expirationTimestamp,
+          expirationDate: cachedActive15mMarket.expirationDate,
+        }
+      : null,
     wallet: serverWallet ? serverWallet.address : null,
     btcPrice: lastBtcPrice,
     zScore: lastCalculatedZScore,
@@ -943,6 +990,46 @@ app.get('/api/bot/status', (req, res) => {
     waitReason: currentWaitReason,
     recentTrades: executedTradesLog.slice(0, 10),
   });
+});
+
+// جلب تفاصيل عقد بيتكوين 15 دقيقة المباشر
+app.get('/api/market/active-15m', async (req, res) => {
+  try {
+    const market = await getServerActiveBtcMarket();
+    if (!market) {
+      return res.json({
+        found: false,
+        message: 'لا يوجد عقد بيتكوين 15 دقيقة نشط حالياً، بانتظار بدء نافذة الـ 15 دقيقة التالية على Limitless.',
+      });
+    }
+
+    const orderbook = await serverMarketFetcher.getOrderBook(market.slug).catch(() => null);
+    const bestAsk = orderbook?.asks?.[0]?.price ?? null;
+    const bestBid = orderbook?.bids?.[0]?.price ?? null;
+    const bestAskNo = bestBid !== null ? Number((1.0 - bestBid).toFixed(3)) : null;
+
+    return res.json({
+      found: true,
+      title: market.title,
+      slug: market.slug,
+      expirationTimestamp: market.expirationTimestamp,
+      expirationDate: market.expirationDate,
+      venueExchange: market.venue?.exchange,
+      tokens: market.tokens,
+      prices: {
+        bestAskYes: bestAsk,
+        bestAskNo,
+      },
+      orderbook: orderbook
+        ? {
+            asks: orderbook.asks?.slice(0, 5) || [],
+            bids: orderbook.bids?.slice(0, 5) || [],
+          }
+        : null,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/api/bot/toggle', (req, res) => {

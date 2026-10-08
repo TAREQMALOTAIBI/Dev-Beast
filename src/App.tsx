@@ -22,6 +22,7 @@ import {
   ExternalLink,
   ChevronDown,
   LogOut,
+  Clock,
 } from 'lucide-react';
 import { ethers } from 'ethers';
 
@@ -108,14 +109,37 @@ export default function App() {
   const [serverStatus, setServerStatus] = useState<{
     running: boolean;
     btcPrice?: number;
-    rsi?: number;
+    zScore?: number;
     waitReason?: string;
     tradeSizeUsdc?: number;
+    targetMarketFocus?: string;
+    active15mMarket?: {
+      title: string;
+      slug: string;
+      expirationTimestamp?: number;
+      expirationDate?: string;
+    } | null;
   }>({
-    running: true,
+    running: false,
     waitReason: 'في انتظار اكتمال شروط الاستراتيجية (Z-Score ≥ 2.0 أو ≤ -2.0) وسعر العقد ≤ 0.20$ (20 سنت وتحت)',
     tradeSizeUsdc: 0.50,
+    targetMarketFocus: 'BTC 15 Min Only (عقود بيتكوين 15 دقيقة حصراً)',
+    active15mMarket: null,
   });
+
+  // تفاصيل عقد بيتكوين 15 دقيقة اللحظي من السيرفر
+  const [active15mInfo, setActive15mInfo] = useState<{
+    found: boolean;
+    title?: string;
+    slug?: string;
+    expirationTimestamp?: number;
+    expirationDate?: string;
+    prices?: {
+      bestAskYes?: number | null;
+      bestAskNo?: number | null;
+    };
+    timeRemainingText?: string;
+  } | null>(null);
 
   const [isWalletModalOpen, setIsWalletModalOpen] = useState<boolean>(false);
   const [isConnectingWallet, setIsConnectingWallet] = useState<boolean>(false);
@@ -547,6 +571,37 @@ export default function App() {
     };
   }, [isStreaming]);
 
+  // جلب وتحديث تفاصيل عقد بيتكوين 15 دقيقة المباشر كل 3 ثوانٍ
+  useEffect(() => {
+    let timer: any = null;
+    const fetch15mMarket = async () => {
+      try {
+        const res = await fetch('/api/market/active-15m');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.found) {
+            let timeRemainingText = '';
+            if (data.expirationTimestamp) {
+              const diffSec = Math.max(0, Math.floor((data.expirationTimestamp - Date.now()) / 1000));
+              const mins = Math.floor(diffSec / 60);
+              const secs = diffSec % 60;
+              timeRemainingText = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            }
+            setActive15mInfo({ ...data, timeRemainingText });
+          } else {
+            setActive15mInfo(null);
+          }
+        }
+      } catch {}
+    };
+
+    fetch15mMarket();
+    timer = setInterval(fetch15mMarket, 3000);
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, []);
+
   // فحص حالة بيانات الاعتماد (.env)
   const fetchCredentialsStatus = useCallback(async () => {
     try {
@@ -796,6 +851,83 @@ export default function App() {
                     </>
                   )}
                 </button>
+              </div>
+            </div>
+
+            {/* بطاقة التركيز الحصري على عقود بيتكوين 15 دقيقة (Exclusive 15-Minute Bitcoin Contracts Focus) */}
+            <div className="bg-gradient-to-r from-amber-500/10 via-slate-900/90 to-cyan-500/10 border border-amber-500/30 rounded-2xl p-4 shadow-xl backdrop-blur-md">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className="p-2.5 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-400 shrink-0">
+                    <Clock className="w-5 h-5 animate-pulse" />
+                  </div>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-bold text-white">
+                        السوق المستهدف: عقود بيتكوين 15 دقيقة حصراً (BTC 15 Min Only)
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono">
+                        🔒 محظور: Daily & Hourly & 5m
+                      </span>
+                      {active15mInfo?.found && (
+                        <span className="px-2 py-0.5 rounded-md text-[11px] font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
+                          عقد 15m مباشر
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                      {active15mInfo?.title ? (
+                        <>
+                          العقد النشط حالياً: <span className="font-bold text-white font-mono">{active15mInfo.title}</span> <span className="text-slate-400 font-mono text-[11px]">({active15mInfo.slug})</span>
+                        </>
+                      ) : (
+                        'جاري فحص ومزامنة عقد الـ 15 دقيقة المفتوح على منصة Limitless Exchange...'
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                {/* إحصائيات عقد 15m اللحظية */}
+                <div className="flex flex-wrap items-center gap-3 self-end lg:self-center">
+                  {active15mInfo?.timeRemainingText && (
+                    <div className="px-3 py-1.5 rounded-xl bg-slate-950/90 border border-amber-500/30 text-xs text-right shadow-inner">
+                      <span className="text-[10px] text-slate-400 block">المتبقي على تسوية العقد</span>
+                      <span className="font-mono font-bold text-amber-400 text-sm">
+                        ⏳ {active15mInfo.timeRemainingText}
+                      </span>
+                    </div>
+                  )}
+                  <div className="px-3 py-1.5 rounded-xl bg-slate-950/90 border border-slate-800 text-xs text-right shadow-inner">
+                    <span className="text-[10px] text-slate-400 block">سعر شراء YES (15m)</span>
+                    <span className="font-mono font-bold text-cyan-300">
+                      {active15mInfo?.prices?.bestAskYes !== null && active15mInfo?.prices?.bestAskYes !== undefined
+                        ? `$${active15mInfo.prices.bestAskYes}`
+                        : 'غير متوفر'}
+                    </span>
+                  </div>
+                  <div className="px-3 py-1.5 rounded-xl bg-slate-950/90 border border-slate-800 text-xs text-right shadow-inner">
+                    <span className="text-[10px] text-slate-400 block">سعر شراء NO (15m)</span>
+                    <span className="font-mono font-bold text-purple-300">
+                      {active15mInfo?.prices?.bestAskNo !== null && active15mInfo?.prices?.bestAskNo !== undefined
+                        ? `$${active15mInfo.prices.bestAskNo}`
+                        : 'غير متوفر'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* شريط تشخيص السيرفر وسبب الانتظار */}
+              <div className="mt-3 pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2 text-slate-300">
+                  <span className="text-slate-400 text-[11px] font-semibold">حالة المحرك وسير العمل:</span>
+                  <span className="font-mono text-cyan-300 text-xs font-medium">
+                    {serverStatus.waitReason || 'في انتظار إشارة Z-Score حاسمة...'}
+                  </span>
+                </div>
+                <span className="text-[11px] text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20 font-medium">
+                  سقف الدخول: &le; 0.20$ (20 سنت وتحت) • عتبة Z-Score: &plusmn;2.0
+                </span>
               </div>
             </div>
 
