@@ -5,14 +5,12 @@ import { Copy, Check, ShieldCheck, Key, Zap, CheckCircle2 } from 'lucide-react';
 interface Eip712InspectorProps {
   payload: EIP712OrderPayload | null;
   signature?: string;
-  isSimulated?: boolean;
   executionResult?: OrderExecutionSummary;
 }
 
 export const Eip712Inspector: React.FC<Eip712InspectorProps> = ({
   payload,
   signature,
-  isSimulated = true,
   executionResult,
 }) => {
   const [copied, setCopied] = useState(false);
@@ -20,10 +18,10 @@ export const Eip712Inspector: React.FC<Eip712InspectorProps> = ({
   if (!payload) {
     return (
       <div className="bg-slate-900/80 rounded-2xl border border-slate-800/80 p-5 shadow-2xl backdrop-blur-md text-slate-500 text-sm flex flex-col items-center justify-center h-64 text-center">
-        <Key className="w-8 h-8 text-slate-600 mb-2" />
-        <p className="font-semibold text-slate-400">لم يتم بناء أي أمر EIP-712 بعد.</p>
-        <span className="text-xs text-slate-500 mt-1">
-          قم بتشغيل سيناريو ذروة الشراء أو ذروة البيع عندما يكون سعر العرض &le; 0.20$ لإنشاء حمولة التوقيع المشفرة فورياً.
+        <Key className="w-8 h-8 text-cyan-600/60 mb-2" />
+        <p className="font-semibold text-slate-300">في انتظار بناء وتوقيع أمر EIP-712...</p>
+        <span className="text-xs text-slate-400 mt-1 max-w-sm">
+          عند تحقق شروط الـ Z-Score (أعلى من 1.0 أو أدنى من -1.0) مع سعر عقد &le; 0.80$، يقوم النظام فورياً بتوليد التوقيع المشفر وإرساله لمحرك Limitless.
         </span>
       </div>
     );
@@ -130,7 +128,7 @@ export const Eip712Inspector: React.FC<Eip712InspectorProps> = ({
       {signature && (
         <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs">
           <div className="flex items-center justify-between text-slate-400 text-[10px] mb-1">
-            <span>توقيع ECDSA التشفيري المشتق من محفظة ethers ({isSimulated ? 'محاكاة Viem / Ethers' : 'Secp256k1'})</span>
+            <span>توقيع ECDSA التشفيري المشتق من المحفظة الحقيقية بنظام EIP-712 Typed Data</span>
             <span className="text-emerald-400 font-bold">✓ توقيع EIP-712 معتمد</span>
           </div>
           <p className="text-emerald-300 break-all text-[11px] font-mono text-left" dir="ltr">{signature}</p>

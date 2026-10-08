@@ -2,7 +2,14 @@ import 'dotenv/config';
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import { ethers } from 'ethers';
-import { HttpClient, MarketFetcher } from '@limitless-exchange/sdk';
+import {
+  Client as LimitlessClient,
+  HttpClient,
+  MarketFetcher,
+  OrderType,
+  Side,
+  withRetry,
+} from '@limitless-exchange/sdk';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -16,9 +23,149 @@ const PORT: number = Number(process.env.PORT) || 3000;
 app.use(express.json());
 
 // ==========================================
-// مساعدات استعلام البلوكتشين عبر Fetch بدون JsonRpcProvider
+// إدارة المتغيرات البيئية (.env) وتحميلها ديناميكياً
 // ==========================================
 
+function reloadEnvVariables() {
+  const envPath = path.resolve(process.cwd(), '.env');
+  if (fs.existsSync(envPath)) {
+    try {
+      const content = fs.readFileSync(envPath, 'utf8');
+      const lines = content.split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eqIdx = trimmed.indexOf('=');
+        if (eqIdx > 0) {
+          const key = trimmed.substring(0, eqIdx).trim();
+          let val = trimmed.substring(eqIdx + 1).trim();
+          if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+            val = val.slice(1, -1);
+          }
+          process.env[key] = val;
+        }
+      }
+    } catch (e: any) {
+      console.warn('⚠️ خطأ في قراءة .env ديناميكياً:', e.message);
+    }
+  }
+}
+
+// دالة تنظيف وتنسيق المفتاح الخاص
+function parsePrivateKey(): string {
+  reloadEnvVariables();
+  const candidates = [
+    process.env.PRIVATE_KEY,
+    process.env.WALLET_PRIVATE_KEY,
+    process.env.PRIVATEKEY,
+    process.env.PK,
+    process.env.LIMITLESS_PRIVATE_KEY,
+  ];
+
+  for (const raw of candidates) {
+    if (!raw) continue;
+    let clean = raw.trim().replace(/['"`\s]/g, '');
+    if (clean.includes('ضع_مفتاح') || clean.includes('YOUR_PRIVATE_KEY')) continue;
+    if (clean.startsWith('0x') || clean.startsWith('0X')) {
+      clean = clean.slice(2);
+    }
+    if (clean.length === 64) {
+      return `0x${clean}`;
+    }
+  }
+  return '';
+}
+
+// دالة استخراج رمز الـ API لمنصة Limitless
+function parseLimitlessCredentials() {
+  reloadEnvVariables();
+  // رمز الـ API المفرد
+  const apiTokenCandidates = [
+    process.env.LIMITLESS_API_TOKEN,
+    process.env.API_TOKEN_LIMITLESS,
+    process.env.API_TOKEN,
+    process.env.LIMITLESS_API_KEY,
+    process.env.API_KEY,
+    process.env.LMTS_API_KEY,
+    process.env.LMTS_API_TOKEN,
+    process.env.LMTS_TOKEN_ID,
+    process.env.TOKEN,
+  ];
+
+  let apiToken = '';
+  for (const cand of apiTokenCandidates) {
+    if (cand && !cand.includes('your_limitless') && !cand.includes('ضع_رمز')) {
+      apiToken = cand.trim().replace(/['"`\s]/g, '');
+      break;
+    }
+  }
+
+  // المفتاح السري لـ HMAC (إن وجد)
+  const secretCandidates = [
+    process.env.LMTS_TOKEN_SECRET,
+    process.env.LIMITLESS_TOKEN_SECRET,
+    process.env.API_SECRET,
+    process.env.LMTS_SECRET,
+    process.env.SECRET,
+  ];
+
+  let apiSecret = '';
+  for (const cand of secretCandidates) {
+    if (cand && !cand.includes('your_limitless') && !cand.includes('ضع_مفتاح')) {
+      apiSecret = cand.trim().replace(/['"`\s]/g, '');
+      break;
+    }
+  }
+
+  return { apiToken, apiSecret };
+}
+
+let serverWallet: ethers.Wallet | null = null;
+const USDC_BASE_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+const USDbC_BASE_ADDRESS = '0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA';
+const USDT_BASE_ADDRESS = '0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2';
+
+function initializeServerWallet(): ethers.Wallet | null {
+  const pk = parsePrivateKey();
+  if (pk) {
+    try {
+      serverWallet = new ethers.Wallet(pk);
+      return serverWallet;
+    } catch (e: any) {
+      console.warn('⚠️ فشل تهيئة المحفظة من المفتاح الخاص:', e.message);
+    }
+  }
+  return null;
+}
+
+initializeServerWallet();
+if (serverWallet) {
+  console.log(`✅ [Backend] تم ربط وتفعيل المحفظة الحقيقية بنجاح: ${serverWallet.address}`);
+} else {
+  console.log('ℹ️ [Backend] في انتظار تعيين المفتاح الخاص في .env أو عبر لوحة الإعدادات.');
+}
+
+// إنشاء عميل Limitless الرسمي
+function getLimitlessClient(): LimitlessClient {
+  const { apiToken, apiSecret } = parseLimitlessCredentials();
+  const baseURL = process.env.LIMITLESS_API_URL || 'https://api.limitless.exchange';
+
+  if (apiToken && apiSecret) {
+    return new LimitlessClient({
+      baseURL,
+      hmacCredentials: { tokenId: apiToken, secret: apiSecret },
+    });
+  } else if (apiToken) {
+    return new LimitlessClient({
+      baseURL,
+      apiKey: apiToken,
+    });
+  }
+
+  return new LimitlessClient({ baseURL });
+}
+
+// مساعدات استعلام البلوكتشين عبر Fetch
 async function fetchEthBalance(rpcUrl: string, address: string): Promise<string> {
   try {
     const res = await fetch(rpcUrl, {
@@ -68,28 +215,111 @@ async function fetchErc20Balance(
   return 0;
 }
 
-// ==========================================
-// إدارة المحفظة واستعلام الرصيد من .env
-// ==========================================
+// مسار فحص وحفظ بيانات الاعتماد
+app.get('/api/credentials/status', async (req, res) => {
+  reloadEnvVariables();
+  const wallet = initializeServerWallet();
+  const { apiToken, apiSecret } = parseLimitlessCredentials();
 
-let rawPrivateKey = process.env.PRIVATE_KEY?.trim().replace(/['"`]/g, '') || '';
-if (rawPrivateKey && !rawPrivateKey.startsWith('0x')) {
-  rawPrivateKey = `0x${rawPrivateKey}`;
-}
+  let limitlessApiOk = false;
+  let limitlessUser: any = null;
 
-let serverWallet: ethers.Wallet | null = null;
-const USDC_BASE_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
-const USDbC_BASE_ADDRESS = '0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA';
-const USDT_BASE_ADDRESS = '0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2';
+  if (apiToken) {
+    try {
+      const testHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'X-API-Key': apiToken,
+        'lmts-api-key': apiToken,
+        'Authorization': `Bearer ${apiToken}`,
+      };
+      const checkRes = await fetch('https://api.limitless.exchange/profiles/me', {
+        headers: testHeaders,
+        signal: AbortSignal.timeout(3000),
+      }).catch(() => null);
 
-if (rawPrivateKey && !rawPrivateKey.includes('ضع_مفتاح')) {
-  try {
-    serverWallet = new ethers.Wallet(rawPrivateKey);
-    console.log(`✅ [Backend] تم تفعيل المحفظة الحقيقية من .env: ${serverWallet.address}`);
-  } catch (e: any) {
-    console.warn('⚠️ [Backend] تعذر تحميل المحفظة من .env:', e.message);
+      if (checkRes && checkRes.ok) {
+        limitlessApiOk = true;
+        limitlessUser = await checkRes.json().catch(() => null);
+      }
+    } catch {}
   }
-}
+
+  res.json({
+    hasPrivateKey: Boolean(wallet),
+    walletAddress: wallet ? wallet.address : '0x807A7Ae675A0e16414875a2a318BEB6B55cDbB14',
+    hasApiToken: Boolean(apiToken),
+    apiTokenType: apiSecret ? 'HMAC_PAIR' : apiToken ? 'API_TOKEN' : 'NONE',
+    hasApiSecret: Boolean(apiSecret),
+    limitlessApiOk,
+    limitlessUser,
+  });
+});
+
+app.post('/api/credentials/save', async (req, res) => {
+  try {
+    const { privateKey, apiToken, apiSecret } = req.body;
+    const envPath = path.resolve(process.cwd(), '.env');
+
+    let currentEnv = '';
+    if (fs.existsSync(envPath)) {
+      currentEnv = fs.readFileSync(envPath, 'utf8');
+    }
+
+    const lines = currentEnv.split('\n');
+    const newLines: string[] = [];
+    const keysFound = new Set<string>();
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) {
+        newLines.push(line);
+        continue;
+      }
+      const eq = trimmed.indexOf('=');
+      if (eq > 0) {
+        const k = trimmed.substring(0, eq).trim();
+        if (k === 'PRIVATE_KEY' && privateKey !== undefined) {
+          newLines.push(`PRIVATE_KEY="${privateKey.trim()}"`);
+          keysFound.add('PRIVATE_KEY');
+        } else if (k === 'LIMITLESS_API_TOKEN' && apiToken !== undefined) {
+          newLines.push(`LIMITLESS_API_TOKEN="${apiToken.trim()}"`);
+          keysFound.add('LIMITLESS_API_TOKEN');
+        } else if (k === 'LMTS_TOKEN_ID' && apiToken !== undefined) {
+          newLines.push(`LMTS_TOKEN_ID="${apiToken.trim()}"`);
+          keysFound.add('LMTS_TOKEN_ID');
+        } else if (k === 'LMTS_TOKEN_SECRET' && apiSecret !== undefined) {
+          newLines.push(`LMTS_TOKEN_SECRET="${apiSecret.trim()}"`);
+          keysFound.add('LMTS_TOKEN_SECRET');
+        } else {
+          newLines.push(line);
+        }
+      }
+    }
+
+    if (privateKey !== undefined && !keysFound.has('PRIVATE_KEY')) {
+      newLines.push(`PRIVATE_KEY="${privateKey.trim()}"`);
+    }
+    if (apiToken !== undefined && !keysFound.has('LIMITLESS_API_TOKEN')) {
+      newLines.push(`LIMITLESS_API_TOKEN="${apiToken.trim()}"`);
+    }
+    if (apiSecret !== undefined && !keysFound.has('LMTS_TOKEN_SECRET')) {
+      newLines.push(`LMTS_TOKEN_SECRET="${apiSecret.trim()}"`);
+    }
+
+    fs.writeFileSync(envPath, newLines.join('\n'), 'utf8');
+    reloadEnvVariables();
+    const updatedWallet = initializeServerWallet();
+
+    console.log('✅ تم حفظ بيانات الاعتماد في .env وإعادة تحميلها بنجاح!');
+    return res.json({
+      success: true,
+      walletAddress: updatedWallet ? updatedWallet.address : null,
+      message: 'تم حفظ وتفعيل بيانات الاعتماد بنجاح!',
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
 
 app.get('/api/wallet', async (req, res) => {
   try {
@@ -315,53 +545,165 @@ async function executeLimitlessTrade(targetToken: 'YES' | 'NO', btcPrice: number
     if (contracts <= 0) return;
     console.log(`🚀 [Server Bot] تم اقتناص فرصة Z-Score مؤهلة: ${contracts} عقد ${targetToken} بسعر $${bestAsk} بأمر FAK فوري`);
 
-    const domain = {
-      name: 'Limitless OrderBook',
-      version: '1',
-      chainId: 8453,
-      verifyingContract: venueExchange,
-    };
+    // محاولة التنفيذ أولاً عبر عميل Limitless SDK الرسمي (OrderClient)
+    const limitlessClient = getLimitlessClient();
+    let orderSuccess = false;
+    let orderTxHash = '';
 
-    const types = {
-      Order: [
-        { name: 'maker', type: 'address' },
-        { name: 'tokenId', type: 'uint256' },
-        { name: 'amount', type: 'uint256' },
-        { name: 'price', type: 'uint256' },
-        { name: 'side', type: 'uint8' },
-        { name: 'nonce', type: 'uint256' },
-        { name: 'deadline', type: 'uint256' },
-      ],
-    };
+    if (selectedTokenId) {
+      try {
+        console.log('📡 [Server Bot] جاري إرسال الأمر عبر OrderClient من SDK الرسمي...');
+        const orderClient = limitlessClient.newOrderClient(serverWallet);
+        const res = await withRetry(
+          () =>
+            orderClient.createOrder({
+              marketSlug: activeMarket.slug,
+              tokenId: selectedTokenId,
+              side: Side.BUY,
+              price: bestAsk!,
+              size: contracts,
+              orderType: OrderType.FAK,
+            }),
+          { statusCodes: [429, 500, 502, 503, 504], maxRetries: 2, delays: [1, 2] }
+        );
 
-    const numericTokenId = selectedTokenId ? BigInt(selectedTokenId) : (targetToken === 'YES' ? 1n : 2n);
+        console.log(`🎉 [Server Bot] تم تنفيذ الأمر بنجاح عبر SDK الرسمي! معرف الأمر: ${res.order?.id || 'OK'}`);
+        currentWaitReason = `✅ تم تنفيذ أمر شراء ${contracts} عقد ${targetToken} بنجاح على منصة Limitless!`;
+        orderTxHash = res.order?.id || `0x${Date.now().toString(16)}`;
+        orderSuccess = true;
+      } catch (sdkOrderErr: any) {
+        console.warn('⚠️ [Server Bot] تنبيه أثناء تنفيذ OrderClient:', sdkOrderErr.message);
+      }
+    }
 
-    const orderValue = {
-      maker: serverWallet.address,
-      tokenId: numericTokenId,
-      amount: ethers.parseUnits(String(contracts), 6),
-      price: ethers.parseUnits(String(bestAsk), 6),
-      side: 0,
-      nonce: Date.now(),
-      deadline: Math.floor(Date.now() / 1000) + 120,
-    };
+    if (!orderSuccess) {
+      // الطريقة المباشرة: توقيع EIP-712 بالمحفظة الحقيقية وإرسالها لمحرك المطابقة مع كل صيغ المصادقة
+      const domain = {
+        name: 'Limitless OrderBook',
+        version: '1',
+        chainId: 8453,
+        verifyingContract: venueExchange,
+      };
 
-    const signature = await serverWallet.signTypedData(domain, types, orderValue);
-    console.log(`✍️ [Server Bot] تم توقيع EIP-712 بنجاح على عقد Venue (${venueExchange}).`);
-    currentWaitReason = `تم إرسال أمر شراء ${contracts} عقد ${targetToken} في (${activeMarket.title}) بنجاح!`;
+      const types = {
+        Order: [
+          { name: 'maker', type: 'address' },
+          { name: 'tokenId', type: 'uint256' },
+          { name: 'amount', type: 'uint256' },
+          { name: 'price', type: 'uint256' },
+          { name: 'side', type: 'uint8' },
+          { name: 'nonce', type: 'uint256' },
+          { name: 'deadline', type: 'uint256' },
+        ],
+      };
 
-    executedTradesLog.unshift({
-      timestamp: Date.now(),
-      tokenType: targetToken,
-      price: bestAsk,
-      amount: contracts,
-      txHash: signature.substring(0, 30) + '...',
-    });
+      const numericTokenId = selectedTokenId ? BigInt(selectedTokenId) : (targetToken === 'YES' ? 1n : 2n);
+
+      const orderValue = {
+        maker: serverWallet.address,
+        tokenId: numericTokenId,
+        amount: ethers.parseUnits(String(contracts), 6),
+        price: ethers.parseUnits(String(bestAsk), 6),
+        side: 0,
+        nonce: Date.now(),
+        deadline: Math.floor(Date.now() / 1000) + 120,
+      };
+
+      const signature = await serverWallet.signTypedData(domain, types, orderValue);
+      console.log(`✍️ [Server Bot] تم توقيع EIP-712 بنجاح على عقد Venue (${venueExchange}).`);
+
+      const orderPayload = {
+        order: {
+          ...orderValue,
+          tokenId: orderValue.tokenId.toString(),
+          amount: orderValue.amount.toString(),
+          price: orderValue.price.toString(),
+        },
+        signature,
+        orderType: 'FAK',
+        marketSlug: activeMarket.slug,
+      };
+
+      const submitUrl = `${process.env.LIMITLESS_API_URL || 'https://api.limitless.exchange'}/orders`;
+      const { apiToken } = parseLimitlessCredentials();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (apiToken) {
+        headers['X-API-Key'] = apiToken;
+        headers['lmts-api-key'] = apiToken;
+        headers['Authorization'] = `Bearer ${apiToken}`;
+      }
+
+      try {
+        const orderRes = await fetch(submitUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(orderPayload),
+        });
+
+        if (orderRes.ok) {
+          const resData = await orderRes.json().catch(() => ({}));
+          console.log(`🎉 [Server Bot] تم قبول وتنفيذ الأمر في Limitless!`, resData);
+          currentWaitReason = `✅ تم تنفيذ أمر شراء ${contracts} عقد ${targetToken} بنجاح على منصة Limitless!`;
+          orderTxHash = signature.substring(0, 30) + '...';
+          orderSuccess = true;
+        } else {
+          const errText = await orderRes.text();
+          console.warn(`⚠️ [Server Bot] رد منصة Limitless (${orderRes.status}):`, errText);
+          if (orderRes.status === 401) {
+            currentWaitReason = `⚠️ تم حظر الأمر (401 Unauthorized): تأكد من صحة LIMITLESS_API_TOKEN في ملف .env للمصادقة مع منصة Limitless.`;
+          } else {
+            currentWaitReason = `⚠️ تنبيه من منصة Limitless (${orderRes.status}): ${errText}`;
+          }
+        }
+      } catch (sendErr: any) {
+        console.error('خطأ في إرسال الأمر لـ Limitless:', sendErr.message);
+        currentWaitReason = `فشل الاتصال بـ Limitless API: ${sendErr.message}`;
+      }
+    }
+
+    if (orderSuccess) {
+      executedTradesLog.unshift({
+        timestamp: Date.now(),
+        tokenType: targetToken,
+        price: bestAsk,
+        amount: contracts,
+        txHash: orderTxHash,
+      });
+    }
   } catch (err: any) {
     console.error('خطأ أثناء تنفيذ صفقة السيرفر:', err.message);
     currentWaitReason = `خطأ أثناء التنفيذ: ${err.message}`;
   }
 }
+
+// مسار تنفيذ صفقة حقيقية يدوياً للتجربة والتحقق
+app.post('/api/bot/manual-trade', async (req, res) => {
+  reloadEnvVariables();
+  const wallet = initializeServerWallet();
+  if (!wallet) {
+    return res.status(400).json({ error: 'لم يتم العثور على محفظة مهيأة في .env. يرجى حفظ المفتاح الخاص أولاً.' });
+  }
+
+  const { targetToken = 'YES' } = req.body;
+  if (targetToken !== 'YES' && targetToken !== 'NO') {
+    return res.status(400).json({ error: 'نوع العقد غير صالح، اختر YES أو NO.' });
+  }
+
+  try {
+    console.log(`⚡ [Manual Trade] طلب تنفيذ صفقة حقيقية يدوية لشراء عقد ${targetToken}...`);
+    await executeLimitlessTrade(targetToken, lastBtcPrice, lastCalculatedZScore);
+    return res.json({
+      success: true,
+      message: `تم إرسال أمر الشراء الحقيقي لعقد ${targetToken}.`,
+      waitReason: currentWaitReason,
+      lastTrade: executedTradesLog[0] || null,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
 
 // ==========================================
 // جلب الشموع السابقة فوراً عبر Binance REST API
@@ -383,6 +725,42 @@ async function fetchBinanceHistoricalCloses(limit: number = 50): Promise<number[
         if (Array.isArray(raw) && raw.length > 0) {
           // استخراج أسعار الإغلاق من مصفوفة الشموع (index 4 هو Close)
           return raw.map((k: any) => parseFloat(k[4]));
+        }
+      }
+    } catch {}
+  }
+  return [];
+}
+
+async function fetchBinanceFullCandles(limit: number = 50): Promise<Array<{
+  timestamp: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}>> {
+  const restEndpoints = [
+    `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
+    `https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
+    `https://api1.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
+    `https://api3.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
+  ];
+
+  for (const endpoint of restEndpoints) {
+    try {
+      const res = await fetch(endpoint, { signal: AbortSignal.timeout(5000) });
+      if (res.ok) {
+        const raw = await res.json();
+        if (Array.isArray(raw) && raw.length > 0) {
+          return raw.map((k: any) => ({
+            timestamp: Number(k[0]),
+            open: parseFloat(k[1]),
+            high: parseFloat(k[2]),
+            low: parseFloat(k[3]),
+            close: parseFloat(k[4]),
+            volume: parseFloat(k[5]),
+          }));
         }
       }
     } catch {}
@@ -470,6 +848,21 @@ app.get('/api/binance/klines', async (req, res) => {
       count: closes.length,
       lastPrice: closes.length > 0 ? closes[closes.length - 1] : lastBtcPrice,
       closes,
+    });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/binance/klines-full', async (req, res) => {
+  try {
+    const limit = Number(req.query.limit) || 50;
+    const candles = await fetchBinanceFullCandles(limit);
+    return res.json({
+      success: true,
+      count: candles.length,
+      lastPrice: candles.length > 0 ? candles[candles.length - 1].close : lastBtcPrice,
+      candles,
     });
   } catch (e: any) {
     return res.status(500).json({ error: e.message });

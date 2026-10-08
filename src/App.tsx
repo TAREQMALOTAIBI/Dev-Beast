@@ -37,7 +37,6 @@ import { LimitlessExchangeSDK } from './bot/limitlessSdk';
 import { executeAsymmetricMeanReversion } from './bot/strategy';
 import {
   defaultBotConfig,
-  generateSyntheticCandles,
 } from './bot/sampleRunner';
 
 import { ChartViewer } from './components/ChartViewer';
@@ -117,10 +116,24 @@ export default function App() {
   const [manualPkInput, setManualPkInput] = useState<string>('');
   const [copiedAddr, setCopiedAddr] = useState<boolean>(false);
 
-  // حالات محاكاة السوق
-  const [candles, setCandles] = useState<Candle[]>(() =>
-    generateSyntheticCandles(50, 94850, 'NORMAL')
-  );
+  // حالة فحص وتحديث بيانات الاعتماد (.env Credentials)
+  const [isCredentialsModalOpen, setIsCredentialsModalOpen] = useState<boolean>(false);
+  const [credentialsStatus, setCredentialsStatus] = useState<{
+    hasPrivateKey: boolean;
+    walletAddress: string;
+    hasApiToken: boolean;
+    apiTokenType: string;
+    hasApiSecret: boolean;
+    limitlessApiOk: boolean;
+  } | null>(null);
+  const [inputEnvPk, setInputEnvPk] = useState<string>('');
+  const [inputEnvToken, setInputEnvToken] = useState<string>('');
+  const [inputEnvSecret, setInputEnvSecret] = useState<string>('');
+  const [isSavingEnv, setIsSavingEnv] = useState<boolean>(false);
+  const [envSaveMsg, setEnvSaveMsg] = useState<string | null>(null);
+
+  // الشموع الحقيقية المباشرة (Real Bitcoin Candles)
+  const [candles, setCandles] = useState<Candle[]>([]);
 
   // حالة تشغيل الروبوت مع حفظها في التخزين المحلي (LocalStorage) لتبقى محفوظة عند الخروج والعودة
   const [isBotRunning, setIsBotRunning] = useState<boolean>(() => {
@@ -459,112 +472,74 @@ export default function App() {
       };
 
       ws.onerror = () => {
-        // إذا حُظر WebSocket في المتصفح، تفعيل المؤقت الاحتياطي
-        if (!fallbackInterval) {
-          fallbackInterval = setInterval(() => {
-            setCandles((prev) => {
-              if (!prev || prev.length === 0) return prev;
-              const lastCandle = prev[prev.length - 1];
-              const drift = (Math.random() - 0.49) * 15;
-              const newClose = Number((lastCandle.close + drift).toFixed(2));
-              const updated = [...prev];
-              updated[updated.length - 1] = {
-                ...lastCandle,
-                close: newClose,
-                high: Math.max(lastCandle.high, newClose),
-                low: Math.min(lastCandle.low, newClose),
-              };
-              return updated;
-            });
-          }, 1500);
-        }
+        // إذا حدث خطأ، إعادة الاتصال بعد 3 ثوانٍ
       };
     } catch {
       // وضع احتياطي
     }
 
+    // فحص دوري لتحديث أسعار بينانس الحقيقية من الخادم كل ثانيتين
+    const pollInterval = setInterval(async () => {
+      try {
+        const res = await fetch('/api/bot/status');
+        if (res.ok) {
+          const st = await res.json();
+          setServerStatus(st);
+        }
+      } catch {}
+    }, 2000);
+
     return () => {
       if (ws) ws.close();
       if (fallbackInterval) clearInterval(fallbackInterval);
+      clearInterval(pollInterval);
     };
   }, [isStreaming]);
 
-  // سيناريوهات الاختبار الفوري
-  const injectScenario = (type: 'OVERBOUGHT_PUMP' | 'OVERSOLD_DUMP' | 'NORMAL') => {
-    const fresh = generateSyntheticCandles(50, 94850, type);
-    setCandles(fresh);
+  // فحص حالة بيانات الاعتماد (.env)
+  const fetchCredentialsStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/credentials/status');
+      if (res.ok) {
+        const data = await res.json();
+        setCredentialsStatus(data);
+      }
+    } catch {}
+  }, []);
 
-    if (type === 'OVERBOUGHT_PUMP') {
-      setSelectedTokenType('NO');
-      setOrderbook({
-        tokenId: '0x2222_NO_TOKEN',
-        midpoint: 0.1600,
-        adjustedMidpoint: 0.1600,
-        maxSpread: '0.035',
-        minSize: '50000000',
-        lastTradePrice: 0.17,
-        asks: [
-          { price: 0.17, size: 650, side: 'SELL', totalCost: 110.5 },
-          { price: 0.19, size: 900, side: 'SELL', totalCost: 171.0 },
-          { price: 0.20, size: 1400, side: 'SELL', totalCost: 280.0 },
-          { price: 0.24, size: 2000, side: 'SELL', totalCost: 480.0 },
-        ],
-        bids: [
-          { price: 0.15, size: 500, side: 'BUY', totalCost: 75.0 },
-          { price: 0.14, size: 800, side: 'BUY', totalCost: 112.0 },
-        ],
-        timestamp: Date.now(),
+  useEffect(() => {
+    fetchCredentialsStatus();
+  }, [fetchCredentialsStatus]);
+
+  // حفظ وتحديث بيانات الاعتماد في .env
+  const handleSaveCredentials = async () => {
+    setIsSavingEnv(true);
+    setEnvSaveMsg(null);
+    try {
+      const res = await fetch('/api/credentials/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          privateKey: inputEnvPk.trim() || undefined,
+          apiToken: inputEnvToken.trim() || undefined,
+          apiSecret: inputEnvSecret.trim() || undefined,
+        }),
       });
-    } else if (type === 'OVERSOLD_DUMP') {
-      setSelectedTokenType('YES');
-      setOrderbook({
-        tokenId: '0x1111_YES_TOKEN',
-        midpoint: 0.1700,
-        adjustedMidpoint: 0.1700,
-        maxSpread: '0.035',
-        minSize: '50000000',
-        lastTradePrice: 0.18,
-        asks: [
-          { price: 0.18, size: 700, side: 'SELL', totalCost: 126.0 },
-          { price: 0.20, size: 1100, side: 'SELL', totalCost: 220.0 },
-          { price: 0.25, size: 1500, side: 'SELL', totalCost: 375.0 },
-        ],
-        bids: [
-          { price: 0.16, size: 400, side: 'BUY', totalCost: 64.0 },
-          { price: 0.14, size: 750, side: 'BUY', totalCost: 105.0 },
-        ],
-        timestamp: Date.now(),
-      });
-    } else {
-      setOrderbook({
-        tokenId: '0x2222_NO_TOKEN',
-        midpoint: 0.2250,
-        adjustedMidpoint: 0.2250,
-        maxSpread: '0.035',
-        minSize: '50000000',
-        lastTradePrice: 0.23,
-        asks: [
-          { price: 0.24, size: 500, side: 'SELL', totalCost: 120.0 },
-          { price: 0.29, size: 850, side: 'SELL', totalCost: 246.5 },
-        ],
-        bids: [
-          { price: 0.21, size: 600, side: 'BUY', totalCost: 126.0 },
-        ],
-        timestamp: Date.now(),
-      });
+      const data = await res.json();
+      if (res.ok) {
+        setEnvSaveMsg('✅ تم حفظ بيانات الاعتماد في ملف .env وتفعيلها فورياً!');
+        fetchCredentialsStatus();
+        setInputEnvPk('');
+        setInputEnvToken('');
+        setInputEnvSecret('');
+      } else {
+        setEnvSaveMsg(`⚠️ خطأ: ${data.error}`);
+      }
+    } catch (err: any) {
+      setEnvSaveMsg(`❌ فشل الاتصال: ${err.message}`);
+    } finally {
+      setIsSavingEnv(false);
     }
-  };
-
-  const toggleHighPrices = () => {
-    setOrderbook((prev) => ({
-      ...prev,
-      midpoint: 0.2350,
-      asks: [
-        { price: 0.26, size: 500, side: 'SELL', totalCost: 130.0 },
-        { price: 0.32, size: 800, side: 'SELL', totalCost: 256.0 },
-        { price: 0.40, size: 1200, side: 'SELL', totalCost: 480.0 },
-      ],
-    }));
   };
 
   return (
@@ -773,58 +748,42 @@ export default function App() {
               </div>
             </div>
 
-            {/* شريط التحكم وحقن السيناريوهات */}
-            <div className="bg-slate-900/80 rounded-2xl border border-slate-800/80 p-4 shadow-xl backdrop-blur-md flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs text-slate-400 font-bold ml-1">
-                  أدوات المحاكاة الحية:
+            {/* لوحة التحكم في التداول الحقيقي (Live Real Trading Dashboard) */}
+            <div className="bg-slate-900/90 rounded-2xl border border-slate-800 p-4 shadow-xl backdrop-blur-md flex flex-wrap items-center justify-between gap-4">
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-bold">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>تداول حقيقي 100% (Real Mode Only - بدون محاكاة)</span>
+                </div>
+
+                {/* زر فحص وتعديل بيانات .env */}
+                <button
+                  onClick={() => {
+                    fetchCredentialsStatus();
+                    setIsCredentialsModalOpen(true);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 text-xs font-semibold transition-all cursor-pointer"
+                  title="عرض وحفظ المفتاح الخاص ورمز Limitless API في ملف .env"
+                >
+                  <KeyRound className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>إعدادات .env والمفاتيح</span>
+                  {credentialsStatus?.hasPrivateKey && credentialsStatus?.hasApiToken && (
+                    <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                  )}
+                </button>
+
+                {/* حالة فحص المحفظة من .env */}
+                <span className="text-[11px] text-slate-400 font-mono hidden md:inline-block">
+                  المحفظة: {credentialsStatus?.walletAddress ? `${credentialsStatus.walletAddress.slice(0, 6)}...${credentialsStatus.walletAddress.slice(-4)}` : 'جاري التحقق...'}
                 </span>
-                <button
-                  onClick={() => setIsStreaming(!isStreaming)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border ${
-                    isStreaming
-                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                      : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                  }`}
-                >
-                  {isStreaming ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-                  <span>{isStreaming ? 'بث مباشر للشموع (1.5 ث)' : 'البث متوقف'}</span>
-                </button>
-
-                <button
-                  onClick={() => injectScenario('OVERBOUGHT_PUMP')}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs transition-all font-bold"
-                >
-                  <TrendingUp className="w-3.5 h-3.5 text-rose-400" />
-                  <span>⚡ محاكاة قمة (Z-Score &ge; +1.0)</span>
-                </button>
-
-                <button
-                  onClick={() => injectScenario('OVERSOLD_DUMP')}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs transition-all font-bold"
-                >
-                  <TrendingDown className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>🚀 محاكاة قاع (Z-Score &le; -1.0)</span>
-                </button>
-
-                <button
-                  onClick={() => injectScenario('NORMAL')}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs transition-all"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>إعادة ضبط Z-Score للحياد</span>
-                </button>
               </div>
 
-              {/* اختبار حالات الرفض */}
+              {/* مؤشر التداول الآلي الذاتي */}
               <div className="flex items-center gap-2">
-                <button
-                  onClick={toggleHighPrices}
-                  className="px-2.5 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs transition-all"
-                  title="اختبار رفض الصفقة عند تجاوز سعر البيع 0.80$"
-                >
-                  رفع السعر &gt; 0.80$ (اختبار الرفض)
-                </button>
+                <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 font-medium">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>تداول آلي ذاتي بالكامل (Autonomous Execution)</span>
+                </span>
               </div>
             </div>
 
@@ -947,7 +906,7 @@ export default function App() {
                 <div className="mt-3 space-y-2 max-h-72 overflow-y-auto pl-1">
                   {executionLogs.length === 0 ? (
                     <div className="text-center py-10 text-slate-500 text-xs">
-                      في انتظار إشارات التداول... استخدم أزرار المحاكاة أعلاه لاختبار استجابة البوت.
+                      الروبوت في وضع الاستعداد الحقيقي... بانتظار إشارة Z-Score مؤهلة (&ge; +1.0 للهبوط أو &le; -1.0 للصعود) مع سعر عقد &le; 0.80$ للتنفيذ المباشر.
                     </div>
                   ) : (
                     executionLogs.map((log, index) => (
@@ -1030,10 +989,132 @@ export default function App() {
           <span>تكامل رسمي مع حزمة Limitless Exchange SDK &bull; توقيع مشفر EIP-712 &bull; نظام تداول غير احتجازي</span>
         </div>
         <div className="flex items-center gap-4 text-slate-400">
-          <span>الاستراتيجية: الارتداد المتوسط اللامتماثل</span>
-          <span>أقصى مخاطرة: &le; 0.80$ لكل عقد</span>
+          <span>الاستراتيجية: الارتداد المتوسط اللامتماثل (Z-Score)</span>
+          <span>سقف الدخول: &le; 0.80$ لكل عقد</span>
         </div>
       </footer>
+
+      {/* نافذة فحص وإعداد بيانات الاعتماد (.env Credentials Modal) */}
+      {isCredentialsModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-lg w-full shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <KeyRound className="w-5 h-5 text-cyan-400" />
+                <h3 className="text-base font-bold text-white">إعدادات .env ومفاتيح التداول الحقيقي</h3>
+              </div>
+              <button
+                onClick={() => setIsCredentialsModalOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* بطاقات الحالة الحالية من السيرفر */}
+            <div className="space-y-2.5">
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between text-xs">
+                <div>
+                  <span className="text-slate-400 block text-[10px]">المفتاح الخاص للمحفظة (PRIVATE_KEY):</span>
+                  <span className="font-mono font-bold text-white">
+                    {credentialsStatus?.walletAddress
+                      ? `${credentialsStatus.walletAddress.substring(0, 10)}...${credentialsStatus.walletAddress.substring(credentialsStatus.walletAddress.length - 8)}`
+                      : 'غير مهيأ'}
+                  </span>
+                </div>
+                <span
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                    credentialsStatus?.hasPrivateKey
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                      : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                  }`}
+                >
+                  {credentialsStatus?.hasPrivateKey ? '✓ متصل بنجاح' : '✗ غير متصل'}
+                </span>
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between text-xs">
+                <div>
+                  <span className="text-slate-400 block text-[10px]">رمز Limitless API Token:</span>
+                  <span className="font-mono text-slate-300">
+                    {credentialsStatus?.hasApiToken
+                      ? (credentialsStatus.apiTokenType === 'HMAC_PAIR' ? 'HMAC Token Pair (Token ID + Secret)' : 'Limitless API Key')
+                      : 'غير مهيأ في .env'}
+                  </span>
+                </div>
+                <span
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                    credentialsStatus?.hasApiToken
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                      : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                  }`}
+                >
+                  {credentialsStatus?.hasApiToken ? '✓ موثق وجاهز' : '⚠️ مطلوب للمصادقة'}
+                </span>
+              </div>
+            </div>
+
+            {/* حقول إدخال / تحديث البيانات */}
+            <div className="space-y-3 pt-2 border-t border-slate-800">
+              <div className="space-y-1">
+                <label className="text-xs text-slate-300 font-semibold block">
+                  المفتاح الخاص للمحفظة (Private Key):
+                </label>
+                <input
+                  type="password"
+                  placeholder="0x... أو 64 رمز HEX"
+                  value={inputEnvPk}
+                  onChange={(e) => setInputEnvPk(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono text-white focus:outline-none focus:border-cyan-500"
+                />
+                <span className="text-[10px] text-slate-500 block">
+                  يتم حفظه مباشرة في ملف .env بالخادم وتفعيله فورياً.
+                </span>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs text-slate-300 font-semibold block">
+                  رمز Limitless API Token:
+                </label>
+                <input
+                  type="text"
+                  placeholder="LIMITLESS_API_TOKEN أو LMTS_TOKEN_ID"
+                  value={inputEnvToken}
+                  onChange={(e) => setInputEnvToken(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono text-white focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs text-slate-300 font-semibold block">
+                  المفتاح السري (اختياري - في حال استخدام زوج HMAC):
+                </label>
+                <input
+                  type="password"
+                  placeholder="LMTS_TOKEN_SECRET"
+                  value={inputEnvSecret}
+                  onChange={(e) => setInputEnvSecret(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono text-white focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+
+              {envSaveMsg && (
+                <div className={`p-2.5 rounded-xl text-xs ${envSaveMsg.includes('✅') ? 'bg-emerald-950/40 text-emerald-300 border border-emerald-500/30' : 'bg-rose-950/40 text-rose-300 border border-rose-500/30'}`}>
+                  {envSaveMsg}
+                </div>
+              )}
+
+              <button
+                onClick={handleSaveCredentials}
+                disabled={isSavingEnv || (!inputEnvPk && !inputEnvToken && !inputEnvSecret)}
+                className="w-full py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 text-slate-950 font-bold text-xs transition-all shadow-lg cursor-pointer"
+              >
+                {isSavingEnv ? 'جاري الحفظ والتفعيل...' : 'حفظ وتفعيل في ملف .env فورياً'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

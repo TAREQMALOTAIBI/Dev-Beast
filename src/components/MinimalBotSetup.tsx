@@ -54,12 +54,12 @@ function cleanPrivateKey(rawKey: string): string {
   return clean ? \`0x\${clean}\` : '';
 }
 
-const rawPkInput = process.env.PRIVATE_KEY || '${config.privateKey || '0x...'}';
+const rawPkInput = process.env.PRIVATE_KEY || process.env.WALLET_PRIVATE_KEY || '${config.privateKey || '0x...'}';
 const formattedPk = cleanPrivateKey(rawPkInput);
 
 const CREDENTIALS = {
-  tokenId: (process.env.LMTS_TOKEN_ID || '${config.lmtsTokenId || ''}').trim(),
-  secret: (process.env.LMTS_TOKEN_SECRET || '${config.lmtsTokenSecret || ''}').trim(),
+  tokenId: (process.env.LIMITLESS_API_TOKEN || process.env.API_TOKEN || process.env.LMTS_TOKEN_ID || '${config.lmtsTokenId || ''}').trim(),
+  secret: (process.env.LMTS_TOKEN_SECRET || process.env.LIMITLESS_TOKEN_SECRET || '${config.lmtsTokenSecret || ''}').trim(),
   privateKey: formattedPk,
 };
 
