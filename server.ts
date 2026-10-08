@@ -153,9 +153,9 @@ function initializeServerWallet(): ethers.Wallet | null {
   return null;
 }
 
-initializeServerWallet();
-if (serverWallet) {
-  console.log(`✅ [Backend] تم ربط وتفعيل المحفظة الحقيقية بنجاح: ${serverWallet.address}`);
+const initWallet = initializeServerWallet();
+if (initWallet) {
+  console.log(`✅ [Backend] تم ربط وتفعيل المحفظة الحقيقية بنجاح: ${initWallet.address}`);
 } else {
   console.log('ℹ️ [Backend] في انتظار تعيين المفتاح الخاص في .env أو عبر لوحة الإعدادات.');
 }
@@ -273,7 +273,9 @@ app.get('/api/portfolio/positions', async (req, res) => {
     }
 
     const client = getLimitlessClient();
-    const positions = await client.portfolio.getPositions(targetAddress).catch(() => null);
+    const positions = await (client.portfolio as any).getPositions(targetAddress).catch(async () => {
+      return await client.portfolio.getPositions().catch(() => null);
+    });
     return res.json(positions || { clob: [], amm: [] });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -437,7 +439,29 @@ app.get('/api/wallet', async (req, res) => {
 // محرك التداول الآلي على السيرفر (Server Trading Engine - Z-Score Strategy)
 // ==========================================
 
-let isServerBotRunning = true;
+const BOT_STATE_FILE = path.resolve(process.cwd(), '.bot_state.json');
+
+function loadBotRunningState(): boolean {
+  try {
+    if (fs.existsSync(BOT_STATE_FILE)) {
+      const data = JSON.parse(fs.readFileSync(BOT_STATE_FILE, 'utf8'));
+      if (typeof data.running === 'boolean') {
+        return data.running;
+      }
+    }
+  } catch {}
+  return false; // الافتراضي: متوقف مؤقتاً لحماية الحساب حتى يفعله المستخدم يدوياً
+}
+
+function saveBotRunningState(running: boolean) {
+  try {
+    fs.writeFileSync(BOT_STATE_FILE, JSON.stringify({ running, updatedAt: new Date().toISOString() }), 'utf8');
+  } catch (err: any) {
+    console.warn('⚠️ فشل حفظ حالة الروبوت في الملف:', err.message);
+  }
+}
+
+let isServerBotRunning = loadBotRunningState();
 let lastServerEvalTime = 0;
 const candleCloses: number[] = [];
 let lastEvaluatedSignal: string = 'NEUTRAL';
@@ -445,7 +469,9 @@ let lastBtcPrice: number = 94500;
 let lastCalculatedZScore: number = 0.0;
 let lastCalculatedMean: number = 94500;
 let lastCalculatedStdDev: number = 50;
-let currentWaitReason: string = 'في انتظار إشارة Z-Score حاسمة (> +2.0 للهبوط أو < -2.0 للصعود) مع سعر عقد ≤ 0.20$ (20 سنت وتحت)';
+let currentWaitReason: string = isServerBotRunning
+  ? 'في انتظار إشارة Z-Score حاسمة (> +2.0 للهبوط أو < -2.0 للصعود) مع سعر عقد ≤ 0.20$'
+  : 'الروبوت متوقف مؤقتاً (PAUSED) - اضغط تشغيل لتفعيل التداول الآلي';
 
 let executedTradesLog: Array<{
   timestamp: number;
@@ -522,12 +548,7 @@ async function getServerActiveBtcMarket(): Promise<any | null> {
         );
         if (btc5m.length > 0) return btc5m[0];
 
-        // 3. أي سوق نشط لـ BTC
-        const anyBtc = validMarkets.filter(
-          (m: any) =>
-            m.slug.includes('btc') || m.title?.toLowerCase().includes('btc')
-        );
-        if (anyBtc.length > 0) return anyBtc[0];
+        // تم إلغاء أسواق Daily و Hourly لمنع أي تداول غير مقصود على الأسواق الطويلة
       }
     }
   } catch (err: any) {
@@ -538,7 +559,14 @@ async function getServerActiveBtcMarket(): Promise<any | null> {
 }
 
 async function executeLimitlessTrade(targetToken: 'YES' | 'NO', btcPrice: number, currentZScore: number) {
-  if (!serverWallet || !isServerBotRunning) return;
+  if (!serverWallet) return;
+
+  // فحص أمان صارم: إذا كان الروبوت متوقفاً يُمنع التنفيذ فوراً
+  if (!isServerBotRunning) {
+    console.log('⛔ [Server Bot] التداول متوقف مؤقتاً (PAUSED) - تم حظر فتح أي صفقة.');
+    currentWaitReason = 'الروبوت متوقف مؤقتاً (PAUSED) - اضغط زر تشغيل الروبوت لتفعيل التداول الآلي.';
+    return;
+  }
 
   // فترة تبريد (Cooldown) لمنع تكرار الصفقات على نفس الإشارة
   if (Date.now() - lastExecutedTradeTime < 45000) {
@@ -611,6 +639,13 @@ async function executeLimitlessTrade(targetToken: 'YES' | 'NO', btcPrice: number
     const contracts = Math.max(1, Math.floor(tradeBudget / alignedPrice));
 
     console.log(`🚀 [Server Bot] تم اقتناص فرصة Z-Score مؤهلة: ${contracts} عقد ${targetToken} بسعر $${alignedPrice} (الميزانية: $${(contracts * alignedPrice).toFixed(2)} USDC)`);
+
+    // فحص أمان صارم قبل محاولة تنفيذ الأمر
+    if (!isServerBotRunning) {
+      console.log('⛔ [Server Bot] تحقق أمان فوري: الروبوت متوقف مؤقتاً (PAUSED) - تم إلغاء إنشاء الأمر فوراً.');
+      currentWaitReason = 'الروبوت متوقف مؤقتاً (PAUSED) - اضغط تشغيل لتفعيل التداول الآلي';
+      return;
+    }
 
     // محاولة التنفيذ أولاً عبر عميل Limitless SDK الرسمي (OrderClient) مع التوقيع المشفر
     const limitlessClient = getLimitlessClient();
@@ -714,33 +749,6 @@ async function executeLimitlessTrade(targetToken: 'YES' | 'NO', btcPrice: number
   }
 }
 
-// مسار تنفيذ صفقة حقيقية يدوياً للتجربة والتحقق
-app.post('/api/bot/manual-trade', async (req, res) => {
-  reloadEnvVariables();
-  const wallet = initializeServerWallet();
-  if (!wallet) {
-    return res.status(400).json({ error: 'لم يتم العثور على محفظة مهيأة في .env. يرجى حفظ المفتاح الخاص أولاً.' });
-  }
-
-  const { targetToken = 'YES' } = req.body;
-  if (targetToken !== 'YES' && targetToken !== 'NO') {
-    return res.status(400).json({ error: 'نوع العقد غير صالح، اختر YES أو NO.' });
-  }
-
-  try {
-    console.log(`⚡ [Manual Trade] طلب تنفيذ صفقة حقيقية يدوية لشراء عقد ${targetToken}...`);
-    await executeLimitlessTrade(targetToken, lastBtcPrice, lastCalculatedZScore);
-    return res.json({
-      success: true,
-      message: `تم إرسال أمر الشراء الحقيقي لعقد ${targetToken}.`,
-      waitReason: currentWaitReason,
-      lastTrade: executedTradesLog[0] || null,
-    });
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
 // ==========================================
 // جلب الشموع السابقة فوراً عبر Binance REST API
 // ==========================================
@@ -834,7 +842,7 @@ async function startServerPriceFeed() {
         }
 
         const now = Date.now();
-        if (candleCloses.length >= (ZSCORE_STRATEGY.lookbackPeriod - 1) && isServerBotRunning && (kline.x || now - lastServerEvalTime >= 2000)) {
+        if (candleCloses.length >= (ZSCORE_STRATEGY.lookbackPeriod - 1) && (kline.x || now - lastServerEvalTime >= 2000)) {
           lastServerEvalTime = now;
           const livePrices = kline.x
             ? candleCloses
@@ -845,13 +853,20 @@ async function startServerPriceFeed() {
           lastCalculatedMean = mean;
           lastCalculatedStdDev = stdDev;
 
-          // 1. إشارة هبوط: Z-Score >= +1.0 -> شراء عقد NO (القمة)
+          // إذا كان الروبوت متوقفاً، نوقف التداول تماماً ونحدث فقط شريط الانتظار
+          if (!isServerBotRunning) {
+            currentWaitReason = `الروبوت متوقف مؤقتاً (PAUSED) - لن يتم فتح أي صفقات | Z-Score اللحظي = ${zScore > 0 ? '+' : ''}${zScore}`;
+            lastEvaluatedSignal = zScore >= ZSCORE_STRATEGY.upperThreshold ? 'OVERBOUGHT' : (zScore <= ZSCORE_STRATEGY.lowerThreshold ? 'OVERSOLD' : 'NEUTRAL');
+            return;
+          }
+
+          // 1. إشارة هبوط: Z-Score >= +2.0 -> شراء عقد NO (القمة)
           if (zScore >= ZSCORE_STRATEGY.upperThreshold) {
             lastEvaluatedSignal = 'OVERBOUGHT';
             console.log(`🚨 [Server Bot]: إشارة هبوط Z-Score! Z = +${zScore} (أعلى من +${ZSCORE_STRATEGY.upperThreshold}). جاري شراء عقد NO...`);
             await executeLimitlessTrade('NO', lastBtcPrice, zScore);
           }
-          // 2. إشارة صعود: Z-Score <= -1.0 -> شراء عقد YES (الارتداد)
+          // 2. إشارة صعود: Z-Score <= -2.0 -> شراء عقد YES (الارتداد)
           else if (zScore <= ZSCORE_STRATEGY.lowerThreshold) {
             lastEvaluatedSignal = 'OVERSOLD';
             console.log(`🚨 [Server Bot]: إشارة صعود Z-Score! Z = ${zScore} (أدنى من ${ZSCORE_STRATEGY.lowerThreshold}). جاري شراء عقد YES...`);
@@ -937,8 +952,12 @@ app.post('/api/bot/toggle', (req, res) => {
   } else {
     isServerBotRunning = !isServerBotRunning;
   }
+  saveBotRunningState(isServerBotRunning);
+  currentWaitReason = isServerBotRunning
+    ? 'في انتظار إشارة Z-Score حاسمة (> +2.0 للهبوط أو < -2.0 للصعود) مع سعر عقد ≤ 0.20$'
+    : 'الروبوت متوقف مؤقتاً (PAUSED) - اضغط تشغيل لتفعيل التداول الآلي';
   console.log(`🎛️ [Server Bot] تم تغيير حالة تشغيل الروبوت على السيرفر إلى: ${isServerBotRunning ? 'تشغيل (RUNNING)' : 'إيقاف (STOPPED)'}`);
-  res.json({ running: isServerBotRunning });
+  res.json({ running: isServerBotRunning, waitReason: currentWaitReason });
 });
 
 // ==========================================

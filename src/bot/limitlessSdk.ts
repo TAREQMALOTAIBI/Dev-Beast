@@ -615,36 +615,6 @@ export class LimitlessExchangeSDK {
   }> {
     const targetPrice = parseFloat(payload.message.price) / 1e6;
     const requestedSize = parseInt(payload.message.makerAmount, 10);
-    const tokenType = payload.message.tokenId.endsWith('1') || payload.message.tokenId.includes('yes') ? 'YES' : 'NO';
-
-    try {
-      const res = await fetch('/api/bot/manual-trade', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetToken: tokenType }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        return {
-          orderId: data.lastTrade?.txHash || `0xlimitless_${Date.now()}`,
-          executionSummary: {
-            settlementStatus: 'CONFIRMED',
-            terminalStatus: 'FILLED',
-            makerMatches: [
-              {
-                makerOrderId: `0xlimitless_match_${Date.now()}`,
-                matchedPrice: data.lastTrade?.price || targetPrice,
-                matchedSize: data.lastTrade?.amount || requestedSize,
-              },
-            ],
-            filledContracts: data.lastTrade?.amount || requestedSize,
-            averageExecutionPrice: data.lastTrade?.price || targetPrice,
-            totalCostUsdc: Number(((data.lastTrade?.price || targetPrice) * (data.lastTrade?.amount || requestedSize)).toFixed(2)),
-          },
-          txHash: data.lastTrade?.txHash || signature.substring(0, 30) + '...',
-        };
-      }
-    } catch {}
 
     return {
       orderId: `0xlimitless_${Date.now()}`,

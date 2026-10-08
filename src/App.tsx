@@ -143,15 +143,43 @@ export default function App() {
   // الشموع الحقيقية المباشرة (Real Bitcoin Candles)
   const [candles, setCandles] = useState<Candle[]>([]);
 
-  // حالة تشغيل الروبوت مع حفظها في التخزين المحلي (LocalStorage) لتبقى محفوظة عند الخروج والعودة
+  // حالة تشغيل الروبوت مع حفظها في التخزين المحلي (الافتراضي: false لحماية المحفظة حتى يفعلها المستخدم)
   const [isBotRunning, setIsBotRunning] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('limitless_bot_running');
-      return saved !== null ? saved === 'true' : true;
+      return saved !== null ? saved === 'true' : false;
     } catch (e) {
-      return true;
+      return false;
     }
   });
+
+  // مزامنة حالة تشغيل الروبوت من السيرفر فور فتح الواجهة
+  useEffect(() => {
+    const syncBotRunningStatus = async () => {
+      try {
+        const response = await fetch('/api/bot/status');
+        if (response.ok) {
+          const data = await response.json();
+          if (typeof data.running === 'boolean') {
+            setIsBotRunning(data.running);
+            localStorage.setItem('limitless_bot_running', data.running ? 'true' : 'false');
+          }
+          if (data.waitReason) {
+            setServerStatus((prev) => ({
+              ...prev,
+              running: data.running,
+              waitReason: data.waitReason,
+              btcPrice: data.btcPrice,
+              tradeSizeUsdc: data.tradeSizeUsdc,
+            }));
+          }
+        }
+      } catch {
+        // في حال عدم توفر السيرفر
+      }
+    };
+    syncBotRunningStatus();
+  }, []);
 
   // حفظ حالة تشغيل الروبوت تلقائياً عند تغييرها
   useEffect(() => {
@@ -175,12 +203,27 @@ export default function App() {
   const handleToggleBot = async () => {
     const nextState = !isBotRunning;
     setIsBotRunning(nextState);
+    localStorage.setItem('limitless_bot_running', nextState ? 'true' : 'false');
     try {
-      await fetch('/api/bot/toggle', {
+      const res = await fetch('/api/bot/toggle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ running: nextState }),
       });
+      if (res.ok) {
+        const data = await res.json();
+        if (typeof data.running === 'boolean') {
+          setIsBotRunning(data.running);
+          localStorage.setItem('limitless_bot_running', data.running ? 'true' : 'false');
+        }
+        if (data.waitReason) {
+          setServerStatus((prev) => ({
+            ...prev,
+            running: data.running,
+            waitReason: data.waitReason,
+          }));
+        }
+      }
     } catch {
       // وضع غير متصل
     }
