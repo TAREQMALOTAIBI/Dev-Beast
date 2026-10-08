@@ -79,45 +79,60 @@ function parsePrivateKey(): string {
 // دالة استخراج رمز الـ API لمنصة Limitless
 function parseLimitlessCredentials() {
   reloadEnvVariables();
-  // رمز الـ API المفرد
+
+  // 1. فحص إذا كان هناك زوج HMAC (معرف التوكن + المفتاح السري)
+  const tokenId = (
+    process.env.LMTS_TOKEN_ID ||
+    process.env.LIMITLESS_API_TOKEN ||
+    process.env.API_TOKEN_LIMITLESS ||
+    ''
+  ).trim();
+
+  const secretId = (
+    process.env.LMTS_TOKEN_SECRET ||
+    process.env.LIMITLESS_TOKEN_SECRET ||
+    process.env.API_SECRET ||
+    process.env.LMTS_SECRET ||
+    ''
+  ).trim();
+
+  // في حال إدخال "tokenId:secret" في حقل واحد
+  if (tokenId.includes(':') && !secretId) {
+    const parts = tokenId.split(':');
+    return {
+      apiToken: parts[0].trim().replace(/['"`\s]/g, ''),
+      apiSecret: parts[1].trim().replace(/['"`\s]/g, ''),
+    };
+  }
+
+  if (tokenId && secretId && !tokenId.includes('your_') && !secretId.includes('your_')) {
+    return {
+      apiToken: tokenId.replace(/['"`\s]/g, ''),
+      apiSecret: secretId.replace(/['"`\s]/g, ''),
+    };
+  }
+
+  // 2. فحص الرموز المفردة (API Key / Identity Token)
   const apiTokenCandidates = [
-    process.env.LIMITLESS_API_TOKEN,
-    process.env.API_TOKEN_LIMITLESS,
-    process.env.API_TOKEN,
     process.env.LIMITLESS_API_KEY,
     process.env.API_KEY,
     process.env.LMTS_API_KEY,
-    process.env.LMTS_API_TOKEN,
+    process.env.LIMITLESS_API_TOKEN,
+    process.env.API_TOKEN_LIMITLESS,
+    process.env.API_TOKEN,
     process.env.LMTS_TOKEN_ID,
     process.env.TOKEN,
   ];
 
   let apiToken = '';
   for (const cand of apiTokenCandidates) {
-    if (cand && !cand.includes('your_limitless') && !cand.includes('ضع_رمز')) {
+    if (cand && !cand.includes('your_') && !cand.includes('ضع_رمز')) {
       apiToken = cand.trim().replace(/['"`\s]/g, '');
       break;
     }
   }
 
-  // المفتاح السري لـ HMAC (إن وجد)
-  const secretCandidates = [
-    process.env.LMTS_TOKEN_SECRET,
-    process.env.LIMITLESS_TOKEN_SECRET,
-    process.env.API_SECRET,
-    process.env.LMTS_SECRET,
-    process.env.SECRET,
-  ];
-
-  let apiSecret = '';
-  for (const cand of secretCandidates) {
-    if (cand && !cand.includes('your_limitless') && !cand.includes('ضع_مفتاح')) {
-      apiSecret = cand.trim().replace(/['"`\s]/g, '');
-      break;
-    }
-  }
-
-  return { apiToken, apiSecret };
+  return { apiToken, apiSecret: '' };
 }
 
 let serverWallet: ethers.Wallet | null = null;
@@ -145,7 +160,7 @@ if (serverWallet) {
   console.log('ℹ️ [Backend] في انتظار تعيين المفتاح الخاص في .env أو عبر لوحة الإعدادات.');
 }
 
-// إنشاء عميل Limitless الرسمي
+// إنشاء عميل Limitless الرسمي مع كامل آليات التوقيع والمصادقة
 function getLimitlessClient(): LimitlessClient {
   const { apiToken, apiSecret } = parseLimitlessCredentials();
   const baseURL = process.env.LIMITLESS_API_URL || 'https://api.limitless.exchange';
@@ -224,24 +239,17 @@ app.get('/api/credentials/status', async (req, res) => {
   let limitlessApiOk = false;
   let limitlessUser: any = null;
 
-  if (apiToken) {
+  if (wallet && (apiToken || apiSecret)) {
     try {
-      const testHeaders: Record<string, string> = {
-        'Content-Type': 'application/json',
-        'X-API-Key': apiToken,
-        'lmts-api-key': apiToken,
-        'Authorization': `Bearer ${apiToken}`,
-      };
-      const checkRes = await fetch('https://api.limitless.exchange/profiles/me', {
-        headers: testHeaders,
-        signal: AbortSignal.timeout(3000),
-      }).catch(() => null);
-
-      if (checkRes && checkRes.ok) {
+      const client = getLimitlessClient();
+      const profile = await client.portfolio.getProfile(wallet.address).catch(() => null);
+      if (profile && (profile.account || profile.id)) {
         limitlessApiOk = true;
-        limitlessUser = await checkRes.json().catch(() => null);
+        limitlessUser = profile;
       }
-    } catch {}
+    } catch (e: any) {
+      console.warn('⚠️ فحص حساب Limitless:', e.message);
+    }
   }
 
   res.json({
@@ -253,6 +261,23 @@ app.get('/api/credentials/status', async (req, res) => {
     limitlessApiOk,
     limitlessUser,
   });
+});
+
+// مسار جلب مراكز المحفظة الحقيقية مباشرة من منصة Limitless عبر SDK
+app.get('/api/portfolio/positions', async (req, res) => {
+  try {
+    const wallet = initializeServerWallet();
+    const targetAddress = (req.query.address as string) || (wallet ? wallet.address : '');
+    if (!targetAddress) {
+      return res.json({ clob: [], amm: [] });
+    }
+
+    const client = getLimitlessClient();
+    const positions = await client.portfolio.getPositions(targetAddress).catch(() => null);
+    return res.json(positions || { clob: [], amm: [] });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/api/credentials/save', async (req, res) => {
@@ -461,7 +486,9 @@ const serverLimitlessHttp = new HttpClient({
 });
 const serverMarketFetcher = new MarketFetcher(serverLimitlessHttp);
 
-async function getServerActiveBtc15mMarket(): Promise<any | null> {
+let lastExecutedTradeTime = 0;
+
+async function getServerActiveBtcMarket(): Promise<any | null> {
   try {
     for (let page = 1; page <= 3; page++) {
       const res = await serverMarketFetcher.getActiveMarkets({
@@ -471,21 +498,40 @@ async function getServerActiveBtc15mMarket(): Promise<any | null> {
       }).catch(() => null);
 
       if (res && Array.isArray(res.data) && res.data.length > 0) {
-        const btc15m = res.data.filter(
+        const now = Date.now();
+        const validMarkets = res.data.filter(
           (m: any) =>
             !m.closed &&
             !m.expired &&
-            (m.slug.includes('btc') || m.title.toLowerCase().includes('btc')) &&
-            (m.slug.includes('15-min') || m.title.includes('15 Min') || m.title.includes('15m'))
+            (!m.expirationDate || new Date(m.expirationDate).getTime() > now + 30000)
         );
 
-        if (btc15m.length > 0) {
-          return btc15m[0];
-        }
+        // 1. أولوية لأسواق 15 دقيقة
+        const btc15m = validMarkets.filter(
+          (m: any) =>
+            (m.slug.includes('btc') || m.title?.toLowerCase().includes('btc')) &&
+            (m.slug.includes('15-min') || m.title?.includes('15 Min') || m.title?.includes('15m'))
+        );
+        if (btc15m.length > 0) return btc15m[0];
+
+        // 2. أسواق 5 دقائق
+        const btc5m = validMarkets.filter(
+          (m: any) =>
+            (m.slug.includes('btc') || m.title?.toLowerCase().includes('btc')) &&
+            (m.slug.includes('5-min') || m.title?.includes('5 Min') || m.title?.includes('5m'))
+        );
+        if (btc5m.length > 0) return btc5m[0];
+
+        // 3. أي سوق نشط لـ BTC
+        const anyBtc = validMarkets.filter(
+          (m: any) =>
+            m.slug.includes('btc') || m.title?.toLowerCase().includes('btc')
+        );
+        if (anyBtc.length > 0) return anyBtc[0];
       }
     }
   } catch (err: any) {
-    console.warn('⚠️ [Server Bot] تعذر جلب سوق BTC 15m عبر MarketFetcher:', err.message);
+    console.warn('⚠️ [Server Bot] تعذر جلب سوق BTC عبر MarketFetcher:', err.message);
   }
 
   return null;
@@ -494,44 +540,54 @@ async function getServerActiveBtc15mMarket(): Promise<any | null> {
 async function executeLimitlessTrade(targetToken: 'YES' | 'NO', btcPrice: number, currentZScore: number) {
   if (!serverWallet || !isServerBotRunning) return;
 
+  // فترة تبريد (Cooldown) لمنع تكرار الصفقات على نفس الإشارة
+  if (Date.now() - lastExecutedTradeTime < 45000) {
+    return;
+  }
+
   try {
-    console.log(`🤖 [Server Bot] فحص سوق BTC 15 دقيقة لشراء عقد ${targetToken} (Z-Score: ${currentZScore})...`);
+    console.log(`🤖 [Server Bot] فحص سوق BTC لشراء عقد ${targetToken} (Z-Score: ${currentZScore})...`);
     
-    const activeMarket = await getServerActiveBtc15mMarket();
+    const activeMarket = await getServerActiveBtcMarket();
     if (!activeMarket) {
-      currentWaitReason = 'لم يتم العثور على سوق BTC 15 دقيقة نشط حالياً في Limitless';
+      currentWaitReason = 'لم يتم العثور على سوق BTC نشط وصالح حالياً في Limitless';
       return;
     }
 
     const orderbook = await serverMarketFetcher.getOrderBook(activeMarket.slug).catch(() => null);
     if (!orderbook) {
-      currentWaitReason = `دفتر الأوامر غير متوفر لسوق BTC 15m (${activeMarket.slug})`;
+      currentWaitReason = `دفتر الأوامر غير متوفر لسوق BTC (${activeMarket.slug})`;
       return;
     }
 
-    let bestAsk: number | null = null;
+    let rawPrice: number | null = null;
     if (targetToken === 'YES') {
-      bestAsk = orderbook.asks?.[0]?.price || null;
+      rawPrice = orderbook.asks?.[0]?.price || null;
     } else {
       if (orderbook.bids?.[0]?.price) {
-        bestAsk = Number((1.0 - orderbook.bids[0].price).toFixed(3));
+        rawPrice = Number((1.0 - orderbook.bids[0].price).toFixed(3));
       } else if (orderbook.asks?.[0]?.price) {
-        bestAsk = Number((1.0 - orderbook.asks[0].price).toFixed(3));
+        rawPrice = Number((1.0 - orderbook.asks[0].price).toFixed(3));
+      } else {
+        rawPrice = 0.50;
       }
     }
 
-    if (bestAsk === null || bestAsk <= 0) {
-      currentWaitReason = `سعر عقد ${targetToken} في سوق BTC 15m غير متاح حالياً`;
+    if (rawPrice === null || rawPrice <= 0) {
+      currentWaitReason = `سعر عقد ${targetToken} في سوق BTC غير متاح حالياً`;
       return;
     }
 
-    if (bestAsk > ZSCORE_STRATEGY.maxEntryPrice) {
-      currentWaitReason = `سعر عقد ${targetToken} في سوق BTC 15m ($${bestAsk}) أعلى من سقف الاستراتيجية ($${ZSCORE_STRATEGY.maxEntryPrice}). تم الانتظار لاقتناص فرصة رخيصة.`;
+    // محاذاة السعر مع دقة المنصة (Tick Alignment: 0.001)
+    const alignedPrice = Math.min(0.999, Math.max(0.001, Number((Math.round(rawPrice / 0.001) * 0.001).toFixed(3))));
+
+    if (alignedPrice > ZSCORE_STRATEGY.maxEntryPrice) {
+      currentWaitReason = `سعر عقد ${targetToken} ($${alignedPrice}) أعلى من سقف الاستراتيجية ($${ZSCORE_STRATEGY.maxEntryPrice}). تم الانتظار لاقتناص فرصة رخيصة.`;
       console.log(`⛔ [Server Bot] ${currentWaitReason}`);
       return;
     }
 
-    console.log(`🎯 [Server Bot] تم اقتناص فرصة في سوق 15m: ${activeMarket.title} (${activeMarket.slug}) بسعر $${bestAsk}`);
+    console.log(`🎯 [Server Bot] تم اقتناص فرصة في سوق: ${activeMarket.title} (${activeMarket.slug}) بسعر $${alignedPrice}`);
 
     // 1. جلب بيانات السوق والـ Venue وعناوين العقود عبر MarketFetcher
     const marketDetails = await serverMarketFetcher.getMarket(activeMarket.slug).catch(() => null);
@@ -540,126 +596,106 @@ async function executeLimitlessTrade(targetToken: 'YES' | 'NO', btcPrice: number
     const noTokenId = marketDetails?.tokens?.no || activeMarket.tokens?.no;
     const selectedTokenId = targetToken === 'YES' ? yesTokenId : noTokenId;
 
-    // دعم تجزئة العقود والكسور بدقة (Fractional Contracts)
-    const contracts = Number((ZSCORE_STRATEGY.tradeSizeUsdc / bestAsk).toFixed(2));
-    if (contracts <= 0) return;
-    console.log(`🚀 [Server Bot] تم اقتناص فرصة Z-Score مؤهلة: ${contracts} عقد ${targetToken} بسعر $${bestAsk} بأمر FAK فوري`);
+    if (!selectedTokenId) {
+      currentWaitReason = `معرف التوكن ${targetToken} غير متوفر في بيانات السوق`;
+      return;
+    }
 
-    // محاولة التنفيذ أولاً عبر عميل Limitless SDK الرسمي (OrderClient)
+    // فحص رصيد USDC الفعلي في المحفظة لضبط حجم الصفقة بدقة
+    const rpcUrl = process.env.BASE_RPC_URL || 'https://mainnet.base.org';
+    const realUsdcBalance = await fetchErc20Balance(rpcUrl, USDC_BASE_ADDRESS, serverWallet.address, 6);
+    
+    // ضبط حجم الصفقة بحيث لا يتجاوز رصيد المحفظة مع حد أدنى عقد واحد
+    const availableBudget = realUsdcBalance > 0.05 ? realUsdcBalance * 0.95 : 0.05;
+    const tradeBudget = Math.min(availableBudget, ZSCORE_STRATEGY.tradeSizeUsdc || 0.50);
+    const contracts = Math.max(1, Math.floor(tradeBudget / alignedPrice));
+
+    console.log(`🚀 [Server Bot] تم اقتناص فرصة Z-Score مؤهلة: ${contracts} عقد ${targetToken} بسعر $${alignedPrice} (الميزانية: $${(contracts * alignedPrice).toFixed(2)} USDC)`);
+
+    // محاولة التنفيذ أولاً عبر عميل Limitless SDK الرسمي (OrderClient) مع التوقيع المشفر
     const limitlessClient = getLimitlessClient();
     let orderSuccess = false;
     let orderTxHash = '';
 
-    if (selectedTokenId) {
+    try {
+      console.log('📡 [Server Bot] جاري إرسال الأمر عبر OrderClient من SDK الرسمي...');
+      const orderClient = limitlessClient.newOrderClient(serverWallet);
+      const res = await withRetry(
+        () =>
+          orderClient.createOrder({
+            marketSlug: activeMarket.slug,
+            tokenId: selectedTokenId,
+            side: Side.BUY,
+            price: alignedPrice,
+            size: contracts,
+            orderType: OrderType.FAK,
+          }),
+        { statusCodes: [429, 500, 502, 503, 504], maxRetries: 2, delays: [1, 2] }
+      );
+
+      console.log(`🎉 [Server Bot] تم تنفيذ الأمر بنجاح عبر SDK الرسمي! معرف الأمر: ${res.order?.id || 'OK'}`);
+      currentWaitReason = `✅ تم تنفيذ أمر شراء ${contracts} عقد ${targetToken} بنجاح على منصة Limitless! (معرف: ${res.order?.id || 'OK'})`;
+      orderTxHash = res.order?.id || `0x${Date.now().toString(16)}`;
+      orderSuccess = true;
+      lastExecutedTradeTime = Date.now();
+    } catch (sdkOrderErr: any) {
+      console.warn('⚠️ [Server Bot] تنبيه أثناء تنفيذ OrderClient:', sdkOrderErr.message);
+      
+      // في حال وجود خطأ، محاولة إرسال مباشر موثق عبر client.http (مع توقيع HMAC تلقائياً)
       try {
-        console.log('📡 [Server Bot] جاري إرسال الأمر عبر OrderClient من SDK الرسمي...');
-        const orderClient = limitlessClient.newOrderClient(serverWallet);
-        const res = await withRetry(
-          () =>
-            orderClient.createOrder({
-              marketSlug: activeMarket.slug,
-              tokenId: selectedTokenId,
-              side: Side.BUY,
-              price: bestAsk!,
-              size: contracts,
-              orderType: OrderType.FAK,
-            }),
-          { statusCodes: [429, 500, 502, 503, 504], maxRetries: 2, delays: [1, 2] }
-        );
+        const domain = {
+          name: 'Limitless OrderBook',
+          version: '1',
+          chainId: 8453,
+          verifyingContract: venueExchange,
+        };
 
-        console.log(`🎉 [Server Bot] تم تنفيذ الأمر بنجاح عبر SDK الرسمي! معرف الأمر: ${res.order?.id || 'OK'}`);
-        currentWaitReason = `✅ تم تنفيذ أمر شراء ${contracts} عقد ${targetToken} بنجاح على منصة Limitless!`;
-        orderTxHash = res.order?.id || `0x${Date.now().toString(16)}`;
-        orderSuccess = true;
-      } catch (sdkOrderErr: any) {
-        console.warn('⚠️ [Server Bot] تنبيه أثناء تنفيذ OrderClient:', sdkOrderErr.message);
-      }
-    }
+        const types = {
+          Order: [
+            { name: 'maker', type: 'address' },
+            { name: 'tokenId', type: 'uint256' },
+            { name: 'amount', type: 'uint256' },
+            { name: 'price', type: 'uint256' },
+            { name: 'side', type: 'uint8' },
+            { name: 'nonce', type: 'uint256' },
+            { name: 'deadline', type: 'uint256' },
+          ],
+        };
 
-    if (!orderSuccess) {
-      // الطريقة المباشرة: توقيع EIP-712 بالمحفظة الحقيقية وإرسالها لمحرك المطابقة مع كل صيغ المصادقة
-      const domain = {
-        name: 'Limitless OrderBook',
-        version: '1',
-        chainId: 8453,
-        verifyingContract: venueExchange,
-      };
+        const orderValue = {
+          maker: serverWallet.address,
+          tokenId: BigInt(selectedTokenId),
+          amount: ethers.parseUnits(String(contracts), 6),
+          price: ethers.parseUnits(String(alignedPrice), 6),
+          side: 0,
+          nonce: Date.now(),
+          deadline: Math.floor(Date.now() / 1000) + 120,
+        };
 
-      const types = {
-        Order: [
-          { name: 'maker', type: 'address' },
-          { name: 'tokenId', type: 'uint256' },
-          { name: 'amount', type: 'uint256' },
-          { name: 'price', type: 'uint256' },
-          { name: 'side', type: 'uint8' },
-          { name: 'nonce', type: 'uint256' },
-          { name: 'deadline', type: 'uint256' },
-        ],
-      };
+        const signature = await serverWallet.signTypedData(domain, types, orderValue);
+        const orderPayload = {
+          order: {
+            ...orderValue,
+            tokenId: orderValue.tokenId.toString(),
+            amount: orderValue.amount.toString(),
+            price: orderValue.price.toString(),
+          },
+          signature,
+          orderType: 'FAK',
+          marketSlug: activeMarket.slug,
+        };
 
-      const numericTokenId = selectedTokenId ? BigInt(selectedTokenId) : (targetToken === 'YES' ? 1n : 2n);
-
-      const orderValue = {
-        maker: serverWallet.address,
-        tokenId: numericTokenId,
-        amount: ethers.parseUnits(String(contracts), 6),
-        price: ethers.parseUnits(String(bestAsk), 6),
-        side: 0,
-        nonce: Date.now(),
-        deadline: Math.floor(Date.now() / 1000) + 120,
-      };
-
-      const signature = await serverWallet.signTypedData(domain, types, orderValue);
-      console.log(`✍️ [Server Bot] تم توقيع EIP-712 بنجاح على عقد Venue (${venueExchange}).`);
-
-      const orderPayload = {
-        order: {
-          ...orderValue,
-          tokenId: orderValue.tokenId.toString(),
-          amount: orderValue.amount.toString(),
-          price: orderValue.price.toString(),
-        },
-        signature,
-        orderType: 'FAK',
-        marketSlug: activeMarket.slug,
-      };
-
-      const submitUrl = `${process.env.LIMITLESS_API_URL || 'https://api.limitless.exchange'}/orders`;
-      const { apiToken } = parseLimitlessCredentials();
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      if (apiToken) {
-        headers['X-API-Key'] = apiToken;
-        headers['lmts-api-key'] = apiToken;
-        headers['Authorization'] = `Bearer ${apiToken}`;
-      }
-
-      try {
-        const orderRes = await fetch(submitUrl, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(orderPayload),
-        });
-
-        if (orderRes.ok) {
-          const resData = await orderRes.json().catch(() => ({}));
-          console.log(`🎉 [Server Bot] تم قبول وتنفيذ الأمر في Limitless!`, resData);
-          currentWaitReason = `✅ تم تنفيذ أمر شراء ${contracts} عقد ${targetToken} بنجاح على منصة Limitless!`;
-          orderTxHash = signature.substring(0, 30) + '...';
+        const directRes: any = await limitlessClient.http.post('/orders', orderPayload);
+        if (directRes && (directRes.order || directRes.id)) {
+          console.log(`🎉 [Server Bot] تم تنفيذ الأمر المباشر بنجاح!`, directRes);
+          orderTxHash = directRes.order?.id || directRes.id || signature.substring(0, 30);
           orderSuccess = true;
-        } else {
-          const errText = await orderRes.text();
-          console.warn(`⚠️ [Server Bot] رد منصة Limitless (${orderRes.status}):`, errText);
-          if (orderRes.status === 401) {
-            currentWaitReason = `⚠️ تم حظر الأمر (401 Unauthorized): تأكد من صحة LIMITLESS_API_TOKEN في ملف .env للمصادقة مع منصة Limitless.`;
-          } else {
-            currentWaitReason = `⚠️ تنبيه من منصة Limitless (${orderRes.status}): ${errText}`;
-          }
+          lastExecutedTradeTime = Date.now();
+          currentWaitReason = `✅ تم تنفيذ أمر شراء ${contracts} عقد ${targetToken} بنجاح على منصة Limitless!`;
         }
-      } catch (sendErr: any) {
-        console.error('خطأ في إرسال الأمر لـ Limitless:', sendErr.message);
-        currentWaitReason = `فشل الاتصال بـ Limitless API: ${sendErr.message}`;
+      } catch (directErr: any) {
+        console.warn('⚠️ [Server Bot] خطأ في الإرسال المباشر:', directErr.message);
+        currentWaitReason = `⚠️ تنبيه من منصة Limitless: ${sdkOrderErr.message || directErr.message}`;
       }
     }
 
@@ -667,7 +703,7 @@ async function executeLimitlessTrade(targetToken: 'YES' | 'NO', btcPrice: number
       executedTradesLog.unshift({
         timestamp: Date.now(),
         tokenType: targetToken,
-        price: bestAsk,
+        price: alignedPrice,
         amount: contracts,
         txHash: orderTxHash,
       });

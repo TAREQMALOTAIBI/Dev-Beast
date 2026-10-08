@@ -71,17 +71,27 @@ export const PortfolioViewer: React.FC<PortfolioViewerProps> = ({
         // تجاهل أخطاء الخادم والاعتماد على RPC المباشر
       }
 
-      // 2. إذا لم يكن هناك رصيد من الـ API، جلبه عبر RPC مباشرة
+      // 2. جلب مراكز المحفظة وسجل التداول المباشر
       if (currentAddress) {
         setActiveAddr(currentAddress);
-        const [prof, pos, hist, balances] = await Promise.all([
+
+        // جلب المراكز الحقيقية من السيرفر الموثق عبر SDK الرسمي
+        try {
+          const posRes = await fetch(`/api/portfolio/positions?address=${currentAddress}`);
+          if (posRes.ok) {
+            const posData = await posRes.json();
+            if (posData && Array.isArray(posData.clob)) {
+              setPositions(posData.clob);
+            }
+          }
+        } catch {}
+
+        const [prof, hist, balances] = await Promise.all([
           sdk.getProfile(currentAddress),
-          sdk.getCLOBPositions(currentAddress),
           sdk.getUserHistory(currentAddress),
           sdk.getRealOnChainBalances(currentAddress),
         ]);
         setProfile(prof);
-        setPositions(pos);
         setHistory(hist.data);
         if (balances.usdc !== '0.00' || balances.eth !== '0.0000') {
           setOnChainBalances({
@@ -107,16 +117,24 @@ export const PortfolioViewer: React.FC<PortfolioViewerProps> = ({
     setTimeout(() => setCopiedHash(null), 2000);
   };
 
+  const parseUnitsSafe = (val: string | number | undefined) => {
+    if (!val) return 0;
+    const num = parseFloat(String(val));
+    if (isNaN(num)) return 0;
+    // إذا كانت القيمة بوحدات العقد الأساسية (6 أصفار)
+    return num > 1000 ? num / 1e6 : num;
+  };
+
   // احتساب الإجماليات الحقيقية
   const totalCostBasis = positions.reduce((acc, p) => {
-    const yesCost = parseFloat(p.positions?.yes?.cost || '0');
-    const noCost = parseFloat(p.positions?.no?.cost || '0');
+    const yesCost = parseUnitsSafe(p.positions?.yes?.cost);
+    const noCost = parseUnitsSafe(p.positions?.no?.cost);
     return acc + yesCost + noCost;
   }, 0);
 
   const totalMarketValue = positions.reduce((acc, p) => {
-    const yesVal = parseFloat(p.positions?.yes?.marketValue || '0');
-    const noVal = parseFloat(p.positions?.no?.marketValue || '0');
+    const yesVal = parseUnitsSafe(p.positions?.yes?.marketValue);
+    const noVal = parseUnitsSafe(p.positions?.no?.marketValue);
     return acc + yesVal + noVal;
   }, 0);
 
@@ -274,26 +292,28 @@ export const PortfolioViewer: React.FC<PortfolioViewerProps> = ({
               </thead>
               <tbody className="divide-y divide-slate-800/80 bg-slate-950/40 font-mono">
                 {positions.map((pos, idx) => {
-                  const hasNo = parseInt(pos.tokensBalance.no || '0', 10) > 0;
-                  const hasYes = parseInt(pos.tokensBalance.yes || '0', 10) > 0;
-                  const cost = parseFloat(pos.positions.no.cost || pos.positions.yes.cost || '0');
-                  const val = parseFloat(pos.positions.no.marketValue || pos.positions.yes.marketValue || '0');
+                  const noBal = parseUnitsSafe(pos.tokensBalance?.no);
+                  const yesBal = parseUnitsSafe(pos.tokensBalance?.yes);
+                  const hasNo = noBal > 0;
+                  const hasYes = yesBal > 0;
+                  const cost = parseUnitsSafe(pos.positions?.no?.cost || pos.positions?.yes?.cost || '0');
+                  const val = parseUnitsSafe(pos.positions?.no?.marketValue || pos.positions?.yes?.marketValue || '0');
                   const pnl = val - cost;
 
                   return (
                     <tr key={idx} className="hover:bg-slate-900/60 transition-colors">
                       <td className="py-2.5 px-3 font-sans">
-                        <span className="font-bold text-white block text-xs">{pos.market.title}</span>
-                        <span className="text-[10px] text-cyan-400 font-mono">{pos.market.slug}</span>
+                        <span className="font-bold text-white block text-xs">{pos.market?.title || 'سوق Limitless'}</span>
+                        <span className="text-[10px] text-cyan-400 font-mono">{pos.market?.slug}</span>
                       </td>
                       <td className="py-2.5 px-3">
                         <span className={hasYes ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
-                          {pos.tokensBalance.yes} عقد
+                          {hasYes ? `${yesBal.toFixed(2)} عقد` : '0 عقد'}
                         </span>
                       </td>
                       <td className="py-2.5 px-3">
                         <span className={hasNo ? 'text-rose-400 font-bold' : 'text-slate-500'}>
-                          {pos.tokensBalance.no} عقد
+                          {hasNo ? `${noBal.toFixed(2)} عقد` : '0 عقد'}
                         </span>
                       </td>
                       <td className="py-2.5 px-3 text-slate-300">
@@ -308,7 +328,7 @@ export const PortfolioViewer: React.FC<PortfolioViewerProps> = ({
                         </span>
                       </td>
                       <td className="py-2.5 px-3 text-slate-400 text-[10px] font-sans">
-                        {new Date(pos.market.deadline).toLocaleTimeString('ar-EG')}
+                        {pos.market?.deadline ? new Date(pos.market.deadline).toLocaleTimeString('ar-EG') : 'قيد التسوية'}
                       </td>
                     </tr>
                   );
