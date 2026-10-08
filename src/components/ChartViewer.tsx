@@ -246,12 +246,12 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
         {/* Sub-Chart: Z-Score (Lookback 20m) Visualizer Panel */}
         <div className="flex flex-wrap items-center justify-between text-xs mb-1.5 gap-2">
           <div className="flex items-center gap-2">
-            <span className="text-white font-bold">مؤشر Z-Score (التركيز على 0.50):</span>
+            <span className="text-white font-bold">مؤشر Z-Score (التركيز على 1.0):</span>
             <span
               className={`font-mono font-bold text-sm px-2 py-0.5 rounded ${
-                zScore >= 0.50
+                zScore >= 1.0
                   ? 'bg-rose-950 text-rose-400 border border-rose-500/40'
-                  : zScore <= -0.50
+                  : zScore <= -1.0
                   ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/40'
                   : 'bg-slate-900 text-cyan-300 border border-slate-700'
               }`}
@@ -267,11 +267,11 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
           <div className="flex items-center gap-3 text-[11px] text-slate-400">
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-rose-500" />
-              إشارة هبوط: &ge; +0.50
+              إشارة هبوط: &ge; +1.0
             </span>
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              إشارة صعود: &le; -0.50
+              إشارة صعود: &le; -1.0
             </span>
           </div>
         </div>
@@ -281,17 +281,17 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
           {/* Neutral center guide (0) */}
           <div className="absolute top-0 bottom-0 left-1/2 w-px bg-slate-700 z-0" />
           
-          {/* Bullish oversold zone (<= -0.50) on left */}
+          {/* Bullish oversold zone (<= -1.0) on left */}
           <div
             className="absolute top-0 bottom-0 left-0 bg-emerald-500/15 border-r border-emerald-500/40"
-            style={{ width: '41.67%' }}
-            title="منطقة إشارة الصعود (Z <= -0.50)"
+            style={{ width: '33.33%' }}
+            title="منطقة إشارة الصعود (Z <= -1.0)"
           />
-          {/* Bearish overbought zone (>= +0.50) on right */}
+          {/* Bearish overbought zone (>= +1.0) on right */}
           <div
             className="absolute top-0 bottom-0 right-0 bg-rose-500/15 border-l border-rose-500/40"
-            style={{ width: '41.67%' }}
-            title="منطقة إشارة الهبوط (Z >= +0.50)"
+            style={{ width: '33.33%' }}
+            title="منطقة إشارة الهبوط (Z >= +1.0)"
           />
 
           {/* Dynamic Z-Score Needle */}
@@ -305,9 +305,9 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
                 style={{
                   left: `${percent}%`,
                   backgroundColor:
-                    zScore >= 0.50
+                    zScore >= 1.0
                       ? '#f43f5e'
-                      : zScore <= -0.50
+                      : zScore <= -1.0
                       ? '#10b981'
                       : '#38bdf8',
                 }}

@@ -85,14 +85,14 @@ async function ensureVenueApproval(venueExchange: string) {
 const ZSCORE_STRATEGY = {
   marketSlug: 'btc-price-15m-now',
   lookbackPeriod: 20,         // نافذة الحساب: آخر 20 شمعة على فريم الدقيقة (1m)
-  upperThreshold: 0.50,       // إشارة هبوط إذا أصبح Z-Score >= +0.50 (حساسية عالية لاقتناص الإشارات)
-  lowerThreshold: -0.50,      // إشارة صعود إذا أصبح Z-Score <= -0.50 (حساسية عالية لاقتناص الإشارات)
+  upperThreshold: 1.0,        // إشارة هبوط إذا أصبح Z-Score >= +1.0
+  lowerThreshold: -1.0,       // إشارة صعود إذا أصبح Z-Score <= -1.0
   maxEntryPrice: Number(process.env.MAX_ENTRY_PRICE) || 0.80, // سقف سعر الدخول (حتى 0.80$)
   riskPercent: 1.0,           // نسبة المخاطرة للصفقة: 1% من رأس المال
   tradeSizeUsdc: Number(process.env.TRADE_SIZE_USDC) || 8.0,  // ميزانية كل صفقة بالدولار USDC
 };
 
-console.log(`📊 الاستراتيجية الحالية: خطة التداول بالـ Z-Score فقط (التركيز على 0.50)`);
+console.log(`📊 الاستراتيجية الحالية: خطة التداول بالـ Z-Score فقط (التركيز على 1.0)`);
 console.log(`⏱️ نافذة الحساب (Lookback Window): آخر ${ZSCORE_STRATEGY.lookbackPeriod} شمعة على فريم الدقيقة (1m)`);
 console.log(`📉 إشارة هبوط: Z-Score >= +${ZSCORE_STRATEGY.upperThreshold} -> شراء عقد NO (القمة) بسعر ≤ $${ZSCORE_STRATEGY.maxEntryPrice}`);
 console.log(`📈 إشارة صعود: Z-Score <= ${ZSCORE_STRATEGY.lowerThreshold} -> شراء عقد YES (الارتداد) بسعر ≤ $${ZSCORE_STRATEGY.maxEntryPrice}`);
@@ -325,7 +325,7 @@ async function evaluateTradingSignal(lastPrice: number, isClosed: boolean = true
     console.log(`🚨 [إشارة صعود Z-Score!]: القيمة = ${zScore} (كسرت قاع ${ZSCORE_STRATEGY.lowerThreshold}). السعر انهار تحت قاع 20 دقيقة. الهدف: شراء عقد YES للارتداد بسعر ≤ $${ZSCORE_STRATEGY.maxEntryPrice} عبر أمر FAK.`);
     await checkAndExecuteLimitlessOrder('YES', lastPrice, zScore);
   } else {
-    console.log(`⚖️ [Z-Score محايد]: القيمة = ${zScore > 0 ? '+' : ''}${zScore} ضمن النطاق الطبيعي [${ZSCORE_STRATEGY.lowerThreshold} إلى +${ZSCORE_STRATEGY.upperThreshold}]. في انتظار اختراق العتبة 0.50.`);
+    console.log(`⚖️ [Z-Score محايد]: القيمة = ${zScore > 0 ? '+' : ''}${zScore} ضمن النطاق الطبيعي [${ZSCORE_STRATEGY.lowerThreshold} إلى +${ZSCORE_STRATEGY.upperThreshold}]. في انتظار اختراق العتبة 1.0.`);
   }
 }
 

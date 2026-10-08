@@ -19,8 +19,8 @@ export const defaultBotConfig: BotConfig = {
   maxEntryPrice: 0.80, // سقف سعر الدخول (حتى 0.80$)
   zScore: {
     period: 20,           // Lookback Window: آخر 20 شمعة على فريم الدقيقة (1m)
-    upperThreshold: 0.50, // إشارة هبوط عند Z-Score >= +0.50
-    lowerThreshold: -0.50, // إشارة صعود عند Z-Score <= -0.50
+    upperThreshold: 1.0,  // إشارة هبوط عند Z-Score >= +1.0
+    lowerThreshold: -1.0, // إشارة صعود عند Z-Score <= -1.0
   },
   bollingerBands: {
     period: 20,

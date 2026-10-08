@@ -190,7 +190,7 @@ let lastBtcPrice: number = 94500;
 let lastCalculatedZScore: number = 0.0;
 let lastCalculatedMean: number = 94500;
 let lastCalculatedStdDev: number = 50;
-let currentWaitReason: string = 'في انتظار إشارة Z-Score حاسمة (> +0.50 للهبوط أو < -0.50 للصعود) مع سعر عقد ≤ 0.80$';
+let currentWaitReason: string = 'في انتظار إشارة Z-Score حاسمة (> +1.0 للهبوط أو < -1.0 للصعود) مع سعر عقد ≤ 0.80$';
 
 let executedTradesLog: Array<{
   timestamp: number;
@@ -204,8 +204,8 @@ let executedTradesLog: Array<{
 const ZSCORE_STRATEGY = {
   marketSlug: 'btc-price-15m-now',
   lookbackPeriod: 20,         // نافذة الحساب: آخر 20 شمعة على فريم الدقيقة (1m)
-  upperThreshold: 0.50,       // إشارة هبوط إذا أصبح Z-Score >= +0.50 (حساسية عالية لاقتناص الإشارات)
-  lowerThreshold: -0.50,      // إشارة صعود إذا أصبح Z-Score <= -0.50 (حساسية عالية لاقتناص الإشارات)
+  upperThreshold: 1.0,        // إشارة هبوط إذا أصبح Z-Score >= +1.0
+  lowerThreshold: -1.0,       // إشارة صعود إذا أصبح Z-Score <= -1.0
   maxEntryPrice: Number(process.env.MAX_ENTRY_PRICE) || 0.80, // سقف سعر الدخول (عقود ≤ 0.80$)
   riskPercent: 1.0,           // نسبة المخاطرة للصفقة (1.0% من رأس المال)
   tradeSizeUsdc: Number(process.env.TRADE_SIZE_USDC) || 8.0,  // حجم كل صفقة ($8.00 USDC)
@@ -431,13 +431,13 @@ async function startServerPriceFeed() {
           lastCalculatedMean = mean;
           lastCalculatedStdDev = stdDev;
 
-          // 1. إشارة هبوط: Z-Score >= +0.50 -> شراء عقد NO (القمة)
+          // 1. إشارة هبوط: Z-Score >= +1.0 -> شراء عقد NO (القمة)
           if (zScore >= ZSCORE_STRATEGY.upperThreshold) {
             lastEvaluatedSignal = 'OVERBOUGHT';
             console.log(`🚨 [Server Bot]: إشارة هبوط Z-Score! Z = +${zScore} (أعلى من +${ZSCORE_STRATEGY.upperThreshold}). جاري شراء عقد NO...`);
             await executeLimitlessTrade('NO', lastBtcPrice, zScore);
           }
-          // 2. إشارة صعود: Z-Score <= -0.50 -> شراء عقد YES (الارتداد)
+          // 2. إشارة صعود: Z-Score <= -1.0 -> شراء عقد YES (الارتداد)
           else if (zScore <= ZSCORE_STRATEGY.lowerThreshold) {
             lastEvaluatedSignal = 'OVERSOLD';
             console.log(`🚨 [Server Bot]: إشارة صعود Z-Score! Z = ${zScore} (أدنى من ${ZSCORE_STRATEGY.lowerThreshold}). جاري شراء عقد YES...`);

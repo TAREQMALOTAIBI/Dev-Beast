@@ -66,8 +66,8 @@ const CREDENTIALS = {
 // 2. إعدادات خطة الـ Z-Score المحدثة
 const CONFIG = {
   lookback: 20,         // نافذة الحساب: آخر 20 شمعة على فريم الدقيقة (1m)
-  upperZScore: 0.50,    // إشارة هبوط: Z-Score >= +0.50
-  lowerZScore: -0.50,   // إشارة صعود: Z-Score <= -0.50
+  upperZScore: 1.0,     // إشارة هبوط: Z-Score >= +1.0
+  lowerZScore: -1.0,    // إشارة صعود: Z-Score <= -1.0
   maxEntryPrice: ${config.maxEntryPrice}, // سقف السعر: عقود ≤ 0.80$
   tradeSizeUsdc: ${config.tradeSizeUsdc},  // ميزانية الصفقة بالدولار
   apiBaseUrl: '${config.apiBaseUrl || 'https://api.limitless.exchange'}',

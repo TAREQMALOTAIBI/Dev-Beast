@@ -55,12 +55,42 @@ export default function App() {
   const [config, setConfig] = useState<BotConfig>(() => {
     try {
       const saved = localStorage.getItem('limitless_bot_config');
-      if (saved) return { ...defaultBotConfig, ...JSON.parse(saved) };
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return {
+          ...defaultBotConfig,
+          ...parsed,
+          zScore: {
+            ...defaultBotConfig.zScore,
+            ...(parsed.zScore || {}),
+            upperThreshold: 1.0, // تثبيت العتبة على 1.0 دائماً
+            lowerThreshold: -1.0, // تثبيت العتبة على -1.0 دائماً
+            period: 20,
+          },
+          maxEntryPrice: 0.80,
+        };
+      }
     } catch (e) {
       console.error('خطأ في استرجاع إعدادات البوت:', e);
     }
     return defaultBotConfig;
   });
+
+  // مزامنة وتحديث فوري لعتبات Z-Score في حال وجود نسخ مخزنة قديمة في المتصفح
+  useEffect(() => {
+    if (config.zScore.upperThreshold !== 1.0 || config.zScore.lowerThreshold !== -1.0) {
+      setConfig((prev) => ({
+        ...prev,
+        zScore: {
+          ...prev.zScore,
+          upperThreshold: 1.0,
+          lowerThreshold: -1.0,
+          period: 20,
+        },
+        maxEntryPrice: 0.80,
+      }));
+    }
+  }, [config.zScore.upperThreshold, config.zScore.lowerThreshold]);
 
   // حالة ربط المحفظة الحقيقية (Web3 Wallet)
   const [connectedWallet, setConnectedWallet] = useState<string | null>(() => {
@@ -76,7 +106,7 @@ export default function App() {
     tradeSizeUsdc?: number;
   }>({
     running: true,
-    waitReason: 'في انتظار اكتمال شروط الاستراتيجية (Z-Score ≥ 0.50 أو ≤ -0.50) وسعر العقد ≤ 0.80$',
+    waitReason: 'في انتظار اكتمال شروط الاستراتيجية (Z-Score ≥ 1.0 أو ≤ -1.0) وسعر العقد ≤ 0.80$',
     tradeSizeUsdc: 8.0,
   });
 
@@ -559,7 +589,7 @@ export default function App() {
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                خطة التداول بالـ Z-Score فقط (Lookback: 20m • التركيز على 0.50 • الدخول &le; 0.80$ • أوامر FAK)
+                خطة التداول بالـ Z-Score فقط (Lookback: 20m • التركيز على 1.0 • الدخول &le; 0.80$ • أوامر FAK)
               </p>
             </div>
           </div>
@@ -573,14 +603,14 @@ export default function App() {
               </span>
             </div>
 
-            {/* مؤشر Z-Score السريع (التركيز على 0.50) */}
+            {/* مؤشر Z-Score السريع (التركيز على 1.0) */}
             <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800">
               <span className="text-slate-400 text-[10px]">Z-Score (20m):</span>
               <span
                 className={`font-mono font-bold text-xs ${
-                  currentSignal.zScore >= 0.50
+                  currentSignal.zScore >= 1.0
                     ? 'text-rose-400 animate-pulse font-extrabold'
-                    : currentSignal.zScore <= -0.50
+                    : currentSignal.zScore <= -1.0
                     ? 'text-emerald-400 animate-pulse font-extrabold'
                     : 'text-cyan-300'
                 }`}
@@ -601,9 +631,9 @@ export default function App() {
               />
               <span className="font-semibold text-slate-300">
                 {currentSignal.signal === 'OVERBOUGHT'
-                  ? 'إشارة هبوط (Z >= +0.50)'
+                  ? 'إشارة هبوط (Z >= +1.0)'
                   : currentSignal.signal === 'OVERSOLD'
-                  ? 'إشارة صعود (Z <= -0.50)'
+                  ? 'إشارة صعود (Z <= -1.0)'
                   : 'سوق محايد (Neutral)'}
               </span>
             </div>
@@ -766,7 +796,7 @@ export default function App() {
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs transition-all font-bold"
                 >
                   <TrendingUp className="w-3.5 h-3.5 text-rose-400" />
-                  <span>⚡ محاكاة قمة (Z-Score &ge; +0.50)</span>
+                  <span>⚡ محاكاة قمة (Z-Score &ge; +1.0)</span>
                 </button>
 
                 <button
@@ -774,7 +804,7 @@ export default function App() {
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs transition-all font-bold"
                 >
                   <TrendingDown className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>🚀 محاكاة قاع (Z-Score &le; -0.50)</span>
+                  <span>🚀 محاكاة قاع (Z-Score &le; -1.0)</span>
                 </button>
 
                 <button
@@ -825,9 +855,9 @@ export default function App() {
                       }`}
                     >
                       {currentSignal.signal === 'OVERBOUGHT'
-                        ? 'إشارة هبوط (Z >= +0.50)'
+                        ? 'إشارة هبوط (Z >= +1.0)'
                         : currentSignal.signal === 'OVERSOLD'
-                        ? 'إشارة صعود (Z <= -0.50)'
+                        ? 'إشارة صعود (Z <= -1.0)'
                         : 'حياد (NEUTRAL)'}
                     </span>
                   </h3>

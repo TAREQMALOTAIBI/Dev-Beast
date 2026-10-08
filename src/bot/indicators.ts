@@ -9,8 +9,8 @@
  * 4. قيمة Z-Score: (السعر الحالي - المتوسط) / الانحراف المعياري.
  * 
  * شروط الدخول:
- * - إشارة هبوط: Z-Score >= +0.50 -> استهداف عقد يراهن على الهبوط (عقد NO للقمة) بسعر ≤ 0.80$.
- * - إشارة صعود: Z-Score <= -0.50 -> استهداف عقد يراهن على الصعود (عقد YES للقاع) بسعر ≤ 0.80$.
+ * - إشارة هبوط: Z-Score >= +1.0 -> استهداف عقد يراهن على الهبوط (عقد NO للقمة) بسعر ≤ 0.80$.
+ * - إشارة صعود: Z-Score <= -1.0 -> استهداف عقد يراهن على الصعود (عقد YES للقاع) بسعر ≤ 0.80$.
  */
 
 import { BollingerBands, RSI } from 'technicalindicators';
@@ -73,8 +73,8 @@ export function checkMeanReversionSignal(
   config: BotConfig
 ): SignalEvaluation {
   const lookbackPeriod = config.zScore?.period || 20; // 20 شمعة على فريم الدقيقة
-  const upperThreshold = config.zScore?.upperThreshold !== undefined ? config.zScore.upperThreshold : 0.50; // التركيز على +0.50
-  const lowerThreshold = config.zScore?.lowerThreshold !== undefined ? config.zScore.lowerThreshold : -0.50; // التركيز على -0.50
+  const upperThreshold = config.zScore?.upperThreshold !== undefined ? config.zScore.upperThreshold : 1.0; // التركيز على +1.0
+  const lowerThreshold = config.zScore?.lowerThreshold !== undefined ? config.zScore.lowerThreshold : -1.0; // التركيز على -1.0
 
   // التحقق من كفاية بيانات الشموع (20 شمعة على الأقل)
   if (!candles || candles.length < lookbackPeriod) {
