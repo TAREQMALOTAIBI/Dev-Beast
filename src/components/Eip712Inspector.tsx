@@ -21,7 +21,7 @@ export const Eip712Inspector: React.FC<Eip712InspectorProps> = ({
         <Key className="w-8 h-8 text-cyan-600/60 mb-2" />
         <p className="font-semibold text-slate-300">في انتظار بناء وتوقيع أمر EIP-712...</p>
         <span className="text-xs text-slate-400 mt-1 max-w-sm">
-          عند تحقق شروط الـ Z-Score (أعلى من 1.0 أو أدنى من -1.0) مع سعر عقد &le; 0.80$، يقوم النظام فورياً بتوليد التوقيع المشفر وإرساله لمحرك Limitless.
+          عند تحقق شروط الـ Z-Score (أعلى من 2.0 أو أدنى من -2.0) مع سعر عقد &le; 0.20$ (20 سنت وتحت)، يقوم النظام فورياً بتوليد التوقيع المشفر وإرساله لمحرك Limitless.
         </span>
       </div>
     );

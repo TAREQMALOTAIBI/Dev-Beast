@@ -445,7 +445,7 @@ let lastBtcPrice: number = 94500;
 let lastCalculatedZScore: number = 0.0;
 let lastCalculatedMean: number = 94500;
 let lastCalculatedStdDev: number = 50;
-let currentWaitReason: string = 'في انتظار إشارة Z-Score حاسمة (> +1.0 للهبوط أو < -1.0 للصعود) مع سعر عقد ≤ 0.80$';
+let currentWaitReason: string = 'في انتظار إشارة Z-Score حاسمة (> +2.0 للهبوط أو < -2.0 للصعود) مع سعر عقد ≤ 0.20$ (20 سنت وتحت)';
 
 let executedTradesLog: Array<{
   timestamp: number;
@@ -459,11 +459,11 @@ let executedTradesLog: Array<{
 const ZSCORE_STRATEGY = {
   marketSlug: 'btc-price-15m-now',
   lookbackPeriod: 20,         // نافذة الحساب: آخر 20 شمعة على فريم الدقيقة (1m)
-  upperThreshold: 1.0,        // إشارة هبوط إذا أصبح Z-Score >= +1.0
-  lowerThreshold: -1.0,       // إشارة صعود إذا أصبح Z-Score <= -1.0
-  maxEntryPrice: Number(process.env.MAX_ENTRY_PRICE) || 0.80, // سقف سعر الدخول (عقود ≤ 0.80$)
+  upperThreshold: Number(process.env.Z_SCORE_THRESHOLD) || 2.0,        // إشارة هبوط إذا أصبح Z-Score >= +2.0
+  lowerThreshold: -(Number(process.env.Z_SCORE_THRESHOLD) || 2.0),       // إشارة صعود إذا أصبح Z-Score <= -2.0
+  maxEntryPrice: Number(process.env.MAX_ENTRY_PRICE) || 0.20, // سقف سعر الدخول (عقود ≤ 0.20$ - 20 سنت وتحت)
   riskPercent: 1.0,           // نسبة المخاطرة للصفقة (1.0% من رأس المال)
-  tradeSizeUsdc: Number(process.env.TRADE_SIZE_USDC) || 8.0,  // حجم كل صفقة ($8.00 USDC)
+  tradeSizeUsdc: Number(process.env.TRADE_SIZE_USDC) || 0.50, // حجم كل صفقة بالدولار
 };
 
 function calculateServerZScore(prices: number[], lookback: number = 20) {
@@ -582,7 +582,7 @@ async function executeLimitlessTrade(targetToken: 'YES' | 'NO', btcPrice: number
     const alignedPrice = Math.min(0.999, Math.max(0.001, Number((Math.round(rawPrice / 0.001) * 0.001).toFixed(3))));
 
     if (alignedPrice > ZSCORE_STRATEGY.maxEntryPrice) {
-      currentWaitReason = `سعر عقد ${targetToken} ($${alignedPrice}) أعلى من سقف الاستراتيجية ($${ZSCORE_STRATEGY.maxEntryPrice}). تم الانتظار لاقتناص فرصة رخيصة.`;
+      currentWaitReason = `سعر عقد ${targetToken} ($${alignedPrice}) أعلى من سقف الاستراتيجية ($${ZSCORE_STRATEGY.maxEntryPrice} - 20 سنت وتحت). بانتظار فرصة مناسبة.`;
       console.log(`⛔ [Server Bot] ${currentWaitReason}`);
       return;
     }

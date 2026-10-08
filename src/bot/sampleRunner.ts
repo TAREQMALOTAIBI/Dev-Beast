@@ -16,11 +16,11 @@ export const defaultBotConfig: BotConfig = {
   symbol: 'BTC/USD',
   candleTimeframe: '1m',
   marketDurationMinutes: 15,
-  maxEntryPrice: 0.80, // سقف سعر الدخول (حتى 0.80$)
+  maxEntryPrice: 0.20, // سقف سعر الدخول (20 سنت وتحت ≤ 0.20$)
   zScore: {
     period: 20,           // Lookback Window: آخر 20 شمعة على فريم الدقيقة (1m)
-    upperThreshold: 1.0,  // إشارة هبوط عند Z-Score >= +1.0
-    lowerThreshold: -1.0, // إشارة صعود عند Z-Score <= -1.0
+    upperThreshold: 2.0,  // إشارة هبوط عند Z-Score >= +2.0
+    lowerThreshold: -2.0, // إشارة صعود عند Z-Score <= -2.0
   },
   bollingerBands: {
     period: 20,

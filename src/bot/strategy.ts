@@ -89,7 +89,7 @@ export async function executeAsymmetricMeanReversion(
     };
   }
 
-  // الخطوة 7: تطبيق سقف سعر الدخول (Max Entry Price <= $0.80)
+  // الخطوة 7: تطبيق سقف سعر الدخول (Max Entry Price <= $0.20 - 20 سنت وتحت)
   const validAsks = sdk.filterAsymmetricAsks(orderbook, config.maxEntryPrice);
   const bestAsk = orderbook.asks.length > 0 ? orderbook.asks[0] : null;
 

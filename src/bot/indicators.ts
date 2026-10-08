@@ -73,8 +73,8 @@ export function checkMeanReversionSignal(
   config: BotConfig
 ): SignalEvaluation {
   const lookbackPeriod = config.zScore?.period || 20; // 20 شمعة على فريم الدقيقة
-  const upperThreshold = config.zScore?.upperThreshold !== undefined ? config.zScore.upperThreshold : 1.0; // التركيز على +1.0
-  const lowerThreshold = config.zScore?.lowerThreshold !== undefined ? config.zScore.lowerThreshold : -1.0; // التركيز على -1.0
+  const upperThreshold = config.zScore?.upperThreshold !== undefined ? config.zScore.upperThreshold : 2.0; // التركيز على +2.0
+  const lowerThreshold = config.zScore?.lowerThreshold !== undefined ? config.zScore.lowerThreshold : -2.0; // التركيز على -2.0
 
   // التحقق من كفاية بيانات الشموع (20 شمعة على الأقل)
   if (!candles || candles.length < lookbackPeriod) {
@@ -138,8 +138,8 @@ export function checkMeanReversionSignal(
       bollingerBands,
       isOverbought: true,
       isOversold: false,
-      explanationArabic: `🚨 [إشارة هبوط Z-Score]: القيمة الحالية = +${zScore} (تجاوزت سقف +${upperThreshold}). السعر ($${currentPrice.toLocaleString()}) أعلى من متوسط 20 دقيقة ($${mean.toLocaleString()}). الهدف: شراء عقد NO للقمة بسعر ≤ 0.80$ عبر أمر FAK فوراً.`,
-      explanationEnglish: `Bearish Z-Score Trigger! Z = +${zScore} (>= +${upperThreshold}). Price is ${zScore} standard deviations above 20m mean ($${mean}). Target: NO contract <= $0.80 via immediate FAK order.`,
+      explanationArabic: `🚨 [إشارة هبوط Z-Score]: القيمة الحالية = +${zScore} (تجاوزت سقف +${upperThreshold}). السعر ($${currentPrice.toLocaleString()}) أعلى من متوسط 20 دقيقة ($${mean.toLocaleString()}). الهدف: شراء عقد NO للقمة بسعر ≤ 0.20$ (20 سنت وتحت) عبر أمر FAK فوراً.`,
+      explanationEnglish: `Bearish Z-Score Trigger! Z = +${zScore} (>= +${upperThreshold}). Price is ${zScore} standard deviations above 20m mean ($${mean}). Target: NO contract <= $0.20 via immediate FAK order.`,
       evaluatedAt: Date.now(),
     };
   }
@@ -155,8 +155,8 @@ export function checkMeanReversionSignal(
       bollingerBands,
       isOverbought: false,
       isOversold: true,
-      explanationArabic: `🚨 [إشارة صعود Z-Score]: القيمة الحالية = ${zScore} (كسرت قاع ${lowerThreshold}). السعر ($${currentPrice.toLocaleString()}) أدنى من متوسط 20 دقيقة ($${mean.toLocaleString()}). الهدف: شراء عقد YES للارتداد بسعر ≤ 0.80$ عبر أمر FAK فوراً.`,
-      explanationEnglish: `Bullish Z-Score Trigger! Z = ${zScore} (<= ${lowerThreshold}). Price is ${Math.abs(zScore)} standard deviations below 20m mean ($${mean}). Target: YES contract <= $0.80 via immediate FAK order.`,
+      explanationArabic: `🚨 [إشارة صعود Z-Score]: القيمة الحالية = ${zScore} (كسرت قاع ${lowerThreshold}). السعر ($${currentPrice.toLocaleString()}) أدنى من متوسط 20 دقيقة ($${mean.toLocaleString()}). الهدف: شراء عقد YES للارتداد بسعر ≤ 0.20$ (20 سنت وتحت) عبر أمر FAK فوراً.`,
+      explanationEnglish: `Bullish Z-Score Trigger! Z = ${zScore} (<= ${lowerThreshold}). Price is ${Math.abs(zScore)} standard deviations below 20m mean ($${mean}). Target: YES contract <= $0.20 via immediate FAK order.`,
       evaluatedAt: Date.now(),
     };
   }

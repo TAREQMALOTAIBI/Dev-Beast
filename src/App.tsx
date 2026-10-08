@@ -62,34 +62,42 @@ export default function App() {
           zScore: {
             ...defaultBotConfig.zScore,
             ...(parsed.zScore || {}),
-            upperThreshold: 1.0, // تثبيت العتبة على 1.0 دائماً
-            lowerThreshold: -1.0, // تثبيت العتبة على -1.0 دائماً
+            upperThreshold: 2.0, // تثبيت العتبة على 2.0
+            lowerThreshold: -2.0, // تثبيت العتبة على -2.0
             period: 20,
           },
-          maxEntryPrice: 0.80,
+          maxEntryPrice: 0.20, // سقف سعر الدخول (20 سنت وتحت)
         };
       }
     } catch (e) {
       console.error('خطأ في استرجاع إعدادات البوت:', e);
     }
-    return defaultBotConfig;
+    return {
+      ...defaultBotConfig,
+      maxEntryPrice: 0.20,
+      zScore: {
+        ...defaultBotConfig.zScore,
+        upperThreshold: 2.0,
+        lowerThreshold: -2.0,
+      },
+    };
   });
 
   // مزامنة وتحديث فوري لعتبات Z-Score في حال وجود نسخ مخزنة قديمة في المتصفح
   useEffect(() => {
-    if (config.zScore.upperThreshold !== 1.0 || config.zScore.lowerThreshold !== -1.0) {
+    if (config.zScore.upperThreshold !== 2.0 || config.zScore.lowerThreshold !== -2.0 || config.maxEntryPrice !== 0.20) {
       setConfig((prev) => ({
         ...prev,
         zScore: {
           ...prev.zScore,
-          upperThreshold: 1.0,
-          lowerThreshold: -1.0,
+          upperThreshold: 2.0,
+          lowerThreshold: -2.0,
           period: 20,
         },
-        maxEntryPrice: 0.80,
+        maxEntryPrice: 0.20,
       }));
     }
-  }, [config.zScore.upperThreshold, config.zScore.lowerThreshold]);
+  }, [config.zScore.upperThreshold, config.zScore.lowerThreshold, config.maxEntryPrice]);
 
   // حالة ربط المحفظة الحقيقية (Web3 Wallet)
   const [connectedWallet, setConnectedWallet] = useState<string | null>(() => {
@@ -105,8 +113,8 @@ export default function App() {
     tradeSizeUsdc?: number;
   }>({
     running: true,
-    waitReason: 'في انتظار اكتمال شروط الاستراتيجية (Z-Score ≥ 1.0 أو ≤ -1.0) وسعر العقد ≤ 0.80$',
-    tradeSizeUsdc: 8.0,
+    waitReason: 'في انتظار اكتمال شروط الاستراتيجية (Z-Score ≥ 2.0 أو ≤ -2.0) وسعر العقد ≤ 0.20$ (20 سنت وتحت)',
+    tradeSizeUsdc: 0.50,
   });
 
   const [isWalletModalOpen, setIsWalletModalOpen] = useState<boolean>(false);
@@ -564,7 +572,7 @@ export default function App() {
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                خطة التداول بالـ Z-Score فقط (Lookback: 20m • التركيز على 1.0 • الدخول &le; 0.80$ • أوامر FAK)
+                خطة التداول بالـ Z-Score فقط (Lookback: 20m • العتبة: &plusmn;2.0 • الدخول &le; 0.20$ / 20 سنت وتحت • أوامر FAK)
               </p>
             </div>
           </div>
@@ -578,14 +586,14 @@ export default function App() {
               </span>
             </div>
 
-            {/* مؤشر Z-Score السريع (التركيز على 1.0) */}
+            {/* مؤشر Z-Score السريع (التركيز على 2.0) */}
             <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800">
               <span className="text-slate-400 text-[10px]">Z-Score (20m):</span>
               <span
                 className={`font-mono font-bold text-xs ${
-                  currentSignal.zScore >= 1.0
+                  currentSignal.zScore >= 2.0
                     ? 'text-rose-400 animate-pulse font-extrabold'
-                    : currentSignal.zScore <= -1.0
+                    : currentSignal.zScore <= -2.0
                     ? 'text-emerald-400 animate-pulse font-extrabold'
                     : 'text-cyan-300'
                 }`}
@@ -606,9 +614,9 @@ export default function App() {
               />
               <span className="font-semibold text-slate-300">
                 {currentSignal.signal === 'OVERBOUGHT'
-                  ? 'إشارة هبوط (Z >= +1.0)'
+                  ? 'إشارة هبوط (Z >= +2.0)'
                   : currentSignal.signal === 'OVERSOLD'
-                  ? 'إشارة صعود (Z <= -1.0)'
+                  ? 'إشارة صعود (Z <= -2.0)'
                   : 'سوق محايد (Neutral)'}
               </span>
             </div>
@@ -718,7 +726,7 @@ export default function App() {
                   </div>
                   <p className="text-xs text-slate-300 mt-0.5">
                     {isBotRunning
-                      ? 'الروبوت يراقب بث أسعار بينانس ودفتر أوامر Limitless CLOB ويقتنص الفرص فور تحقق الشرط (≤ 0.80$).'
+                      ? 'الروبوت يراقب بث أسعار بينانس ودفتر أوامر Limitless CLOB ويقتنص الفرص فور تحقق الشرط (Z-Score ≥ ±2.0 وسعر ≤ 0.20$).'
                       : 'تم تعليق التداول التلقائي وإرسال الأوامر. يمكنك استئناف التشغيل في أي وقت.'}
                   </p>
                 </div>
@@ -814,9 +822,9 @@ export default function App() {
                       }`}
                     >
                       {currentSignal.signal === 'OVERBOUGHT'
-                        ? 'إشارة هبوط (Z >= +1.0)'
+                        ? 'إشارة هبوط (Z >= +2.0)'
                         : currentSignal.signal === 'OVERSOLD'
-                        ? 'إشارة صعود (Z <= -1.0)'
+                        ? 'إشارة صعود (Z <= -2.0)'
                         : 'حياد (NEUTRAL)'}
                     </span>
                   </h3>
@@ -841,7 +849,7 @@ export default function App() {
                     {latestReport.status === 'EXECUTED'
                       ? 'تم التنفيذ بنجاح'
                       : latestReport.status === 'PRICE_EXCEEDS_MAX'
-                      ? 'مرفوض: السعر > 0.80$'
+                      ? 'مرفوض: السعر > 0.20$ (20 سنت)'
                       : latestReport.status}
                   </span>
                   {latestReport.asymmetricMultiplier && (
@@ -906,7 +914,7 @@ export default function App() {
                 <div className="mt-3 space-y-2 max-h-72 overflow-y-auto pl-1">
                   {executionLogs.length === 0 ? (
                     <div className="text-center py-10 text-slate-500 text-xs">
-                      الروبوت في وضع الاستعداد الحقيقي... بانتظار إشارة Z-Score مؤهلة (&ge; +1.0 للهبوط أو &le; -1.0 للصعود) مع سعر عقد &le; 0.80$ للتنفيذ المباشر.
+                      الروبوت في وضع الاستعداد الحقيقي... بانتظار إشارة Z-Score مؤهلة (&ge; +2.0 للهبوط أو &le; -2.0 للصعود) مع سعر عقد &le; 0.20$ (20 سنت وتحت) للتنفيذ المباشر.
                     </div>
                   ) : (
                     executionLogs.map((log, index) => (
@@ -931,7 +939,7 @@ export default function App() {
                               {log.status === 'EXECUTED'
                                 ? 'تم تنفيذ الأمر فورياً'
                                 : log.status === 'PRICE_EXCEEDS_MAX'
-                                ? 'إلغاء: السعر تجاوز 0.80$'
+                                ? 'إلغاء: السعر تجاوز 0.20$ (20 سنت)'
                                 : log.status}
                             </span>
                             {log.targetedToken && (
@@ -990,7 +998,7 @@ export default function App() {
         </div>
         <div className="flex items-center gap-4 text-slate-400">
           <span>الاستراتيجية: الارتداد المتوسط اللامتماثل (Z-Score)</span>
-          <span>سقف الدخول: &le; 0.80$ لكل عقد</span>
+          <span>سقف الدخول: &le; 0.20$ لكل عقد (20 سنت وتحت)</span>
         </div>
       </footer>
 

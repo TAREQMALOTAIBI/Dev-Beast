@@ -66,9 +66,9 @@ const CREDENTIALS = {
 // 2. إعدادات خطة الـ Z-Score المحدثة
 const CONFIG = {
   lookback: 20,         // نافذة الحساب: آخر 20 شمعة على فريم الدقيقة (1m)
-  upperZScore: 1.0,     // إشارة هبوط: Z-Score >= +1.0
-  lowerZScore: -1.0,    // إشارة صعود: Z-Score <= -1.0
-  maxEntryPrice: ${config.maxEntryPrice}, // سقف السعر: عقود ≤ 0.80$
+  upperZScore: 2.0,     // إشارة هبوط: Z-Score >= +2.0
+  lowerZScore: -2.0,    // إشارة صعود: Z-Score <= -2.0
+  maxEntryPrice: ${config.maxEntryPrice}, // سقف السعر: عقود ≤ 0.20$ (20 سنت وتحت)
   tradeSizeUsdc: ${config.tradeSizeUsdc},  // ميزانية الصفقة بالدولار
   apiBaseUrl: '${config.apiBaseUrl || 'https://api.limitless.exchange'}',
   baseRpcUrl: process.env.BASE_RPC_URL || 'https://mainnet.base.org',
@@ -360,7 +360,7 @@ run();`;
               </span>
             </h2>
             <p className="text-xs text-slate-300">
-              يستقبل أسعار شموع البيتكوين مباشرة من بينانس بدون قيود جغرافية، ويصطاد عروض أسعار ليمتلس &le; 0.80$ في اللحظة نفسها.
+              يستقبل أسعار شموع البيتكوين مباشرة من بينانس بدون قيود جغرافية، ويصطاد عروض أسعار ليمتلس &le; 0.20$ (20 سنت وتحت) في اللحظة نفسها.
             </p>
           </div>
         </div>
@@ -483,7 +483,7 @@ run();`;
               className="w-full accent-cyan-500 cursor-pointer"
             />
             <p className="text-[11px] text-slate-400">
-              سقف السعر: الدخول في صفقات بأسعار &le; 0.80$ يقتنص الفرص فوراً. إذا كان السعر أعلى، يُلغى الأمر لحماية رأس المال.
+              سقف السعر: الدخول في صفقات بأسعار &le; 0.20$ (20 سنت وتحت). إذا كان السعر أعلى، يُلغى الأمر لحماية رأس المال واقتناص أفضل نسبة عائد.
             </p>
           </div>
 
