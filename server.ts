@@ -330,8 +330,18 @@ app.post('/api/portfolio/sell', async (req, res) => {
     }
 
     // جلب الرصيد الفعلي On-Chain
-    const rawBal = await ctfContract.balanceOf(wallet.address, tokenId).catch(() => BigInt(0));
-    const availableTokens = parseFloat(ethers.formatUnits(rawBal, 6));
+    let availableTokens = 0;
+    try {
+      const rawBal = await ctfContract.balanceOf(wallet.address, tokenId).catch(() => BigInt(0));
+      availableTokens = parseFloat(ethers.formatUnits(rawBal, 6));
+    } catch (e: any) {
+      console.warn('⚠️ فحص رصيد CTF On-chain:', e.message);
+    }
+
+    // إذا تعذر فحص البلوكتشين اللحظي ولكن المركز موجود في المحفظة
+    if (availableTokens <= 0 && shares && parseFloat(String(shares)) > 0) {
+      availableTokens = parseFloat(String(shares));
+    }
 
     if (availableTokens <= 0) {
       return res.status(400).json({
@@ -609,7 +619,7 @@ let lastCalculatedZScore: number = 0.0;
 let lastCalculatedMean: number = 94500;
 let lastCalculatedStdDev: number = 50;
 let currentWaitReason: string = isServerBotRunning
-  ? 'في انتظار إشارة Z-Score حاسمة (> +2.0 للهبوط أو < -2.0 للصعود) مع سعر عقد ≤ 0.20$'
+  ? 'في انتظار إشارة Z-Score حاسمة (> +2.0 للهبوط أو < -2.0 للصعود) على عقد BTC 15m للتنفيذ المباشر'
   : 'الروبوت متوقف مؤقتاً (PAUSED) - اضغط تشغيل لتفعيل التداول الآلي';
 
 let executedTradesLog: Array<{
@@ -620,13 +630,13 @@ let executedTradesLog: Array<{
   txHash: string;
 }> = [];
 
-// خطة التداول بالـ Z-Score فقط
+// خطة التداول بالـ Z-Score فقط مع قيد "20 سنت وتحت"
 const ZSCORE_STRATEGY = {
   marketSlug: 'btc-price-15m-now',
   lookbackPeriod: 20,         // نافذة الحساب: آخر 20 شمعة على فريم الدقيقة (1m)
   upperThreshold: Number(process.env.Z_SCORE_THRESHOLD) || 2.0,        // إشارة هبوط إذا أصبح Z-Score >= +2.0
   lowerThreshold: -(Number(process.env.Z_SCORE_THRESHOLD) || 2.0),       // إشارة صعود إذا أصبح Z-Score <= -2.0
-  maxEntryPrice: Number(process.env.MAX_ENTRY_PRICE) || 0.20, // سقف سعر الدخول (عقود ≤ 0.20$ - 20 سنت وتحت)
+  maxEntryPrice: Number(process.env.MAX_ENTRY_PRICE) || 0.20, // قيد سقف الدخول: 20 سنت وتحت (<= 0.20$)
   riskPercent: 1.0,           // نسبة المخاطرة للصفقة (1.0% من رأس المال)
   tradeSizeUsdc: Number(process.env.TRADE_SIZE_USDC) || 0.50, // حجم كل صفقة بالدولار
 };
@@ -786,8 +796,8 @@ async function executeLimitlessTrade(targetToken: 'YES' | 'NO', btcPrice: number
     // محاذاة السعر مع دقة المنصة (Tick Alignment: 0.001)
     const alignedPrice = Math.min(0.999, Math.max(0.001, Number((Math.round(rawPrice / 0.001) * 0.001).toFixed(3))));
 
-    if (alignedPrice > ZSCORE_STRATEGY.maxEntryPrice) {
-      currentWaitReason = `سعر عقد ${targetToken} ($${alignedPrice}) في سوق 15m أعلى من سقف الاستراتيجية ($${ZSCORE_STRATEGY.maxEntryPrice} - 20 سنت وتحت). بانتظار فرصة مناسبة.`;
+    if (alignedPrice > (ZSCORE_STRATEGY.maxEntryPrice || 0.20)) {
+      currentWaitReason = `سعر عقد ${targetToken} ($${alignedPrice}) في سوق 15m أعلى من قيد الدخول (20 سنت وتحت: $${ZSCORE_STRATEGY.maxEntryPrice}). بانتظار فرصة مناسبة.`;
       console.log(`⛔ [Server Bot] ${currentWaitReason}`);
       return;
     }
@@ -1180,7 +1190,7 @@ app.post('/api/bot/toggle', (req, res) => {
   }
   saveBotRunningState(isServerBotRunning);
   currentWaitReason = isServerBotRunning
-    ? 'في انتظار إشارة Z-Score حاسمة (> +2.0 للهبوط أو < -2.0 للصعود) مع سعر عقد ≤ 0.20$'
+    ? 'في انتظار إشارة Z-Score حاسمة (> +2.0 للهبوط أو < -2.0 للصعود) على عقد BTC 15m للتنفيذ المباشر'
     : 'الروبوت متوقف مؤقتاً (PAUSED) - اضغط تشغيل لتفعيل التداول الآلي';
   console.log(`🎛️ [Server Bot] تم تغيير حالة تشغيل الروبوت على السيرفر إلى: ${isServerBotRunning ? 'تشغيل (RUNNING)' : 'إيقاف (STOPPED)'}`);
   res.json({ running: isServerBotRunning, waitReason: currentWaitReason });

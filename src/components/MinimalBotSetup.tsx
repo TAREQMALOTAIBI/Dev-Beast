@@ -68,7 +68,7 @@ const CONFIG = {
   lookback: 20,         // نافذة الحساب: آخر 20 شمعة على فريم الدقيقة (1m)
   upperZScore: 2.0,     // إشارة هبوط: Z-Score >= +2.0
   lowerZScore: -2.0,    // إشارة صعود: Z-Score <= -2.0
-  maxEntryPrice: ${config.maxEntryPrice}, // سقف السعر: عقود ≤ 0.20$ (20 سنت وتحت)
+  maxEntryPrice: ${config.maxEntryPrice}, // سقف سعر الدخول (20 سنت وتحت ≤ 0.20$)
   tradeSizeUsdc: ${config.tradeSizeUsdc},  // ميزانية الصفقة بالدولار
   apiBaseUrl: '${config.apiBaseUrl || 'https://api.limitless.exchange'}',
   baseRpcUrl: process.env.BASE_RPC_URL || 'https://mainnet.base.org',
@@ -365,7 +365,7 @@ run();`;
               </span>
             </h2>
             <p className="text-xs text-slate-300">
-              يستقبل أسعار شموع البيتكوين مباشرة من بينانس بدون قيود جغرافية، ويصطاد عروض أسعار ليمتلس &le; 0.20$ (20 سنت وتحت) في اللحظة نفسها.
+              يستقبل أسعار شموع البيتكوين مباشرة من بينانس بدون قيود جغرافية، ويصطاد عروض أسعار ليمتلس الفورية في اللحظة نفسها.
             </p>
           </div>
         </div>
@@ -475,21 +475,30 @@ run();`;
 
           <div className="space-y-1.5">
             <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
-              <span>أقصى سعر دخول مسموح (Max Entry Price)</span>
+              <span>قيد سعر الدخول الأقصى (20 سنت وتحت)</span>
               <span className="text-cyan-400 font-mono font-bold">${config.maxEntryPrice.toFixed(2)} USDC</span>
             </label>
             <input
               type="range"
               min="0.05"
-              max="0.95"
+              max="0.50"
               step="0.01"
               value={config.maxEntryPrice}
               onChange={(e) => onUpdateConfig({ ...config, maxEntryPrice: parseFloat(e.target.value) })}
               className="w-full accent-cyan-500 cursor-pointer"
             />
-            <p className="text-[11px] text-slate-400">
-              سقف السعر: الدخول في صفقات بأسعار &le; 0.20$ (20 سنت وتحت). إذا كان السعر أعلى، يُلغى الأمر لحماية رأس المال واقتناص أفضل نسبة عائد.
-            </p>
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] text-slate-400">
+                قيد صارم: الشراء فقط عندما يكون سعر العقد 20 سنت وتحت (&le; $0.20).
+              </p>
+              <button
+                type="button"
+                onClick={() => onUpdateConfig({ ...config, maxEntryPrice: 0.20 })}
+                className="text-[10px] px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 hover:bg-cyan-900 transition-colors"
+              >
+                تثبيت على 0.20$
+              </button>
+            </div>
           </div>
 
           <div className="space-y-1.5">
@@ -507,7 +516,7 @@ run();`;
               className="w-full accent-emerald-500 cursor-pointer"
             />
             <p className="text-[11px] text-slate-400">
-              المبلغ المالي المخصص لشراء العقود عند تحقق شروط الإشارة وسعر الدخول.
+              المبلغ المالي المخصص لشراء العقود عند ظهور الإشارة.
             </p>
           </div>
         </div>

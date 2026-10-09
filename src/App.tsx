@@ -67,7 +67,7 @@ export default function App() {
             lowerThreshold: -2.0, // تثبيت العتبة على -2.0
             period: 20,
           },
-          maxEntryPrice: 0.20, // سقف سعر الدخول (20 سنت وتحت)
+          maxEntryPrice: parsed.maxEntryPrice && parsed.maxEntryPrice <= 0.20 ? parsed.maxEntryPrice : 0.20, // سقف سعر الدخول: 20 سنت وتحت
         };
       }
     } catch (e) {
@@ -86,7 +86,7 @@ export default function App() {
 
   // مزامنة وتحديث فوري لعتبات Z-Score في حال وجود نسخ مخزنة قديمة في المتصفح
   useEffect(() => {
-    if (config.zScore.upperThreshold !== 2.0 || config.zScore.lowerThreshold !== -2.0 || config.maxEntryPrice !== 0.20) {
+    if (config.zScore.upperThreshold !== 2.0 || config.zScore.lowerThreshold !== -2.0) {
       setConfig((prev) => ({
         ...prev,
         zScore: {
@@ -95,10 +95,9 @@ export default function App() {
           lowerThreshold: -2.0,
           period: 20,
         },
-        maxEntryPrice: 0.20,
       }));
     }
-  }, [config.zScore.upperThreshold, config.zScore.lowerThreshold, config.maxEntryPrice]);
+  }, [config.zScore.upperThreshold, config.zScore.lowerThreshold]);
 
   // حالة ربط المحفظة الحقيقية (Web3 Wallet)
   const [connectedWallet, setConnectedWallet] = useState<string | null>(() => {
@@ -121,7 +120,7 @@ export default function App() {
     } | null;
   }>({
     running: false,
-    waitReason: 'في انتظار اكتمال شروط الاستراتيجية (Z-Score ≥ 2.0 أو ≤ -2.0) وسعر العقد ≤ 0.20$ (20 سنت وتحت)',
+    waitReason: 'في انتظار إشارة Z-Score مؤهلة على عقد BTC 15m بسعر 20 سنت وتحت (≤ 0.20$)',
     tradeSizeUsdc: 0.50,
     targetMarketFocus: 'BTC 15 Min Only (عقود بيتكوين 15 دقيقة حصراً)',
     active15mMarket: null,
@@ -670,7 +669,7 @@ export default function App() {
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                خطة التداول بالـ Z-Score فقط (Lookback: 20m • العتبة: &plusmn;2.0 • الدخول &le; 0.20$ / 20 سنت وتحت • أوامر FAK)
+                خطة التداول بالـ Z-Score فقط (Lookback: 20m • العتبة: &plusmn;2.0 • قيد الدخول: 20 سنت وتحت &le; $0.20 • تنفيذ FAK)
               </p>
             </div>
           </div>
@@ -926,7 +925,7 @@ export default function App() {
                   </span>
                 </div>
                 <span className="text-[11px] text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20 font-medium">
-                  سقف الدخول: &le; 0.20$ (20 سنت وتحت) • عتبة Z-Score: &plusmn;2.0
+                  تنفيذ مباشر FAK • سقف الدخول: 20 سنت وتحت (&le; 0.20$) • عتبة Z-Score: &plusmn;2.0
                 </span>
               </div>
             </div>
@@ -1024,7 +1023,7 @@ export default function App() {
                     {latestReport.status === 'EXECUTED'
                       ? 'تم التنفيذ بنجاح'
                       : latestReport.status === 'PRICE_EXCEEDS_MAX'
-                      ? 'مرفوض: السعر > 0.20$ (20 سنت)'
+                      ? 'بانتظار سيولة مطابقة'
                       : latestReport.status}
                   </span>
                   {latestReport.asymmetricMultiplier && (
@@ -1089,7 +1088,7 @@ export default function App() {
                 <div className="mt-3 space-y-2 max-h-72 overflow-y-auto pl-1">
                   {executionLogs.length === 0 ? (
                     <div className="text-center py-10 text-slate-500 text-xs">
-                      الروبوت في وضع الاستعداد الحقيقي... بانتظار إشارة Z-Score مؤهلة (&ge; +2.0 للهبوط أو &le; -2.0 للصعود) مع سعر عقد &le; 0.20$ (20 سنت وتحت) للتنفيذ المباشر.
+                      الروبوت في وضع الاستعداد الحقيقي... بانتظار إشارة Z-Score مؤهلة (&ge; +2.0 للهبوط أو &le; -2.0 للصعود) على عقد BTC 15m بسعر 20 سنت وتحت (&le; 0.20$).
                     </div>
                   ) : (
                     executionLogs.map((log, index) => (
@@ -1114,7 +1113,7 @@ export default function App() {
                               {log.status === 'EXECUTED'
                                 ? 'تم تنفيذ الأمر فورياً'
                                 : log.status === 'PRICE_EXCEEDS_MAX'
-                                ? 'إلغاء: السعر تجاوز 0.20$ (20 سنت)'
+                                ? 'بانتظار سيولة مطابقة'
                                 : log.status}
                             </span>
                             {log.targetedToken && (
@@ -1172,8 +1171,8 @@ export default function App() {
           <span>تكامل رسمي مع حزمة Limitless Exchange SDK &bull; توقيع مشفر EIP-712 &bull; نظام تداول غير احتجازي</span>
         </div>
         <div className="flex items-center gap-4 text-slate-400">
-          <span>الاستراتيجية: الارتداد المتوسط اللامتماثل (Z-Score)</span>
-          <span>سقف الدخول: &le; 0.20$ لكل عقد (20 سنت وتحت)</span>
+          <span>عقود بيتكوين 15 دقيقة (BTC 15 Min)</span>
+          <span>أوامر FAK فورية</span>
         </div>
       </footer>
 

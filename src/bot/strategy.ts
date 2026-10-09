@@ -89,7 +89,7 @@ export async function executeAsymmetricMeanReversion(
     };
   }
 
-  // الخطوة 7: تطبيق سقف سعر الدخول (Max Entry Price <= $0.20 - 20 سنت وتحت)
+  // الخطوة 7: تطبيق سقف سعر الدخول (Max Entry Price)
   const validAsks = sdk.filterAsymmetricAsks(orderbook, config.maxEntryPrice);
   const bestAsk = orderbook.asks.length > 0 ? orderbook.asks[0] : null;
 
@@ -109,7 +109,7 @@ export async function executeAsymmetricMeanReversion(
       },
       executed: false,
       status: 'PRICE_EXCEEDS_MAX',
-      messageArabic: `تم إلغاء التنفيذ لحماية نسبة العائد: أفضل سعر معروض (${bestAsk?.price.toFixed(2)}$) أعلى من الحد الأقصى (${config.maxEntryPrice.toFixed(2)}$). نحن نشتري فقط عندما يكون السعر <= 0.20$ لضمان عائد 5 أضعاف (+400%).`,
+      messageArabic: `تم إلغاء التنفيذ: أفضل سعر معروض (${bestAsk?.price.toFixed(2)}$) أعلى من قيد الدخول المحدد (${config.maxEntryPrice.toFixed(2)}$ - 20 سنت وتحت). في انتظار عروض سيولة ملائمة.`,
       messageEnglish: `Execution rejected: Best ask price ($${bestAsk?.price.toFixed(2)}) exceeds max entry threshold ($${config.maxEntryPrice.toFixed(2)}).`,
     };
   }

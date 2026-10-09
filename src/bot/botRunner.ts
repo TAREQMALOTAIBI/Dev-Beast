@@ -85,14 +85,14 @@ async function ensureVenueApproval(venueExchange: string) {
 const ZSCORE_STRATEGY = {
   marketSlug: 'btc-price-15m-now',
   lookbackPeriod: 20,         // نافذة الحساب: آخر 20 شمعة على فريم الدقيقة (1m)
-  upperThreshold: 1.0,        // إشارة هبوط إذا أصبح Z-Score >= +1.0
-  lowerThreshold: -1.0,       // إشارة صعود إذا أصبح Z-Score <= -1.0
-  maxEntryPrice: Number(process.env.MAX_ENTRY_PRICE) || 0.80, // سقف سعر الدخول (حتى 0.80$)
+  upperThreshold: 2.0,        // إشارة هبوط إذا أصبح Z-Score >= +2.0
+  lowerThreshold: -2.0,       // إشارة صعود إذا أصبح Z-Score <= -2.0
+  maxEntryPrice: Number(process.env.MAX_ENTRY_PRICE) || 0.20, // سقف سعر الدخول: 20 سنت وتحت (≤ 0.20$)
   riskPercent: 1.0,           // نسبة المخاطرة للصفقة: 1% من رأس المال
   tradeSizeUsdc: Number(process.env.TRADE_SIZE_USDC) || 8.0,  // ميزانية كل صفقة بالدولار USDC
 };
 
-console.log(`📊 الاستراتيجية الحالية: خطة التداول بالـ Z-Score فقط (التركيز على 1.0)`);
+console.log(`📊 الاستراتيجية الحالية: خطة التداول بالـ Z-Score فقط (التركيز على 2.0 وقيد 20 سنت وتحت)`);
 console.log(`⏱️ نافذة الحساب (Lookback Window): آخر ${ZSCORE_STRATEGY.lookbackPeriod} شمعة على فريم الدقيقة (1m)`);
 console.log(`📉 إشارة هبوط: Z-Score >= +${ZSCORE_STRATEGY.upperThreshold} -> شراء عقد NO (القمة) بسعر ≤ $${ZSCORE_STRATEGY.maxEntryPrice}`);
 console.log(`📈 إشارة صعود: Z-Score <= ${ZSCORE_STRATEGY.lowerThreshold} -> شراء عقد YES (الارتداد) بسعر ≤ $${ZSCORE_STRATEGY.maxEntryPrice}`);

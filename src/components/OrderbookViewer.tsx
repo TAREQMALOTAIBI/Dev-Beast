@@ -76,11 +76,11 @@ export const OrderbookViewer: React.FC<OrderbookViewerProps> = ({
           <div>
             <span className="font-bold">
               {isBestAskUnderThreshold
-                ? `فرصة دخول لامتماثلة مؤهلة (أفضل عرض: $${bestAsk?.price.toFixed(2)})`
-                : `أفضل عرض بيع ($${bestAsk?.price.toFixed(2) || 'N/A'}) يتجاوز الحد الأقصى $${maxEntryPrice.toFixed(2)}`}
+                ? `فرصة دخول لامتماثلة مؤهلة (أفضل عرض: $${bestAsk?.price.toFixed(2)} - 20 سنت وتحت)`
+                : `أفضل عرض بيع ($${bestAsk?.price.toFixed(2) || 'N/A'}) يتجاوز قيد الدخول (20 سنت وتحت: $${maxEntryPrice.toFixed(2)})`}
             </span>
             <p className="text-[11px] text-slate-400">
-              شرط السعر: يتم التنفيذ فقط عندما يكون سعر الشراء &le; ${maxEntryPrice.toFixed(2)} لحماية رأس المال.
+              قيد السعر: الشراء فقط عندما يكون سعر العقد $0.20 وتحت (20 سنت وتحت).
             </p>
           </div>
         </div>
