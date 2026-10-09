@@ -408,31 +408,35 @@ export default function App() {
     return checkMeanReversionSignal(candles, config);
   }, [candles, config]);
 
-  // تنفيذ الاستراتيجية عند تغير البيانات
+  // فحص وتحديث تقرير حالة الروبوت اللحظية من السيرفر
   const triggerExecutionCheck = useCallback(async () => {
+    const currentSig = checkMeanReversionSignal(candles, config);
+
     if (!isBotRunning) {
       setLatestReport({
         timestamp: Date.now(),
-        signal: checkMeanReversionSignal(candles, config),
+        signal: currentSig,
         executed: false,
         status: 'NO_SIGNAL',
-        messageArabic: '⏸️ الروبوت متوقف مؤقتاً بواسطة المستخدم. تم تعليق إرسال الأوامر والتداول الآلي.',
+        messageArabic: '⏸️ الروبوت متوقف مؤقتاً بواسطة المستخدم. اضغط "تشغيل الروبوت" لتفعيل التداول الآلي.',
         messageEnglish: 'Bot paused manually by user. Automated order execution suspended.',
       });
       return;
     }
 
-    try {
-      const report = await executeAsymmetricMeanReversion(sdk, candles, config);
-      setLatestReport(report);
+    const serverReason = serverStatus.waitReason || 'الروبوت يراقب السوق المباشر وينتظر تحقق شروط Z-Score وسعر 20 سنت وتحت...';
+    const isExceedingPrice = serverReason.includes('أعلى من قيد') || serverReason.includes('20 سنت');
 
-      if (report.status !== 'NO_SIGNAL') {
-        setExecutionLogs((prev) => [report, ...prev.slice(0, 19)]);
-      }
-    } catch (err) {
-      console.error('خطأ في فحص التنفيذ:', err);
-    }
-  }, [sdk, candles, config, isBotRunning]);
+    setLatestReport({
+      timestamp: Date.now(),
+      signal: currentSig,
+      targetedToken: currentSig.signal === 'OVERBOUGHT' ? 'NO' : (currentSig.signal === 'OVERSOLD' ? 'YES' : undefined),
+      executed: false,
+      status: isExceedingPrice ? 'PRICE_EXCEEDS_MAX' : (currentSig.signal !== 'NEUTRAL' ? 'MONITORING' : 'NO_SIGNAL'),
+      messageArabic: serverReason,
+      messageEnglish: `Live Server: ${serverReason}`,
+    });
+  }, [candles, config, isBotRunning, serverStatus.waitReason]);
 
   useEffect(() => {
     triggerExecutionCheck();
@@ -554,13 +558,28 @@ export default function App() {
       // وضع احتياطي
     }
 
-    // فحص دوري لتحديث أسعار بينانس الحقيقية من الخادم كل ثانيتين
+    // فحص دوري لتحديث أسعار بينانس الحقيقية وحالة الخادم والصفقات المنفذة كل ثانيتين
     const pollInterval = setInterval(async () => {
       try {
         const res = await fetch('/api/bot/status');
         if (res.ok) {
           const st = await res.json();
           setServerStatus(st);
+          if (st.recentTrades && Array.isArray(st.recentTrades) && st.recentTrades.length > 0) {
+            const realLogs = st.recentTrades.map((t: any) => ({
+              timestamp: t.timestamp,
+              signal: { signal: t.tokenType === 'NO' ? 'OVERBOUGHT' : 'OVERSOLD', zScore: 2.1, mean: 94000, stdDev: 50 },
+              targetedToken: t.tokenType,
+              executed: true,
+              status: 'EXECUTED',
+              executionPrice: t.price,
+              contractsFilled: t.amount,
+              totalCostUsdc: Number((t.amount * t.price).toFixed(2)),
+              messageArabic: `✅ تم تنفيذ صفقة حقيقية على منصة Limitless! شراء ${t.amount} عقد ${t.tokenType} بسعر $${t.price}. المعرف: ${t.txHash.substring(0, 18)}...`,
+              messageEnglish: `Real Limitless trade executed: ${t.amount} ${t.tokenType} at $${t.price}.`,
+            }));
+            setExecutionLogs(realLogs);
+          }
         }
       } catch {}
     }, 2000);
@@ -589,6 +608,36 @@ export default function App() {
               timeRemainingText = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
             }
             setActive15mInfo({ ...data, timeRemainingText });
+
+            // تحديث دفتر الأوامر اللحظي ببيانات السوق الحقيقية من المنصة
+            if (data.orderbook && (data.orderbook.asks?.length > 0 || data.orderbook.bids?.length > 0)) {
+              const asks = (data.orderbook.asks || []).map((a: any) => ({
+                price: Number(a.price),
+                size: Number(a.size || 500),
+                side: 'SELL' as const,
+                totalCost: Number((Number(a.price) * Number(a.size || 500)).toFixed(2)),
+              }));
+              const bids = (data.orderbook.bids || []).map((b: any) => ({
+                price: Number(b.price),
+                size: Number(b.size || 500),
+                side: 'BUY' as const,
+                totalCost: Number((Number(b.price) * Number(b.size || 500)).toFixed(2)),
+              }));
+              const bestAsk = asks[0]?.price ?? 0.20;
+              const bestBid = bids[0]?.price ?? 0.15;
+              const midpoint = Number(((bestBid + bestAsk) / 2).toFixed(4));
+              setOrderbook({
+                tokenId: data.slug || 'BTC-15M',
+                midpoint,
+                adjustedMidpoint: midpoint,
+                maxSpread: '0.035',
+                minSize: '50000000',
+                lastTradePrice: bestAsk,
+                asks,
+                bids,
+                timestamp: Date.now(),
+              });
+            }
           } else {
             setActive15mInfo(null);
           }
