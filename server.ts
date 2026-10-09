@@ -282,6 +282,145 @@ app.get('/api/portfolio/positions', async (req, res) => {
   }
 });
 
+// مسار البيع الفوري وإغلاق المراكز (Manual / Instant Sell Endpoint)
+app.post('/api/portfolio/sell', async (req, res) => {
+  try {
+    const { marketSlug, outcome, shares, price, orderType } = req.body;
+    if (!marketSlug || !outcome) {
+      return res.status(400).json({ error: 'marketSlug and outcome (YES/NO) are required.' });
+    }
+
+    const wallet = initializeServerWallet();
+    if (!wallet) {
+      return res.status(400).json({ error: 'المحفظة غير مهيأة بالسيرفر. يرجى التأكد من حفظ المفتاح الخاص.' });
+    }
+
+    const client = getLimitlessClient();
+    const market = await client.markets.getMarket(marketSlug).catch(() => null);
+    if (!market) {
+      return res.status(404).json({ error: `تعذر العثور على بيانات السوق (${marketSlug}) في منصة Limitless.` });
+    }
+
+    const outcomeUpper = String(outcome).toUpperCase();
+    const tokenId = outcomeUpper === 'YES' ? market.tokens?.yes : market.tokens?.no;
+    if (!tokenId) {
+      return res.status(400).json({ error: `معرف التوكن (${outcomeUpper}) غير متوفر لهذا السوق.` });
+    }
+
+    // فحص وتحديث التفويض لـ CTF على شبكة Base إذا لزم الأمر
+    const provider = new ethers.JsonRpcProvider(process.env.BASE_RPC_URL || 'https://mainnet.base.org');
+    const ctfAbi = [
+      'function balanceOf(address account, uint256 id) view returns (uint256)',
+      'function isApprovedForAll(address account, address operator) view returns (bool)',
+      'function setApprovalForAll(address operator, bool approved)'
+    ];
+    const ctfContract = new ethers.Contract('0xC9c98965297Bc527861c898329Ee280632B76e18', ctfAbi, wallet.connect(provider));
+    const venueExchange = market.venue?.exchange || '0x05c748E2f4DcDe0ec9Fa8DDc40DE6b867f923fa5';
+
+    try {
+      const isApproved = await ctfContract.isApprovedForAll(wallet.address, venueExchange).catch(() => true);
+      if (!isApproved) {
+        console.log('⚡ [Auto-Approve] تفويض منصة Limitless لنقل عقود CTF...');
+        const tx = await ctfContract.setApprovalForAll(venueExchange, true);
+        await tx.wait(1);
+        console.log('✅ تم تفعيل تفويض CTF بنجاح:', tx.hash);
+      }
+    } catch (e: any) {
+      console.warn('⚠️ فحص تفويض CTF:', e.message);
+    }
+
+    // جلب الرصيد الفعلي On-Chain
+    const rawBal = await ctfContract.balanceOf(wallet.address, tokenId).catch(() => BigInt(0));
+    const availableTokens = parseFloat(ethers.formatUnits(rawBal, 6));
+
+    if (availableTokens <= 0) {
+      return res.status(400).json({
+        error: `لا يوجد لديك رصيد من عقود ${outcomeUpper} المتاحة للبيع في هذا السوق (الرصيد الفعلي: 0).`,
+        availableTokens: 0
+      });
+    }
+
+    // تحديد الكمية المراد بيعها
+    let sharesToSell = shares !== undefined && shares !== null && shares !== '' ? parseFloat(String(shares)) : availableTokens;
+    if (isNaN(sharesToSell) || sharesToSell <= 0) {
+      sharesToSell = availableTokens;
+    }
+    sharesToSell = Math.min(sharesToSell, availableTokens);
+    sharesToSell = Math.floor(sharesToSell);
+
+    if (sharesToSell <= 0) {
+      return res.status(400).json({ error: 'الكمية المتاحة للبيع أقل من 1 عقد صحيح.' });
+    }
+
+    // جلب دفتر الأوامر لتحديد أفضل سعر بيع فوري
+    const orderbook = await client.markets.getOrderBook(marketSlug).catch(() => null);
+    let executionPrice = price ? parseFloat(String(price)) : null;
+
+    if (!executionPrice) {
+      if (outcomeUpper === 'YES') {
+        executionPrice = orderbook?.bids?.[0]?.price || null;
+      } else {
+        if (orderbook?.bids?.[0]?.price) {
+          executionPrice = Number((1.0 - orderbook.bids[0].price).toFixed(3));
+        } else if (orderbook?.asks?.[0]?.price) {
+          executionPrice = Number((1.0 - orderbook.asks[0].price).toFixed(3));
+        } else {
+          executionPrice = 0.20;
+        }
+      }
+    }
+
+    if (!executionPrice || executionPrice <= 0) {
+      return res.status(400).json({
+        error: 'لا توجد طلبات شراء (Bids) نشطة حالياً في دفتر الأوامر لهذا العقد لتنفيذ البيع الفوري.',
+        orderbookBids: orderbook?.bids?.length || 0
+      });
+    }
+
+    // ضبط السعر على دقة 0.001
+    const alignedPrice = Math.min(0.999, Math.max(0.001, Number((Math.round(executionPrice / 0.001) * 0.001).toFixed(3))));
+
+    console.log(`📤 [Manual Sell] إرسال أمر بيع ${sharesToSell} عقد ${outcomeUpper} بسعر $${alignedPrice} في سوق ${marketSlug}...`);
+
+    const orderClient = client.newOrderClient(wallet);
+    const selectedOrderType = orderType === 'GTC' ? OrderType.GTC : OrderType.FAK;
+
+    const resOrder = await orderClient.createOrder({
+      marketSlug,
+      tokenId,
+      side: Side.SELL,
+      price: alignedPrice,
+      size: sharesToSell,
+      orderType: selectedOrderType,
+    });
+
+    console.log(`🎉 [Manual Sell] تم إرسال أمر البيع بنجاح! معرف الأمر: ${resOrder.order?.id || 'OK'}`);
+
+    const estimatedUsdc = (sharesToSell * alignedPrice).toFixed(2);
+
+    return res.json({
+      success: true,
+      message: `تم تنفيذ أمر بيع ${sharesToSell} عقد ${outcomeUpper} بسعر $${alignedPrice} بنجاح! المبلغ التقديري المسترد: $${estimatedUsdc} USDC.`,
+      orderId: resOrder.order?.id,
+      soldShares: sharesToSell,
+      price: alignedPrice,
+      estimatedProceedsUsdc: estimatedUsdc,
+      matches: resOrder.makerMatches?.length || 0
+    });
+  } catch (err: any) {
+    console.error('❌ [Manual Sell] فشل تنفيذ أمر البيع:', err);
+    let friendlyMessage = err.message || 'حدث خطأ أثناء إرسال أمر البيع إلى المنصة.';
+    if (friendlyMessage.includes('Order size') || friendlyMessage.includes('minSize') || friendlyMessage.includes('100000000')) {
+      friendlyMessage = 'تنبيه من المنصة: دفتر الأوامر يفرض حداً أدنى لحجم الأمر (Min Order Size: 100 عقد). يمكنك زيادة حجم المركز أو الاحتفاظ به حتى موعد التسوية التلقائي.';
+    } else if (friendlyMessage.includes('Authentication') || friendlyMessage.includes('401')) {
+      friendlyMessage = 'يرجى التحقق من بيانات اعتماد API الخاصة بمنصة Limitless في تبويب الإعدادات.';
+    } else if (friendlyMessage.includes('liquidity') || friendlyMessage.includes('FAK') || friendlyMessage.includes('cancelled')) {
+      friendlyMessage = 'لم يتم العثور على سيولة شراء فورية مطابقة لهذا السعر في دفتر الأوامر حالياً.';
+    }
+    return res.status(500).json({ error: friendlyMessage, rawError: err.message });
+  }
+});
+
 app.post('/api/credentials/save', async (req, res) => {
   try {
     const { privateKey, apiToken, apiSecret } = req.body;
