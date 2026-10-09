@@ -23,6 +23,7 @@ import {
   ChevronDown,
   LogOut,
   Clock,
+  Server,
 } from 'lucide-react';
 import { ethers } from 'ethers';
 
@@ -45,10 +46,11 @@ import { OrderbookViewer } from './components/OrderbookViewer';
 import { Eip712Inspector } from './components/Eip712Inspector';
 import { PortfolioViewer } from './components/PortfolioViewer';
 import { MinimalBotSetup } from './components/MinimalBotSetup';
+import { GcpAutoMaintenance } from './components/GcpAutoMaintenance';
 
 export default function App() {
-  // تبويبات الواجهة الأساسية المطلوبة فقط
-  const [activeTab, setActiveTab] = useState<'terminal' | 'portfolio' | 'setup'>('terminal');
+  // تبويبات الواجهة الأساسية
+  const [activeTab, setActiveTab] = useState<'terminal' | 'portfolio' | 'setup' | 'maintenance'>('terminal');
   const [activeMarketSlug, setActiveMarketSlug] = useState<string>('btc-price-15m-now');
 
   // إعدادات البوت والبارامترات
@@ -776,6 +778,18 @@ export default function App() {
                 <Code2 className="w-3.5 h-3.5" />
                 <span>كود البوت وإعدادات التشغيل</span>
               </button>
+              <button
+                onClick={() => setActiveTab('maintenance')}
+                className={`px-3.5 py-1.5 rounded-lg font-medium transition-all flex items-center gap-1.5 ${
+                  activeTab === 'maintenance'
+                    ? 'bg-cyan-500 text-slate-950 font-bold shadow-md'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+                title="نظام الفرمتة والتطهير الآلي لموارد Google Cloud VM لمنع الاختناق"
+              >
+                <Server className="w-3.5 h-3.5" />
+                <span>فرمتة وموارد GCP VM</span>
+              </button>
             </nav>
           </div>
         </div>
@@ -1161,6 +1175,11 @@ export default function App() {
             config={config}
             onUpdateConfig={setConfig}
           />
+        )}
+
+        {/* التبويب 4: الفرمتة الآلية وإدارة موارد Google Cloud VM */}
+        {activeTab === 'maintenance' && (
+          <GcpAutoMaintenance />
         )}
       </main>
 

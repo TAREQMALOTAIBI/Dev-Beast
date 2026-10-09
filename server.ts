@@ -12,6 +12,7 @@ import {
 } from '@limitless-exchange/sdk';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -630,6 +631,95 @@ let executedTradesLog: Array<{
   txHash: string;
 }> = [];
 
+// ==============================================================================
+// 🧹 نظام الفرمتة والتطهير الآلي لموارد السيرفر (Google Cloud VM Auto-Purge Engine)
+// لمنع الاختناق وتسريب الذاكرة وضمان تنفيذ أوامر FAK بأعلى سرعة وسلاسة 24/7
+// ==============================================================================
+
+interface PurgeLogRecord {
+  id: string;
+  timestamp: number;
+  reason: string;
+  freedMb: number;
+  currentRssMb: number;
+  heapUsedMb: number;
+  durationMs: number;
+}
+
+let lastPurgeTimestamp: number = Date.now();
+let totalPurgeCount: number = 0;
+let lastFreedMb: number = 0;
+const purgeLogs: PurgeLogRecord[] = [];
+
+function performSystemPurge(reason: string = 'فرمتة دورية تلقائية'): PurgeLogRecord {
+  const startTime = Date.now();
+  const memBefore = process.memoryUsage();
+
+  // 1. تقليص وتطهير سجلات الصفقات المحفوظة بالذاكرة
+  if (executedTradesLog.length > 25) {
+    executedTradesLog = executedTradesLog.slice(0, 25);
+  }
+
+  // 2. تقليص مصفوفة الشموع إلى الحد الأدنى اللازم لحساب الـ Z-Score
+  if (candleCloses.length > 50) {
+    candleCloses.splice(0, candleCloses.length - 50);
+  }
+
+  // 3. تنظيف وتفريغ كاش الأسواق المؤقت
+  cachedActive15mMarket = null;
+  lastMarketFetchTime = 0;
+
+  // 4. استدعاء تفريغ الذاكرة القسري V8 Garbage Collection عند تفعيله
+  if (typeof (global as any).gc === 'function') {
+    try {
+      (global as any).gc();
+    } catch {}
+  }
+
+  const memAfter = process.memoryUsage();
+  const freedBytes = Math.max(0, memBefore.rss - memAfter.rss);
+  const freedMb = Number((freedBytes / (1024 * 1024)).toFixed(2));
+  const currentRssMb = Number((memAfter.rss / (1024 * 1024)).toFixed(2));
+  const heapUsedMb = Number((memAfter.heapUsed / (1024 * 1024)).toFixed(2));
+  const durationMs = Date.now() - startTime;
+
+  totalPurgeCount++;
+  lastPurgeTimestamp = Date.now();
+  lastFreedMb = freedMb;
+
+  const record: PurgeLogRecord = {
+    id: `purge-${Date.now()}`,
+    timestamp: Date.now(),
+    reason,
+    freedMb,
+    currentRssMb,
+    heapUsedMb,
+    durationMs,
+  };
+
+  purgeLogs.unshift(record);
+  if (purgeLogs.length > 20) purgeLogs.pop();
+
+  console.log(`🧹 [GCP Auto-Purge] تمت الفرمتة الآلية بنجاح (${reason}) | الذاكرة الحالية (RSS): ${currentRssMb}MB | الذاكرة المحررة: ${freedMb}MB (${durationMs}ms)`);
+  return record;
+}
+
+// ⏱️ جدولة الفرمتة الآلية الذاتية كل 10 دقائق لتطهير الموارد ومنع تراكم الكاش
+const AUTO_PURGE_INTERVAL_MS = 10 * 60 * 1000;
+setInterval(() => {
+  performSystemPurge('فرمتة دورية تلقائية (كل 10 دقائق)');
+}, AUTO_PURGE_INTERVAL_MS);
+
+// 🛡️ حارس أمان الذاكرة الفوري (فحص كل 30 ثانية): فرمتة طارئة فورية إذا تجاوز RSS 350MB
+setInterval(() => {
+  const mem = process.memoryUsage();
+  const rssMb = mem.rss / (1024 * 1024);
+  if (rssMb > 350) {
+    console.warn(`🚨 [GCP Auto-Purge Guard] استهلاك الذاكرة تجاوز الحد الموصى به (${rssMb.toFixed(1)}MB > 350MB). جاري الفرمتة والتطهير الطارئ...`);
+    performSystemPurge('فرمتة طارئة لتجاوز حد الأمان (350MB)');
+  }
+}, 30000);
+
 // خطة التداول بالـ Z-Score فقط مع قيد "20 سنت وتحت"
 const ZSCORE_STRATEGY = {
   marketSlug: 'btc-price-15m-now',
@@ -1138,6 +1228,14 @@ app.get('/api/bot/status', (req, res) => {
     lowerThreshold: ZSCORE_STRATEGY.lowerThreshold,
     waitReason: currentWaitReason,
     recentTrades: executedTradesLog.slice(0, 10),
+    autoPurge: {
+      enabled: true,
+      intervalMinutes: 10,
+      lastPurgeTime: lastPurgeTimestamp,
+      lastFreedMb,
+      totalPurgeCount,
+      currentRssMb: Number((process.memoryUsage().rss / (1024 * 1024)).toFixed(1)),
+    },
   });
 });
 
@@ -1194,6 +1292,57 @@ app.post('/api/bot/toggle', (req, res) => {
     : 'الروبوت متوقف مؤقتاً (PAUSED) - اضغط تشغيل لتفعيل التداول الآلي';
   console.log(`🎛️ [Server Bot] تم تغيير حالة تشغيل الروبوت على السيرفر إلى: ${isServerBotRunning ? 'تشغيل (RUNNING)' : 'إيقاف (STOPPED)'}`);
   res.json({ running: isServerBotRunning, waitReason: currentWaitReason });
+});
+
+// ==========================================
+// مسارات الفرمتة الآلية وإدارة موارد GCP VM
+// ==========================================
+
+app.get('/api/system/maintenance', (req, res) => {
+  const mem = process.memoryUsage();
+  res.json({
+    autoPurgeEnabled: true,
+    intervalMinutes: 10,
+    lastPurgeTime: lastPurgeTimestamp,
+    totalPurgeCount,
+    lastFreedMb,
+    memory: {
+      rssMb: Number((mem.rss / (1024 * 1024)).toFixed(1)),
+      heapUsedMb: Number((mem.heapUsed / (1024 * 1024)).toFixed(1)),
+      heapTotalMb: Number((mem.heapTotal / (1024 * 1024)).toFixed(1)),
+      externalMb: Number((mem.external / (1024 * 1024)).toFixed(1)),
+    },
+    system: {
+      platform: os.platform(),
+      arch: os.arch(),
+      uptimeHours: Number((os.uptime() / 3600).toFixed(1)),
+      nodeUptimeMinutes: Number((process.uptime() / 60).toFixed(1)),
+      osTotalMemMb: Number((os.totalmem() / (1024 * 1024)).toFixed(0)),
+      osFreeMemMb: Number((os.freemem() / (1024 * 1024)).toFixed(0)),
+      cpuCount: os.cpus()?.length || 1,
+      loadAvg: os.loadavg().map((l) => Number(l.toFixed(2))),
+    },
+    purgeLogs,
+  });
+});
+
+app.post('/api/system/purge', (req, res) => {
+  const record = performSystemPurge('طلب يدوي فوري من لوحة التحكم');
+  res.json({
+    success: true,
+    message: 'تمت الفرمتة وتطهير الذاكرة والكاش بنجاح',
+    record,
+  });
+});
+
+app.get('/api/system/gcp-script', (req, res) => {
+  const scriptPath = path.resolve(process.cwd(), 'scripts', 'gcp-auto-maintenance.sh');
+  if (fs.existsSync(scriptPath)) {
+    const content = fs.readFileSync(scriptPath, 'utf8');
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    return res.send(content);
+  }
+  return res.status(404).send('# Script not found');
 });
 
 // ==========================================
