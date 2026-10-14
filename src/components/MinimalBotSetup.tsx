@@ -213,12 +213,13 @@ async function findAndExecuteBestBtcTrade(targetSide: 'YES' | 'NO', zScore: numb
       if (bestAsk < CONFIG.kellyWinRate && bal > 0) {
         const fStar = (CONFIG.kellyWinRate - bestAsk) / (1 - bestAsk);
         const safeFraction = Math.min(fStar * CONFIG.kellyMultiplier, 0.01);
-        currentTradeBudget = Math.max(bestAsk, Number((bal * safeFraction).toFixed(2)));
+        currentTradeBudget = Math.max(0.05, Number((bal * safeFraction).toFixed(2)));
         console.log(\`🧠 [Full Kelly]: نسبة كيلي f*: \${(fStar * 100).toFixed(1)}% | ميزانية الصفقة: $\${currentTradeBudget} USDC من رصيد $\${bal.toFixed(2)} USDC\`);
       }
     } catch {}
 
-    const contracts = Number((currentTradeBudget / bestAsk).toFixed(2));
+    let contracts = Number((currentTradeBudget / bestAsk).toFixed(2));
+    if (contracts < 0.05) contracts = 0.05;
     const marketDetails = await marketFetcher.getMarket(btc15mMarket.slug).catch(() => null);
     const tokenId = targetSide === 'YES'
       ? (marketDetails?.tokens?.yes || btc15mMarket.tokens?.yes)
@@ -257,7 +258,7 @@ async function findAndExecuteBestBtcTrade(targetSide: 'YES' | 'NO', zScore: numb
       const orderValue = {
         maker: wallet.address,
         tokenId: numTokenId,
-        amount: ethers.parseUnits(String(contracts), 6),
+        amount: ethers.parseUnits(contracts.toFixed(2), 6),
         price: ethers.parseUnits(String(bestAsk), 6),
         side: 0,
         nonce: Date.now(),

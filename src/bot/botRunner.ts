@@ -495,18 +495,22 @@ async function checkAndExecuteLimitlessOrder(targetToken: 'YES' | 'NO', btcPrice
         const safeFraction = Math.min(kellyFraction * ZSCORE_STRATEGY.kellyMultiplier, ZSCORE_STRATEGY.maxBankrollRiskPercent);
         const computedBudget = walletBalance * safeFraction;
 
-        currentTradeBudget = Math.max(bestAsk, Number(computedBudget.toFixed(2)));
+        // دعم التجزئة الدقيقة: حد أدنى 0.05$ للمطابقة على منصة Limitless بدون إجبار العقد على 1 كامل
+        const minTradeUsdc = 0.05;
+        currentTradeBudget = Math.max(minTradeUsdc, Number(computedBudget.toFixed(2)));
+        if (walletBalance > 0 && walletBalance < currentTradeBudget) {
+          currentTradeBudget = Number(walletBalance.toFixed(2));
+        }
         console.log(`🧠 [Full Kelly إدارة المخاطر]: نسبة كيلي المحسوبة f*: ${(kellyFraction * 100).toFixed(1)}% | المخصص (100%): ${(safeFraction * 100).toFixed(1)}% | ميزانية الصفقة: $${currentTradeBudget.toFixed(2)} USDC من رصيد $${walletBalance.toFixed(2)} USDC`);
       } catch (balErr: any) {
         console.warn(`⚠️ تعذر جلب رصيد المحفظة لحساب كيلي، استخدام الميزانية الافتراضية ($${currentTradeBudget}):`, balErr.message);
       }
     }
 
-    // دعم تجزئة العقود والكسور بدقة (Fractional Contracts)
-    const contractsCount = Number((currentTradeBudget / bestAsk).toFixed(2));
-    if (contractsCount <= 0) {
-      console.log('⚠️ حجم العقد بعد التجزئة أصغر من الحد المسموح، تم تخطي الأمر.');
-      return;
+    // دعم تجزئة العقود والكسور بدقة تامة (Fractional Contracts مثل 0.42 أو 0.53 أو 0.67 عقد)
+    let contractsCount = Number((currentTradeBudget / bestAsk).toFixed(2));
+    if (contractsCount < 0.05) {
+      contractsCount = 0.05;
     }
     const totalCost = Number((contractsCount * bestAsk).toFixed(2));
     const potentialPayout = contractsCount * 1.0;
@@ -562,7 +566,7 @@ async function checkAndExecuteLimitlessOrder(targetToken: 'YES' | 'NO', btcPrice
       const orderValue = {
         maker: wallet.address,
         tokenId: numericTokenId,
-        amount: ethers.parseUnits(String(contractsCount), 6),
+        amount: ethers.parseUnits(contractsCount.toFixed(2), 6),
         price: ethers.parseUnits(String(bestAsk), 6),
         side: 0, // BUY
         nonce: Date.now(),

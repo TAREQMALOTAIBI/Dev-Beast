@@ -117,7 +117,7 @@ export async function executeAsymmetricMeanReversion(
   // الخطوة 7: حساب حجم العقود المطلوب شراؤها
   const optimalAsk = validAsks[0];
   const executionPrice = optimalAsk.price;
-  const maxContractsByBudget = Math.floor(config.tradeSizeUsdc / executionPrice);
+  const maxContractsByBudget = Number((config.tradeSizeUsdc / executionPrice).toFixed(2));
   const contractsToBuy = Math.min(maxContractsByBudget, optimalAsk.size);
 
   if (contractsToBuy <= 0) {

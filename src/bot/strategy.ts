@@ -118,7 +118,7 @@ export async function executeAsymmetricMeanReversion(
   // الخطوة 8: حساب عدد العقود وتكلفة الشراء
   const optimalAsk = validAsks[0];
   const executionPrice = optimalAsk.price;
-  const maxContractsByBudget = Math.floor(config.tradeSizeUsdc / executionPrice);
+  const maxContractsByBudget = Number((config.tradeSizeUsdc / executionPrice).toFixed(2));
   const contractsToBuy = Math.min(maxContractsByBudget, optimalAsk.size);
 
   // قواعد التحقق من السعر والحجم (Validation Rules)

@@ -1298,21 +1298,33 @@ async function executeLimitlessTrade(
         kellyFraction = edge / (1 - alignedPrice);
         const safeAllocatedFraction = Math.min(kellyFraction * ZSCORE_STRATEGY.kellyMultiplier, ZSCORE_STRATEGY.maxBankrollRiskPercent);
         const computedBudget = realUsdcBalance * safeAllocatedFraction;
-        tradeBudget = Math.max(alignedPrice, Number(computedBudget.toFixed(2)));
+        // دعم التجزئة الدقيقة: حد أدنى 0.05$ للمطابقة على منصة Limitless بدون إجبار العقد على 1 كامل
+        const minTradeUsdc = 0.05;
+        tradeBudget = Math.max(minTradeUsdc, Number(computedBudget.toFixed(2)));
+        if (realUsdcBalance > 0 && realUsdcBalance < tradeBudget) {
+          tradeBudget = Number(realUsdcBalance.toFixed(2));
+        }
         console.log(`🧠 [Full Kelly] نسبة كيلي: ${(kellyFraction * 100).toFixed(1)}% | المخصص (100% f*): ${(safeAllocatedFraction * 100).toFixed(1)}% | ميزانية الصفقة: $${tradeBudget.toFixed(2)} USDC من رصيد $${realUsdcBalance.toFixed(2)} USDC`);
       } else {
-        // السعر المباشر مرتفع لكن بدون سقف سعر: تنفيذ بحجم عقد واحد تجريبي كحد أدنى آمن
-        tradeBudget = alignedPrice;
-        console.log(`🧠 [Full Kelly] تنفيذ مباشر بسعر السوق بحجم عقد واحد آمن: $${alignedPrice}`);
+        // ميزانية تجزئة آمنة تعادل سقف الأمان من المحفظة (1% أو حد أدنى 0.05$)
+        const minBudget = Math.max(0.05, Number((realUsdcBalance * ZSCORE_STRATEGY.maxBankrollRiskPercent).toFixed(2)));
+        tradeBudget = Math.min(0.10, minBudget);
+        console.log(`🧠 [Full Kelly] ميزانية التجزئة الآمنة: $${tradeBudget.toFixed(2)} USDC`);
       }
     } else {
       const availableBudget = realUsdcBalance > 0.05 ? realUsdcBalance * 0.95 : 0.05;
-      tradeBudget = Math.min(availableBudget, Math.max(alignedPrice, ZSCORE_STRATEGY.tradeSizeUsdc || 0.50));
+      const targetBudget = ZSCORE_STRATEGY.tradeSizeUsdc || 0.06;
+      tradeBudget = Math.max(0.05, Math.min(availableBudget, targetBudget));
     }
 
-    const contracts = Math.max(1, Math.floor(tradeBudget / alignedPrice));
+    // دعم تجزئة العقود والكسور بدقة تامة (Fractional Contracts مثل 0.42 أو 0.53 أو 0.67 عقد)
+    // التجزئة تسمح بحصص أصغر من 1 عقد كامل بدقة منزلتين عشريتين
+    let contracts = Number((tradeBudget / alignedPrice).toFixed(2));
+    if (contracts < 0.05) {
+      contracts = 0.05; // الحد الأدنى الميكرو للعقد المجزأ
+    }
 
-    console.log(`🚀 [Server Bot] تم اقتناص فرصة Z-Score مؤهلة (Full Kelly): ${contracts} عقد ${targetToken} بسعر $${alignedPrice} (الميزانية: $${(contracts * alignedPrice).toFixed(2)} USDC)`);
+    console.log(`🚀 [Server Bot] تم اقتناص فرصة Z-Score مؤهلة (Full Kelly): ${contracts} عقد مجزأ ${targetToken} بسعر $${alignedPrice} (الميزانية: $${(contracts * alignedPrice).toFixed(2)} USDC)`);
 
     // تم الحصول على تفويض USDC مسبقاً (No auto-approval needed)
 
@@ -1382,7 +1394,7 @@ async function executeLimitlessTrade(
         const orderValue = {
           maker: serverWallet.address,
           tokenId: BigInt(selectedTokenId),
-          amount: ethers.parseUnits(String(contracts), 6),
+          amount: ethers.parseUnits(contracts.toFixed(2), 6),
           price: ethers.parseUnits(String(alignedPrice), 6),
           side: 0,
           nonce: Date.now(),
