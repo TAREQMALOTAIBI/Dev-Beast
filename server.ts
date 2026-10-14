@@ -689,6 +689,7 @@ interface TradedContractInfo {
   price: number;
   amount: number;
   timestamp: number;
+  expirationTimestamp?: number;
   txHash: string;
 }
 
@@ -702,8 +703,8 @@ function loadTradedContracts(): Map<string, TradedContractInfo> {
       if (Array.isArray(data)) {
         const now = Date.now();
         for (const item of data) {
-          // نحتفظ بالعقود المتداولة خلال آخر 3 ساعات لتغطية فترات التداول
-          if (item && item.slug && (now - (item.timestamp || 0) < 3 * 3600 * 1000)) {
+          // نحتفظ بالعقود المتداولة خلال آخر 6 ساعات لتغطية فترات التداول والانتهاء
+          if (item && item.slug && (now - (item.timestamp || 0) < 6 * 3600 * 1000)) {
             map.set(item.slug.toLowerCase().trim(), item);
           }
         }
@@ -726,19 +727,77 @@ function saveTradedContracts(map: Map<string, TradedContractInfo>) {
 
 let tradedContractsMap = loadTradedContracts();
 
-function isContractAlreadyTraded(slug: string): boolean {
+// قفل التزامن الفوري (Immediate Mutex Lock) لمنع تنفيذ تكات متزامنة في نفس اللحظة
+let isServerTradeExecuting = false;
+const pendingExecutionSlugs = new Set<string>();
+
+function isContractAlreadyTraded(slug: string, expirationTimestamp?: number): boolean {
   if (!slug) return false;
   const cleanSlug = slug.toLowerCase().trim();
+
+  // 1. الفحص في خريطة العقود المنفذة المباشرة
   if (tradedContractsMap.has(cleanSlug)) return true;
 
-  // فحص إضافي في سجل الصفقات المحلية
+  // 2. الفحص في قائمة العقود قيد التنفيذ اللحظي (حظر التزامن)
+  if (pendingExecutionSlugs.has(cleanSlug)) return true;
+
+  // 3. فحص إضافي في سجل الصفقات المنفذة عبر slug العقد
   for (const trade of executedTradesLog) {
     const mSlug = (trade as any).marketSlug;
     if (mSlug && mSlug.toLowerCase().trim() === cleanSlug) {
       return true;
     }
   }
+
+  // 4. قاعدة الأمان الصارمة عبر النافذة الزمنية (15 دقيقة):
+  // أي صفقة تم تنفيذها داخل نافذة الـ 15 دقيقة الخاصة بهذا العقد تعني أنه تم الدخول فيه مسبقاً!
+  // نافذة العقد تبدأ قبل انتهاء الصلاحية بـ 15 دقيقة وتنتهي عند expirationTimestamp
+  if (expirationTimestamp && expirationTimestamp > 0) {
+    const windowStart = expirationTimestamp - 15 * 60 * 1000;
+    const windowEnd = expirationTimestamp;
+    for (const trade of executedTradesLog) {
+      if (trade.timestamp && trade.timestamp >= windowStart && trade.timestamp <= windowEnd) {
+        return true;
+      }
+    }
+
+    // فحص أيضاً في خريطة العقود المتداولة المسجلة
+    for (const [, info] of tradedContractsMap) {
+      if (info.timestamp && info.timestamp >= windowStart && info.timestamp <= windowEnd) {
+        return true;
+      }
+      if (info.expirationTimestamp && Math.abs(info.expirationTimestamp - expirationTimestamp) < 60000) {
+        return true;
+      }
+    }
+  }
+
   return false;
+}
+
+function findTradeForMarket(slug: string, expirationTimestamp?: number) {
+  if (!slug) return null;
+  const cleanSlug = slug.toLowerCase().trim();
+  const direct = tradedContractsMap.get(cleanSlug);
+  if (direct) return direct;
+
+  for (const trade of executedTradesLog) {
+    const mSlug = (trade as any).marketSlug;
+    if (mSlug && mSlug.toLowerCase().trim() === cleanSlug) {
+      return trade;
+    }
+  }
+
+  if (expirationTimestamp && expirationTimestamp > 0) {
+    const windowStart = expirationTimestamp - 15 * 60 * 1000;
+    for (const trade of executedTradesLog) {
+      if (trade.timestamp && trade.timestamp >= windowStart && trade.timestamp <= expirationTimestamp) {
+        return trade;
+      }
+    }
+  }
+
+  return null;
 }
 
 function recordContractTraded(info: TradedContractInfo) {
@@ -756,7 +815,7 @@ let lastCalculatedZScore: number = 0.0;
 let lastCalculatedMean: number = 94500;
 let lastCalculatedStdDev: number = 50;
 let currentWaitReason: string = isServerBotRunning
-  ? 'في انتظار إشارة Z-Score مؤهلة (±2.00 على نافذة 30m) للتنفيذ المباشر بسعر السوق على عقد BTC 15m'
+  ? 'في انتظار إشارة Z-Score مؤهلة (±2.00 على فريم 5m لآخر 20 شمعة) للتنفيذ المباشر بسعر السوق على عقد BTC 15m'
   : 'الروبوت متوقف مؤقتاً (PAUSED) - اضغط تشغيل لتفعيل التداول الآلي';
 let lastExecutionError: string | null = null;
 
@@ -770,6 +829,24 @@ let executedTradesLog: Array<{
   marketTitle?: string;
 }> = loadPersistedTrades();
 
+// مزامنة العقود المتداولة مسبقاً من سجل الصفقات المحفوظة
+for (const trade of executedTradesLog) {
+  if (trade.marketSlug) {
+    const cleanSlug = trade.marketSlug.toLowerCase().trim();
+    if (!tradedContractsMap.has(cleanSlug)) {
+      tradedContractsMap.set(cleanSlug, {
+        slug: trade.marketSlug,
+        title: trade.marketTitle || trade.marketSlug,
+        tokenType: trade.tokenType,
+        price: trade.price,
+        amount: trade.amount,
+        timestamp: trade.timestamp,
+        txHash: trade.txHash,
+      });
+    }
+  }
+}
+
 async function syncLimitlessUserHistory() {
   if (!serverWallet) return;
   try {
@@ -782,15 +859,28 @@ async function syncLimitlessUserHistory() {
         price: Number(item.outcomeTokenPrice || 0),
         amount: Number(item.outcomeTokenAmount || item.contracts || 1),
         txHash: item.transactionHash || item.orderId || '',
+        marketSlug: item.market?.slug,
+        marketTitle: item.market?.title,
       }));
 
-      const existingHashes = new Set(executedTradesLog.map(t => t.txHash));
+      // الحفاظ على marketSlug و marketTitle المسجلة محلياً في الصفقات المنفذة
+      const existingMap = new Map<string, any>();
+      for (const t of executedTradesLog) {
+        if (t.txHash) existingMap.set(t.txHash, t);
+      }
+
       for (const t of synced) {
-        if (!existingHashes.has(t.txHash)) {
-          executedTradesLog.push(t);
-          existingHashes.add(t.txHash);
+        if (t.txHash && existingMap.has(t.txHash)) {
+          const prev = existingMap.get(t.txHash);
+          if (!t.marketSlug && prev.marketSlug) t.marketSlug = prev.marketSlug;
+          if (!t.marketTitle && prev.marketTitle) t.marketTitle = prev.marketTitle;
+        }
+        if (t.txHash) {
+          existingMap.set(t.txHash, t);
         }
       }
+
+      executedTradesLog = Array.from(existingMap.values());
       executedTradesLog.sort((a, b) => b.timestamp - a.timestamp);
       savePersistedTrades(executedTradesLog);
     }
@@ -802,7 +892,7 @@ async function syncLimitlessUserHistory() {
 // خطة التداول بالـ Z-Score مع إدارة المخاطر Full Kelly (100% f*)
 const ZSCORE_STRATEGY = {
   marketSlug: 'btc-price-15m-now',
-  lookbackPeriod: 30,         // نافذة الحساب: آخر 30 شمعة على فريم الدقيقة (1m) لتعظيم الدقة الإحصائية وتصفية الضجيج
+  lookbackPeriod: 20,         // نافذة الحساب: آخر 20 شمعة على فريم الـ 5 دقائق (5m) لتعظيم الدقة الإحصائية وتصفية الضجيج
   upperThreshold: Number(process.env.Z_SCORE_THRESHOLD) || 2.00,        // إشارة هبوط إذا أصبح Z-Score >= +2.00
   lowerThreshold: -(Number(process.env.Z_SCORE_THRESHOLD) || 2.00),       // إشارة صعود إذا أصبح Z-Score <= -2.00
   maxEntryPrice: null as number | null, // تم إزالة سقف السعر نهائياً: شراء مباشر بسعر السوق المتاح (Market Price)
@@ -816,7 +906,7 @@ const ZSCORE_STRATEGY = {
   tradeSizeUsdc: Number(process.env.TRADE_SIZE_USDC) || 0.50, // الحد الأدنى المرجعي للميزانية بالدولار
 };
 
-function calculateServerZScore(prices: number[], lookback: number = 30) {
+function calculateServerZScore(prices: number[], lookback: number = 20) {
   const window = prices.slice(-lookback);
   const current = window[window.length - 1];
   const sum = window.reduce((a, b) => a + b, 0);
@@ -1133,6 +1223,12 @@ async function executeLimitlessTrade(
   currentZScore: number,
   isManualOrForced: boolean = false
 ) {
+  // 1. فحص التزامن الفوري: منع أي تنفيذ متزامن في نفس اللحظة
+  if (isServerTradeExecuting && !isManualOrForced) {
+    console.log('⏳ [Server Bot] هناك صفقة قيد المعالجة والتنفيذ حالياً - تم حظر أي أمر متزامن.');
+    return;
+  }
+
   if (!serverWallet) {
     serverWallet = initializeServerWallet();
   }
@@ -1152,7 +1248,7 @@ async function executeLimitlessTrade(
   }
 
   // فترة تبريد (Cooldown) لمنع تكرار الصفقات على نفس الإشارة
-  if (Date.now() - lastExecutedTradeTime < 45000) {
+  if (!isManualOrForced && Date.now() - lastExecutedTradeTime < 60000) {
     return;
   }
 
@@ -1190,16 +1286,20 @@ async function executeLimitlessTrade(
 
     // 🛡️ فحص أمان صارم: منع تكرار فتح صفقات على نفس العقد (صفقة واحدة فقط لكل عقد 15 دقيقة)
     const marketSlug = (activeMarket.slug || '').trim();
-    if (!isManualOrForced && isContractAlreadyTraded(marketSlug)) {
-      const prevTrade = tradedContractsMap.get(marketSlug.toLowerCase().trim());
+    const expTime = activeMarket.expirationTimestamp ? Number(activeMarket.expirationTimestamp) : 0;
+    if (!isManualOrForced && isContractAlreadyTraded(marketSlug, expTime)) {
+      const prevTrade = findTradeForMarket(marketSlug, expTime);
       const sideText = prevTrade ? `(شراء سابق لعقد ${prevTrade.tokenType} بسعر $${prevTrade.price})` : '';
-      const expTime = activeMarket.expirationTimestamp ? Number(activeMarket.expirationTimestamp) : 0;
       const timeLeft = expTime > Date.now() ? `${Math.ceil((expTime - Date.now()) / 60000)} دقيقة متبقية` : 'قريب من الانتهاء';
       
       console.log(`🛡️ [Server Bot - قاعدة الأمان الصارمة]: تم فتح صفقة لهذا العقد (${activeMarket.title || marketSlug}) مسبقاً ${sideText}! تم حظر فتح صفقة مكررة.`);
       currentWaitReason = `🛡️ تم تنفيذ صفقة مسبقاً لهذا العقد (${activeMarket.title || marketSlug}) ${sideText}. الروبوت يلتزم بصفقة واحدة فقط لكل عقد. في انتظار انتهاء العقد الحالي (${timeLeft}) وتوفر عقد جديد.`;
       return;
     }
+
+    // 🔒 تفعيل قفل التزامن الفوري على المحرك وعلى العقد لمنع أي تكة أخرى من الدخول أثناء التوقيع والإرسال
+    isServerTradeExecuting = true;
+    pendingExecutionSlugs.add(marketSlug.toLowerCase().trim());
 
     // ⚡ قراءة دفتر الأوامر اللحظي مباشرة من ذاكرة البث المباشر أو جلب فوري من REST إذا لزم الأمر
     let orderbook = liveLimitlessOrderbook;
@@ -1443,6 +1543,7 @@ async function executeLimitlessTrade(
         price: alignedPrice,
         amount: contracts,
         timestamp: Date.now(),
+        expirationTimestamp: Number(activeMarket.expirationTimestamp) || 0,
         txHash: orderTxHash,
       });
 
@@ -1458,10 +1559,15 @@ async function executeLimitlessTrade(
       savePersistedTrades(executedTradesLog);
       console.log(`🔒 [Server Bot] تم قفل العقد (${activeMarket.title || activeMarket.slug}) رسمياً - لن يتم فتح أي صفقة أخرى عليه.`);
       setTimeout(syncLimitlessUserHistory, 3000);
+    } else {
+      // إذا لم ينجح الطلب، فك الحظر المؤقت
+      pendingExecutionSlugs.delete(marketSlug.toLowerCase().trim());
     }
   } catch (err: any) {
     console.error('خطأ أثناء تنفيذ صفقة السيرفر:', err.message);
     currentWaitReason = `خطأ أثناء التنفيذ: ${err.message}`;
+  } finally {
+    isServerTradeExecuting = false;
   }
 }
 
@@ -1471,10 +1577,10 @@ async function executeLimitlessTrade(
 
 async function fetchBinanceHistoricalCloses(limit: number = 50): Promise<number[]> {
   const restEndpoints = [
-    `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
-    `https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
-    `https://api1.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
-    `https://api3.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
+    `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=${limit}`,
+    `https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=${limit}`,
+    `https://api1.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=${limit}`,
+    `https://api3.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=${limit}`,
   ];
 
   for (const endpoint of restEndpoints) {
@@ -1501,10 +1607,10 @@ async function fetchBinanceFullCandles(limit: number = 50): Promise<Array<{
   volume: number;
 }>> {
   const restEndpoints = [
-    `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
-    `https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
-    `https://api1.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
-    `https://api3.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
+    `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=${limit}`,
+    `https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=${limit}`,
+    `https://api1.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=${limit}`,
+    `https://api3.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=${limit}`,
   ];
 
   for (const endpoint of restEndpoints) {
@@ -1530,19 +1636,19 @@ async function fetchBinanceFullCandles(limit: number = 50): Promise<Array<{
 
 async function startServerPriceFeed() {
   try {
-    // 1. جلب الشموع السابقة فوراً عبر Binance REST API لتفادي أي انتظار
+    // 1. جلب الشموع السابقة فوراً عبر Binance REST API (فريم 5 دقائق)
     const initialCloses = await fetchBinanceHistoricalCloses(50);
     if (initialCloses.length > 0) {
       candleCloses.push(...initialCloses);
       lastBtcPrice = candleCloses[candleCloses.length - 1];
-      console.log(`✅ [Server Bot] تم جلب ${initialCloses.length} شمعة عبر Binance REST API بنجاح! السعر الحالي: $${lastBtcPrice}`);
+      console.log(`✅ [Server Bot] تم جلب ${initialCloses.length} شمعة (فريم 5 دقائق) عبر Binance REST API بنجاح! السعر الحالي: $${lastBtcPrice}`);
     }
 
     const WebSocketClient = (await import('ws')).default;
-    const ws = new WebSocketClient('wss://data-stream.binance.vision/ws/btcusdt@kline_1m');
+    const ws = new WebSocketClient('wss://data-stream.binance.vision/ws/btcusdt@kline_5m');
 
     ws.on('open', () => {
-      console.log('⚡ [Server Bot] متصل ببث بينانس المباشر لأسعار BTC.');
+      console.log('⚡ [Server Bot] متصل ببث بينانس المباشر لأسعار BTC على فريم 5 دقائق (5m).');
     });
 
     ws.on('message', async (raw: string) => {
@@ -1571,7 +1677,7 @@ async function startServerPriceFeed() {
 
           // إذا كان الروبوت متوقفاً، نوقف التداول تماماً ونحدث فقط شريط الانتظار
           if (!isServerBotRunning) {
-            currentWaitReason = `الروبوت متوقف مؤقتاً (PAUSED) - لن يتم فتح أي صفقات | Z-Score اللحظي = ${zScore > 0 ? '+' : ''}${zScore}`;
+            currentWaitReason = `الروبوت متوقف مؤقتاً (PAUSED) - لن يتم فتح أي صفقات | Z-Score اللحظي (5m) = ${zScore > 0 ? '+' : ''}${zScore}`;
             lastEvaluatedSignal = zScore >= ZSCORE_STRATEGY.upperThreshold ? 'OVERBOUGHT' : (zScore <= ZSCORE_STRATEGY.lowerThreshold ? 'OVERSOLD' : 'NEUTRAL');
             return;
           }
@@ -1579,19 +1685,19 @@ async function startServerPriceFeed() {
           // 1. إشارة هبوط: Z-Score >= +2.00 -> شراء عقد NO (القمة)
           if (zScore >= ZSCORE_STRATEGY.upperThreshold) {
             lastEvaluatedSignal = 'OVERBOUGHT';
-            console.log(`🚨 [Server Bot]: إشارة هبوط Z-Score! Z = +${zScore} (أعلى من +${ZSCORE_STRATEGY.upperThreshold}). جاري شراء عقد NO...`);
+            console.log(`🚨 [Server Bot]: إشارة هبوط Z-Score على فريم 5m! Z = +${zScore} (أعلى من +${ZSCORE_STRATEGY.upperThreshold}). جاري شراء عقد NO...`);
             await executeLimitlessTrade('NO', lastBtcPrice, zScore);
           }
           // 2. إشارة صعود: Z-Score <= -2.00 -> شراء عقد YES (الارتداد)
           else if (zScore <= ZSCORE_STRATEGY.lowerThreshold) {
             lastEvaluatedSignal = 'OVERSOLD';
-            console.log(`🚨 [Server Bot]: إشارة صعود Z-Score! Z = ${zScore} (أدنى من ${ZSCORE_STRATEGY.lowerThreshold}). جاري شراء عقد YES...`);
+            console.log(`🚨 [Server Bot]: إشارة صعود Z-Score على فريم 5m! Z = ${zScore} (أدنى من ${ZSCORE_STRATEGY.lowerThreshold}). جاري شراء عقد YES...`);
             await executeLimitlessTrade('YES', lastBtcPrice, zScore);
           } else {
             lastEvaluatedSignal = 'NEUTRAL';
             currentWaitReason = lastExecutionError
-              ? `⚠️ تنبيه من المحرك: ${lastExecutionError} | Z-Score = ${zScore > 0 ? '+' : ''}${zScore}`
-              : `سوق محايد: مؤشر Z-Score = ${zScore > 0 ? '+' : ''}${zScore} (المطلوب: > +${ZSCORE_STRATEGY.upperThreshold} للهبوط أو < ${ZSCORE_STRATEGY.lowerThreshold} للصعود) | متوسط 30 دقيقة = $${mean.toLocaleString()}`;
+              ? `⚠️ تنبيه من المحرك: ${lastExecutionError} | Z-Score (5m) = ${zScore > 0 ? '+' : ''}${zScore}`
+              : `سوق محايد: مؤشر Z-Score (5m) = ${zScore > 0 ? '+' : ''}${zScore} (المطلوب: > +${ZSCORE_STRATEGY.upperThreshold} للهبوط أو < ${ZSCORE_STRATEGY.lowerThreshold} للصعود) | متوسط 20 شمعة (5m) = $${mean.toLocaleString()}`;
           }
         }
       } catch (feedErr: any) {
@@ -1648,7 +1754,7 @@ app.get('/api/binance/klines-full', async (req, res) => {
 app.get('/api/bot/status', (req, res) => {
   res.json({
     running: isServerBotRunning,
-    strategy: 'Z-Score Only (Lookback: 30m • Threshold: ±2.00 • تنفيذ فوري بسعر السوق)',
+    strategy: 'Z-Score Only (Lookback: 20 candles on 5m • Threshold: ±2.00 • تنفيذ فوري بسعر السوق)',
     targetMarketFocus: 'BTC 15 Min Only (عقود بيتكوين 15 دقيقة حصراً • تنفيذ مباشر بسعر السوق)',
     active15mMarket: cachedActive15mMarket
       ? {
@@ -1684,8 +1790,8 @@ app.get('/api/bot/status', (req, res) => {
     lowerThreshold: ZSCORE_STRATEGY.lowerThreshold,
     waitReason: currentWaitReason,
     lastExecutionError,
-    isCurrentMarketTraded: cachedActive15mMarket ? isContractAlreadyTraded(cachedActive15mMarket.slug) : false,
-    currentMarketTrade: cachedActive15mMarket ? (tradedContractsMap.get(cachedActive15mMarket.slug.toLowerCase().trim()) || null) : null,
+    isCurrentMarketTraded: cachedActive15mMarket ? isContractAlreadyTraded(cachedActive15mMarket.slug, Number(cachedActive15mMarket.expirationTimestamp)) : false,
+    currentMarketTrade: cachedActive15mMarket ? findTradeForMarket(cachedActive15mMarket.slug, Number(cachedActive15mMarket.expirationTimestamp)) : null,
     tradedContractsCount: tradedContractsMap.size,
     recentTrades: executedTradesLog.slice(0, 10),
   });

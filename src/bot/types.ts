@@ -286,7 +286,7 @@ export interface ZScoreConfig {
 
 export interface BotConfig {
   symbol: string;
-  candleTimeframe: '1m';
+  candleTimeframe: '1m' | '5m' | '15m';
   marketDurationMinutes: 15;
   maxEntryPrice: number;
   zScore: ZScoreConfig;

@@ -28,8 +28,8 @@ export const MinimalBotSetup: React.FC<MinimalBotSetupProps> = ({
 
   const selectedBinanceWs =
     binanceEndpoint === 'vision'
-      ? 'wss://data-stream.binance.vision/ws/btcusdt@kline_1m'
-      : 'wss://stream.binance.us:9443/ws/btcusdt@kline_1m';
+      ? 'wss://data-stream.binance.vision/ws/btcusdt@kline_5m'
+      : 'wss://stream.binance.us:9443/ws/btcusdt@kline_5m';
 
 // كود البوت الكامل والمستقل مع خطة التداول بالـ Z-Score ومسح جميع أسواق BTC وأمر FAK الفوري
   const dualWsBotScript = `import WebSocket from 'ws';
@@ -175,7 +175,8 @@ async function findAndExecuteBestBtcTrade(targetSide: 'YES' | 'NO', zScore: numb
     }
 
     console.log(\`🎯 السوق المستهدف: \${btc15mMarket.title} (\${btc15mMarket.slug})\`);
-    if (tradedMarketSlugs.has(btc15mMarket.slug)) {
+    const marketSlug = (btc15mMarket.slug || '').toLowerCase().trim();
+    if (tradedMarketSlugs.has(marketSlug)) {
       console.log(\`🛡️ [أمان العقد]: تم فتح صفقة لهذا العقد (\${btc15mMarket.title || btc15mMarket.slug}) مسبقاً! قانون الروبوت: صفقة واحدة فقط لكل عقد.\`);
       return;
     }
@@ -290,12 +291,12 @@ async function findAndExecuteBestBtcTrade(targetSide: 'YES' | 'NO', zScore: numb
 // 5. جلب الشموع السابقة فوراً عبر Binance REST API
 async function initHistoricalCandles() {
   try {
-    const res = await fetch('https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=50', { signal: AbortSignal.timeout(5000) });
+    const res = await fetch('https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=50', { signal: AbortSignal.timeout(5000) });
     if (res.ok) {
       const data = await res.json();
       const closes = data.map((k: any) => parseFloat(k[4]));
       candleCloses.push(...closes);
-      console.log(\`✅ تم جلب \${closes.length} شمعة دقيقة سابقة بنجاح. البوت جاهز فوراً!\`);
+      console.log(\`✅ تم جلب \${closes.length} شمعة (فريم 5 دقائق) سابقة بنجاح. البوت جاهز فوراً!\`);
     }
   } catch {
     console.log('ℹ️ جاري تجميع الشموع مباشرة عبر البث المباشر...');
@@ -320,7 +321,7 @@ async function run() {
   let lastEval = 0;
 
   binanceWs.on('open', () => {
-    console.log('⚡ متصل ببث بينانس المباشر لأسعار BTC (BTCUSDT 1m)');
+    console.log('⚡ متصل ببث بينانس المباشر لأسعار BTC على فريم 5 دقائق (BTCUSDT 5m)');
   });
 
   binanceWs.on('message', async (raw: string) => {

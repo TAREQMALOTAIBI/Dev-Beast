@@ -84,7 +84,7 @@ async function ensureVenueApproval(venueExchange: string) {
 
 const ZSCORE_STRATEGY = {
   marketSlug: 'btc-price-15m-now',
-  lookbackPeriod: 30,         // نافذة الحساب: آخر 30 شمعة على فريم الدقيقة (1m) لتعظيم الدقة الإحصائية وتصفية الضجيج
+  lookbackPeriod: 20,         // نافذة الحساب: آخر 20 شمعة على فريم الـ 5 دقائق (5m) لتعظيم الدقة الإحصائية وتصفية الضجيج
   upperThreshold: Number(process.env.Z_SCORE_THRESHOLD) || 2.00,        // إشارة هبوط إذا أصبح Z-Score >= +2.00
   lowerThreshold: -(Number(process.env.Z_SCORE_THRESHOLD) || 2.00),       // إشارة صعود إذا أصبح Z-Score <= -2.00
   maxEntryPrice: process.env.MAX_ENTRY_PRICE ? Number(process.env.MAX_ENTRY_PRICE) : null, // إزالة سقف السعر: شراء مباشر بسعر السوق
@@ -99,7 +99,7 @@ const ZSCORE_STRATEGY = {
 };
 
 console.log(`📊 الاستراتيجية الحالية: Z-Score فقط (عتبة ±2.00) مع إدارة المخاطر Full Kelly (100% f*) على عقود BTC 15m`);
-console.log(`⏱️ نافذة الحساب (Lookback Window): آخر ${ZSCORE_STRATEGY.lookbackPeriod} شموع على فريم الدقيقة (1m)`);
+console.log(`⏱️ نافذة الحساب (Lookback Window): آخر ${ZSCORE_STRATEGY.lookbackPeriod} شموع على فريم الـ 5 دقائق (5m)`);
 console.log(`📉 إشارة هبوط: Z-Score >= +${ZSCORE_STRATEGY.upperThreshold} -> شراء عقد NO (القمة) بسعر السوق المباشر`);
 console.log(`📈 إشارة صعود: Z-Score <= ${ZSCORE_STRATEGY.lowerThreshold} -> شراء عقد YES (الارتداد) بسعر السوق المباشر`);
 console.log(`🧠 إدارة المخاطر: Full Kelly (100% f*) | نسبة الفوز المقدرة p: ${(ZSCORE_STRATEGY.kellyWinRate * 100).toFixed(0)}% | الحجم ديناميكي من رصيد المحفظة`);
@@ -116,10 +116,10 @@ let isProcessingOrder = false;
 
 async function fetchBinanceHistoricalKlines(limit: number = 50): Promise<number[]> {
   const restEndpoints = [
-    `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
-    `https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
-    `https://api1.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
-    `https://api3.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
+    `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=${limit}`,
+    `https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=${limit}`,
+    `https://api1.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=${limit}`,
+    `https://api3.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=${limit}`,
   ];
 
   for (const endpoint of restEndpoints) {
@@ -152,7 +152,7 @@ async function fetchBinanceHistoricalKlines(limit: number = 50): Promise<number[
 // ==========================================
 
 async function startPriceFeed() {
-  const BINANCE_WS_URL = 'wss://data-stream.binance.vision/ws/btcusdt@kline_1m';
+  const BINANCE_WS_URL = 'wss://data-stream.binance.vision/ws/btcusdt@kline_5m';
   console.log(`⚡ جاري الاتصال ببث أسعار بينانس المباشر: ${BINANCE_WS_URL}`);
 
   try {
@@ -160,7 +160,7 @@ async function startPriceFeed() {
     const ws = new WebSocketClient(BINANCE_WS_URL);
 
     ws.on('open', () => {
-      console.log('🟢 متصل ببث بينانس الحي (BTC/USDT 1m). مراقبة مستمرة للأسعار وإغلاق الشموع...');
+      console.log('🟢 متصل ببث بينانس الحي (BTC/USDT 5m). مراقبة مستمرة للأسعار وإغلاق الشموع...');
     });
 
     let lastEvaluatedTime = 0;
@@ -172,14 +172,14 @@ async function startPriceFeed() {
 
         const kline = payload.k;
         const currentPrice = parseFloat(kline.c);
-        const isClosed = kline.x; // هل اكتمل إغلاق شمعة الدقيقة؟
+        const isClosed = kline.x; // هل اكتمل إغلاق شمعة الـ 5 دقائق؟
         const now = Date.now();
 
         if (isClosed) {
           candleCloses.push(currentPrice);
           if (candleCloses.length > 50) candleCloses.shift();
 
-          console.log(`📈 إغلاق شمعة دقيقة: $${currentPrice.toLocaleString()} | إجمالي الشموع في الذاكرة: ${candleCloses.length}`);
+          console.log(`📈 إغلاق شمعة 5 دقائق: $${currentPrice.toLocaleString()} | إجمالي الشموع في الذاكرة: ${candleCloses.length}`);
           await evaluateTradingSignal(currentPrice, true);
           lastEvaluatedTime = now;
         } else if (now - lastEvaluatedTime >= 2000 && candleCloses.length >= (ZSCORE_STRATEGY.lookbackPeriod - 1)) {
@@ -308,7 +308,7 @@ function computeZScore(prices: number[], lookback: number = 20) {
 
 async function evaluateTradingSignal(lastPrice: number, isClosed: boolean = true) {
   if (candleCloses.length < (ZSCORE_STRATEGY.lookbackPeriod - 1)) {
-    console.log(`⏳ في انتظار تجميع 30 شمعة دقيقة لحساب الـ Z-Score (${candleCloses.length}/${ZSCORE_STRATEGY.lookbackPeriod})...`);
+    console.log(`⏳ في انتظار تجميع 20 شمعة (فريم 5m) لحساب الـ Z-Score (${candleCloses.length}/${ZSCORE_STRATEGY.lookbackPeriod})...`);
     return;
   }
 
@@ -318,12 +318,12 @@ async function evaluateTradingSignal(lastPrice: number, isClosed: boolean = true
 
   const { zScore, mean, stdDev } = computeZScore(livePrices, ZSCORE_STRATEGY.lookbackPeriod);
 
-  console.log(`🔍 [فحص Z-Score]: السعر=$${lastPrice.toLocaleString()} | المتوسط(30m)=$${mean.toLocaleString()} | الانحراف=$${stdDev} | Z-Score=${zScore > 0 ? '+' : ''}${zScore}`);
+  console.log(`🔍 [فحص Z-Score]: السعر=$${lastPrice.toLocaleString()} | المتوسط(5m - 20 شمعة)=$${mean.toLocaleString()} | الانحراف=$${stdDev} | Z-Score=${zScore > 0 ? '+' : ''}${zScore}`);
 
   // 1. إشارة هبوط: إذا أصبح Z-Score >= +2.00
   // ابحث فوراً في Limitless عن عقد يراهن على الهبوط (عقد NO للقمة) بسعر ≤ 0.20$
   if (zScore >= ZSCORE_STRATEGY.upperThreshold) {
-    console.log(`🚨 [إشارة هبوط Z-Score!]: القيمة = +${zScore} (تجاوزت سقف +${ZSCORE_STRATEGY.upperThreshold}). السعر متضخم فوق قمة 30 دقيقة. الهدف: شراء عقد NO للقمة بسعر ≤ $${ZSCORE_STRATEGY.maxEntryPrice} عبر أمر FAK.`);
+    console.log(`🚨 [إشارة هبوط Z-Score!]: القيمة = +${zScore} (تجاوزت سقف +${ZSCORE_STRATEGY.upperThreshold}). السعر متضخم فوق قمة فريم 5 دقائق. الهدف: شراء عقد NO للقمة بسعر ≤ $${ZSCORE_STRATEGY.maxEntryPrice} عبر أمر FAK.`);
     await checkAndExecuteLimitlessOrder('NO', lastPrice, zScore);
   }
   // 2. إشارة صعود: إذا أصبح Z-Score <= -2.00
@@ -415,6 +415,7 @@ async function getLiveActiveBtc15mMarket(): Promise<any | null> {
 async function checkAndExecuteLimitlessOrder(targetToken: 'YES' | 'NO', btcPrice: number, currentZScore: number) {
   if (isProcessingOrder) return;
   isProcessingOrder = true;
+  let currentTargetSlug: string | null = null;
 
   try {
     console.log(`📡 [سوق BTC 15 دقيقة] جاري فحص دفتر أوامر عقد 15m لشراء ${targetToken} (إشارة Z-Score: ${currentZScore})...`);
@@ -428,10 +429,13 @@ async function checkAndExecuteLimitlessOrder(targetToken: 'YES' | 'NO', btcPrice
     console.log(`🎯 السوق المستهدف: ${activeMarket.title} (${activeMarket.slug})`);
 
     const marketSlug = (activeMarket.slug || '').toLowerCase().trim();
+    currentTargetSlug = marketSlug;
     if (tradedMarketSlugs.has(marketSlug)) {
       console.log(`🛡️ [أمان العقد]: تم فتح صفقة بالفعل لهذا العقد (${activeMarket.title || activeMarket.slug}) مسبقاً! قانون الروبوت: صفقة واحدة فقط لكل عقد.`);
       return;
     }
+    // قفل فوري لمنع أي محاولة متزامنة أثناء تنفيذ وتوقيع الأمر
+    tradedMarketSlugs.add(marketSlug);
 
     // 1. جلب دفتر الأوامر الخاص بسوق الـ 15 دقيقة
     const orderbook = await marketFetcher.getOrderBook(activeMarket.slug).catch(() => null);
@@ -607,6 +611,9 @@ async function checkAndExecuteLimitlessOrder(targetToken: 'YES' | 'NO', btcPrice
     console.log('✅ تم إرسال الأمر بنجاح إلى Limitless Match Engine!');
   } catch (err: any) {
     console.error('❌ خطأ أثناء معالجة الأمر:', err.message);
+    if (currentTargetSlug) {
+      tradedMarketSlugs.delete(currentTargetSlug);
+    }
   } finally {
     isProcessingOrder = false;
   }

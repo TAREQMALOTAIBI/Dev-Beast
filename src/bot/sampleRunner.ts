@@ -14,11 +14,11 @@ import type { BotConfig, Candle } from './types';
  */
 export const defaultBotConfig: BotConfig = {
   symbol: 'BTC/USD',
-  candleTimeframe: '1m',
+  candleTimeframe: '5m',
   marketDurationMinutes: 15,
   maxEntryPrice: 0.99, // بدون سقف سعر (تنفيذ مباشر بسعر السوق المتاح)
   zScore: {
-    period: 30,           // Lookback Window: آخر 30 شمعة على فريم الدقيقة (1m) لتعظيم الدقة الإحصائية
+    period: 20,           // Lookback Window: آخر 20 شمعة على فريم الـ 5 دقائق (5m) لتعظيم الدقة الإحصائية
     upperThreshold: 2.00,  // إشارة هبوط عند Z-Score >= +2.00
     lowerThreshold: -2.00, // إشارة صعود عند Z-Score <= -2.00
   },
