@@ -52,7 +52,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'terminal' | 'portfolio' | 'setup'>('terminal');
   const [activeMarketSlug, setActiveMarketSlug] = useState<string>('btc-price-15m-now');
 
-  // إعدادات البوت والبارامترات - خيار الدقة العالية (Z = 2.00, Lookback: 12 candles on 5m / 60m, تنفيذ مباشر بسعر السوق بدون سقف سعر, سقف أمان الصفقة 1%)
+  // إعدادات البوت والبارامترات - خيار الدقة العالية (Z = 2.00, Lookback: 12 candles on 5m / 60m, تنفيذ مباشر بسعر السوق بدون سقف سعر, سقف أمان الصفقة 8%)
   const [config, setConfig] = useState<BotConfig>(() => {
     try {
       const saved = localStorage.getItem('limitless_bot_config');
@@ -61,7 +61,7 @@ export default function App() {
         return {
           ...defaultBotConfig,
           ...parsed,
-          maxBankrollRiskPercent: 0.01, // سقف أمان الصفقة: 1%
+          maxBankrollRiskPercent: 0.08, // سقف أمان الصفقة: 8%
           zScore: {
             ...defaultBotConfig.zScore,
             ...(parsed.zScore || {}),
@@ -77,7 +77,7 @@ export default function App() {
     }
     return {
       ...defaultBotConfig,
-      maxBankrollRiskPercent: 0.01,
+      maxBankrollRiskPercent: 0.08,
       maxEntryPrice: 0.99,
       zScore: {
         ...defaultBotConfig.zScore,
@@ -88,19 +88,19 @@ export default function App() {
     };
   });
 
-  // مزامنة وتحديث فوري لعتبات Z-Score وسقف أمان الصفقة 1% وإلغاء سقف السعر (تنفيذ مباشر بسعر السوق على نافذة 12 شمعة / فريم 5m)
+  // مزامنة وتحديث فوري لعتبات Z-Score وسقف أمان الصفقة 8% وإلغاء سقف السعر (تنفيذ مباشر بسعر السوق على نافذة 12 شمعة / فريم 5m)
   useEffect(() => {
     if (
       config.zScore.upperThreshold !== 2.00 ||
       config.zScore.lowerThreshold !== -2.00 ||
       config.zScore.period !== 12 ||
       config.maxEntryPrice < 0.95 ||
-      config.maxBankrollRiskPercent !== 0.01
+      config.maxBankrollRiskPercent !== 0.08
     ) {
       setConfig((prev) => ({
         ...prev,
         maxEntryPrice: 0.99, // بدون سقف سعر (تنفيذ فوري بسعر السوق المتاح)
-        maxBankrollRiskPercent: 0.01, // سقف أمان الصفقة: 1% من المحفظة
+        maxBankrollRiskPercent: 0.08, // سقف أمان الصفقة: 8% من المحفظة
         zScore: {
           ...prev.zScore,
           upperThreshold: 2.00,
@@ -145,7 +145,7 @@ export default function App() {
     running: false,
     waitReason: 'في انتظار إشارة Z-Score مؤهلة (±2.00) على عقد BTC 15m بسعر السوق المباشر',
     tradeSizeUsdc: 0.50,
-    maxBankrollRiskPercent: 0.01,
+    maxBankrollRiskPercent: 0.08,
     isCurrentMarketTraded: false,
     currentMarketTrade: null,
     tradedContractsCount: 0,
@@ -1257,7 +1257,7 @@ export default function App() {
                 <div className="bg-slate-950/80 px-3 py-2 rounded-xl border border-slate-800 text-right">
                   <span className="text-slate-400 text-[10px] block">سقف أمان الصفقة</span>
                   <span className="font-mono font-bold text-amber-300">
-                    أقصى حد {serverStatus.maxBankrollRiskPercent ? `${Math.round(serverStatus.maxBankrollRiskPercent * 100)}%` : '1%'}
+                    أقصى حد {serverStatus.maxBankrollRiskPercent ? `${Math.round(serverStatus.maxBankrollRiskPercent * 100)}%` : '8%'}
                   </span>
                 </div>
                 <div className="bg-slate-950/80 px-3 py-2 rounded-xl border border-slate-800 text-right hidden sm:block">

@@ -213,7 +213,7 @@ async function findAndExecuteBestBtcTrade(targetSide: 'YES' | 'NO', zScore: numb
       const bal = Number(ethers.formatUnits(await usdc.balanceOf(wallet.address), 6));
       if (bestAsk < CONFIG.kellyWinRate && bal > 0) {
         const fStar = (CONFIG.kellyWinRate - bestAsk) / (1 - bestAsk);
-        const safeFraction = Math.min(fStar * CONFIG.kellyMultiplier, 0.01);
+        const safeFraction = Math.min(fStar * CONFIG.kellyMultiplier, 0.08);
         currentTradeBudget = Math.max(0.05, Number((bal * safeFraction).toFixed(2)));
         console.log(\`🧠 [Full Kelly]: نسبة كيلي f*: \${(fStar * 100).toFixed(1)}% | ميزانية الصفقة: $\${currentTradeBudget} USDC من رصيد $\${bal.toFixed(2)} USDC\`);
       }

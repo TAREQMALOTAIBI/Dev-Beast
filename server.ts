@@ -900,9 +900,9 @@ const ZSCORE_STRATEGY = {
   riskModel: (process.env.RISK_MODEL as 'FULL_KELLY' | 'HALF_KELLY' | 'FIXED') || 'FULL_KELLY', // استراتيجية كيلي الكاملة (Full Kelly 100%)
   kellyWinRate: Number(process.env.KELLY_WIN_RATE) || 0.68, // نسبة النجاح المقدرة 68% لإشارة Z-Score ±2.00
   kellyMultiplier: 1.0,       // Full Kelly = 100%
-  maxBankrollRiskPercent: (process.env.MAX_BANKROLL_RISK_PERCENT && Number(process.env.MAX_BANKROLL_RISK_PERCENT) !== 0.04)
+  maxBankrollRiskPercent: (process.env.MAX_BANKROLL_RISK_PERCENT && Number(process.env.MAX_BANKROLL_RISK_PERCENT) !== 0.04 && Number(process.env.MAX_BANKROLL_RISK_PERCENT) !== 0.01)
     ? Number(process.env.MAX_BANKROLL_RISK_PERCENT)
-    : 0.01, // سقف حماية أقصى: لا تضع أكثر من 1% من المحفظة في صفقة واحدة
+    : 0.08, // سقف حماية أقصى: لا تضع أكثر من 8% من المحفظة في صفقة واحدة
   tradeSizeUsdc: Number(process.env.TRADE_SIZE_USDC) || 0.50, // الحد الأدنى المرجعي للميزانية بالدولار
 };
 
