@@ -815,7 +815,7 @@ let lastCalculatedZScore: number = 0.0;
 let lastCalculatedMean: number = 94500;
 let lastCalculatedStdDev: number = 50;
 let currentWaitReason: string = isServerBotRunning
-  ? 'في انتظار إشارة Z-Score مؤهلة (±2.00 على فريم 5m لآخر 20 شمعة) للتنفيذ المباشر بسعر السوق على عقد BTC 15m'
+  ? 'في انتظار إشارة Z-Score مؤهلة (> +2.00 لشراء UP أو < -2.00 لشراء DOWN على فريم 5m لآخر 12 شمعة) للتنفيذ المباشر بسعر السوق على عقد BTC 15m'
   : 'الروبوت متوقف مؤقتاً (PAUSED) - اضغط تشغيل لتفعيل التداول الآلي';
 let lastExecutionError: string | null = null;
 
@@ -892,9 +892,9 @@ async function syncLimitlessUserHistory() {
 // خطة التداول بالـ Z-Score مع إدارة المخاطر Full Kelly (100% f*)
 const ZSCORE_STRATEGY = {
   marketSlug: 'btc-price-15m-now',
-  lookbackPeriod: 20,         // نافذة الحساب: آخر 20 شمعة على فريم الـ 5 دقائق (5m) لتعظيم الدقة الإحصائية وتصفية الضجيج
-  upperThreshold: Number(process.env.Z_SCORE_THRESHOLD) || 2.00,        // إشارة هبوط إذا أصبح Z-Score >= +2.00
-  lowerThreshold: -(Number(process.env.Z_SCORE_THRESHOLD) || 2.00),       // إشارة صعود إذا أصبح Z-Score <= -2.00
+  lookbackPeriod: Number(process.env.LOOKBACK_PERIOD) || 12,         // نافذة الحساب: آخر 12 شمعة على فريم الـ 5 دقائق (5m = 60 دقيقة كاملة)
+  upperThreshold: Number(process.env.Z_SCORE_THRESHOLD) || 2.00,        // إشارة صعود: شراء عقد YES (UP) إذا أصبح Z-Score >= +2.00
+  lowerThreshold: -(Number(process.env.Z_SCORE_THRESHOLD) || 2.00),       // إشارة هبوط: شراء عقد NO (DOWN) إذا أصبح Z-Score <= -2.00
   maxEntryPrice: null as number | null, // تم إزالة سقف السعر نهائياً: شراء مباشر بسعر السوق المتاح (Market Price)
   riskPercent: 1.0,           // نسبة المخاطرة للصفقة
   riskModel: (process.env.RISK_MODEL as 'FULL_KELLY' | 'HALF_KELLY' | 'FIXED') || 'FULL_KELLY', // استراتيجية كيلي الكاملة (Full Kelly 100%)
@@ -906,7 +906,7 @@ const ZSCORE_STRATEGY = {
   tradeSizeUsdc: Number(process.env.TRADE_SIZE_USDC) || 0.50, // الحد الأدنى المرجعي للميزانية بالدولار
 };
 
-function calculateServerZScore(prices: number[], lookback: number = 20) {
+function calculateServerZScore(prices: number[], lookback: number = 12) {
   const window = prices.slice(-lookback);
   const current = window[window.length - 1];
   const sum = window.reduce((a, b) => a + b, 0);
@@ -1678,26 +1678,26 @@ async function startServerPriceFeed() {
           // إذا كان الروبوت متوقفاً، نوقف التداول تماماً ونحدث فقط شريط الانتظار
           if (!isServerBotRunning) {
             currentWaitReason = `الروبوت متوقف مؤقتاً (PAUSED) - لن يتم فتح أي صفقات | Z-Score اللحظي (5m) = ${zScore > 0 ? '+' : ''}${zScore}`;
-            lastEvaluatedSignal = zScore >= ZSCORE_STRATEGY.upperThreshold ? 'OVERBOUGHT' : (zScore <= ZSCORE_STRATEGY.lowerThreshold ? 'OVERSOLD' : 'NEUTRAL');
+            lastEvaluatedSignal = zScore >= ZSCORE_STRATEGY.upperThreshold ? 'MOMENTUM_UP' : (zScore <= ZSCORE_STRATEGY.lowerThreshold ? 'MOMENTUM_DOWN' : 'NEUTRAL');
             return;
           }
 
-          // 1. إشارة هبوط: Z-Score >= +2.00 -> شراء عقد NO (القمة)
+          // 1. إشارة صعود: Z-Score >= +2.00 -> شراء عقد YES (UP) مع زخم الصعود
           if (zScore >= ZSCORE_STRATEGY.upperThreshold) {
-            lastEvaluatedSignal = 'OVERBOUGHT';
-            console.log(`🚨 [Server Bot]: إشارة هبوط Z-Score على فريم 5m! Z = +${zScore} (أعلى من +${ZSCORE_STRATEGY.upperThreshold}). جاري شراء عقد NO...`);
-            await executeLimitlessTrade('NO', lastBtcPrice, zScore);
-          }
-          // 2. إشارة صعود: Z-Score <= -2.00 -> شراء عقد YES (الارتداد)
-          else if (zScore <= ZSCORE_STRATEGY.lowerThreshold) {
-            lastEvaluatedSignal = 'OVERSOLD';
-            console.log(`🚨 [Server Bot]: إشارة صعود Z-Score على فريم 5m! Z = ${zScore} (أدنى من ${ZSCORE_STRATEGY.lowerThreshold}). جاري شراء عقد YES...`);
+            lastEvaluatedSignal = 'MOMENTUM_UP';
+            console.log(`🚨 [Server Bot]: إشارة صعود Z-Score على فريم 5m! Z = +${zScore} (أعلى من +${ZSCORE_STRATEGY.upperThreshold}). جاري شراء عقد UP (YES)...`);
             await executeLimitlessTrade('YES', lastBtcPrice, zScore);
+          }
+          // 2. إشارة هبوط: Z-Score <= -2.00 -> شراء عقد NO (DOWN) مع زخم الهبوط
+          else if (zScore <= ZSCORE_STRATEGY.lowerThreshold) {
+            lastEvaluatedSignal = 'MOMENTUM_DOWN';
+            console.log(`🚨 [Server Bot]: إشارة هبوط Z-Score على فريم 5m! Z = ${zScore} (أدنى من ${ZSCORE_STRATEGY.lowerThreshold}). جاري شراء عقد DOWN (NO)...`);
+            await executeLimitlessTrade('NO', lastBtcPrice, zScore);
           } else {
             lastEvaluatedSignal = 'NEUTRAL';
             currentWaitReason = lastExecutionError
               ? `⚠️ تنبيه من المحرك: ${lastExecutionError} | Z-Score (5m) = ${zScore > 0 ? '+' : ''}${zScore}`
-              : `سوق محايد: مؤشر Z-Score (5m) = ${zScore > 0 ? '+' : ''}${zScore} (المطلوب: > +${ZSCORE_STRATEGY.upperThreshold} للهبوط أو < ${ZSCORE_STRATEGY.lowerThreshold} للصعود) | متوسط 20 شمعة (5m) = $${mean.toLocaleString()}`;
+              : `سوق محايد: مؤشر Z-Score (5m) = ${zScore > 0 ? '+' : ''}${zScore} (المطلوب: > +${ZSCORE_STRATEGY.upperThreshold} لشراء UP أو < ${ZSCORE_STRATEGY.lowerThreshold} لشراء DOWN) | متوسط 12 شمعة (5m) = $${mean.toLocaleString()}`;
           }
         }
       } catch (feedErr: any) {
@@ -1754,7 +1754,7 @@ app.get('/api/binance/klines-full', async (req, res) => {
 app.get('/api/bot/status', (req, res) => {
   res.json({
     running: isServerBotRunning,
-    strategy: 'Z-Score Only (Lookback: 20 candles on 5m • Threshold: ±2.00 • تنفيذ فوري بسعر السوق)',
+    strategy: 'Z-Score Momentum (Lookback: 12 candles on 5m • Z>=+2.00 -> UP, Z<=-2.00 -> DOWN • تنفيذ فوري بسعر السوق)',
     targetMarketFocus: 'BTC 15 Min Only (عقود بيتكوين 15 دقيقة حصراً • تنفيذ مباشر بسعر السوق)',
     active15mMarket: cachedActive15mMarket
       ? {
@@ -1779,6 +1779,7 @@ app.get('/api/bot/status', (req, res) => {
     stdDev: lastCalculatedStdDev,
     lastSignal: lastEvaluatedSignal,
     candleCount: candleCloses.length,
+    lookbackPeriod: ZSCORE_STRATEGY.lookbackPeriod,
     riskPercent: ZSCORE_STRATEGY.riskPercent,
     riskModel: ZSCORE_STRATEGY.riskModel,
     kellyWinRate: ZSCORE_STRATEGY.kellyWinRate,
@@ -1898,14 +1899,14 @@ app.post('/api/bot/toggle', (req, res) => {
     lastExecutionError = null;
   }
   currentWaitReason = isServerBotRunning
-    ? 'في انتظار إشارة Z-Score مؤهلة (> +2.00 للهبوط أو < -2.00 للصعود) على عقد BTC 15m للتنفيذ المباشر بسعر السوق'
+    ? 'في انتظار إشارة Z-Score مؤهلة (> +2.00 لشراء UP أو < -2.00 لشراء DOWN) على عقد BTC 15m للتنفيذ المباشر بسعر السوق'
     : 'الروبوت متوقف مؤقتاً (PAUSED) - اضغط تشغيل لتفعيل التداول الآلي';
   console.log(`🎛️ [Server Bot] تم تغيير حالة تشغيل الروبوت على السيرفر إلى: ${isServerBotRunning ? 'تشغيل (RUNNING)' : 'إيقاف (STOPPED)'}`);
   res.json({ running: isServerBotRunning, waitReason: currentWaitReason, lastExecutionError });
 });
 
 app.post('/api/bot/config', (req, res) => {
-  const { maxEntryPrice, maxBankrollRiskPercent } = req.body;
+  const { maxEntryPrice, maxBankrollRiskPercent, lookbackPeriod } = req.body;
   if (typeof maxEntryPrice === 'number' && maxEntryPrice > 0) {
     ZSCORE_STRATEGY.maxEntryPrice = maxEntryPrice;
     console.log(`⚙️ [Server Bot] تم تحديث سقف سعر الدخول إلى: $${maxEntryPrice}`);
@@ -1914,10 +1915,15 @@ app.post('/api/bot/config', (req, res) => {
     ZSCORE_STRATEGY.maxBankrollRiskPercent = maxBankrollRiskPercent;
     console.log(`⚙️ [Server Bot] تم تحديث سقف أمان الصفقة إلى: ${(maxBankrollRiskPercent * 100).toFixed(1)}%`);
   }
+  if (typeof lookbackPeriod === 'number' && lookbackPeriod > 0) {
+    ZSCORE_STRATEGY.lookbackPeriod = lookbackPeriod;
+    console.log(`⚙️ [Server Bot] تم تحديث نافذة الشموع (Lookback) إلى: ${lookbackPeriod} شمعة`);
+  }
   res.json({
     success: true,
     maxEntryPrice: ZSCORE_STRATEGY.maxEntryPrice,
     maxBankrollRiskPercent: ZSCORE_STRATEGY.maxBankrollRiskPercent,
+    lookbackPeriod: ZSCORE_STRATEGY.lookbackPeriod,
   });
 });
 

@@ -243,23 +243,24 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
 
       {/* Sub-Chart: RSI (14) Oscillator Panel */}
       <div className="mt-3 pt-3 border-t border-slate-800/80">
-        {/* Sub-Chart: Z-Score (Lookback 20m) Visualizer Panel */}
+        {/* Sub-Chart: Z-Score (Lookback 5m - 20 candles) Visualizer Panel */}
         <div className="flex flex-wrap items-center justify-between text-xs mb-1.5 gap-2">
           <div className="flex items-center gap-2">
-            <span className="text-white font-bold">مؤشر Z-Score (التركيز على 1.0):</span>
+            <span className="text-white font-bold">مؤشر Z-Score (فريم 5m • العتبة ±2.00):</span>
             <span
+              dir="ltr"
               className={`font-mono font-bold text-sm px-2 py-0.5 rounded ${
-                zScore >= 1.0
-                  ? 'bg-rose-950 text-rose-400 border border-rose-500/40'
-                  : zScore <= -1.0
-                  ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/40'
+                zScore >= 2.0
+                  ? 'bg-rose-950 text-rose-400 border border-rose-500/40 animate-pulse'
+                  : zScore <= -2.0
+                  ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/40 animate-pulse'
                   : 'bg-slate-900 text-cyan-300 border border-slate-700'
               }`}
             >
               {zScore > 0 ? '+' : ''}{zScore.toFixed(3)}
             </span>
             {mean && (
-              <span className="text-[11px] text-slate-400">
+              <span className="text-[11px] text-slate-400 font-mono" dir="ltr">
                 (المتوسط: ${mean.toLocaleString()} | الانحراف: ${stdDev})
               </span>
             )}
@@ -267,11 +268,11 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
           <div className="flex items-center gap-3 text-[11px] text-slate-400">
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-rose-500" />
-              إشارة هبوط: &ge; +1.0
+              إشارة هبوط (شراء NO): &ge; +2.0
             </span>
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              إشارة صعود: &le; -1.0
+              إشارة صعود (شراء YES): &le; -2.0
             </span>
           </div>
         </div>
@@ -281,17 +282,17 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
           {/* Neutral center guide (0) */}
           <div className="absolute top-0 bottom-0 left-1/2 w-px bg-slate-700 z-0" />
           
-          {/* Bullish oversold zone (<= -1.0) on left */}
+          {/* Bullish oversold zone (<= -2.0) on left */}
           <div
-            className="absolute top-0 bottom-0 left-0 bg-emerald-500/15 border-r border-emerald-500/40"
-            style={{ width: '33.33%' }}
-            title="منطقة إشارة الصعود (Z <= -1.0)"
+            className="absolute top-0 bottom-0 left-0 bg-emerald-500/20 border-r border-emerald-500/50"
+            style={{ width: '16.67%' }}
+            title="منطقة إشارة الصعود (Z <= -2.00)"
           />
-          {/* Bearish overbought zone (>= +1.0) on right */}
+          {/* Bearish overbought zone (>= +2.0) on right */}
           <div
-            className="absolute top-0 bottom-0 right-0 bg-rose-500/15 border-l border-rose-500/40"
-            style={{ width: '33.33%' }}
-            title="منطقة إشارة الهبوط (Z >= +1.0)"
+            className="absolute top-0 bottom-0 right-0 bg-rose-500/20 border-l border-rose-500/50"
+            style={{ width: '16.67%' }}
+            title="منطقة إشارة الهبوط (Z >= +2.00)"
           />
 
           {/* Dynamic Z-Score Needle */}
@@ -305,9 +306,9 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
                 style={{
                   left: `${percent}%`,
                   backgroundColor:
-                    zScore >= 1.0
+                    zScore >= 2.0
                       ? '#f43f5e'
-                      : zScore <= -1.0
+                      : zScore <= -2.0
                       ? '#10b981'
                       : '#38bdf8',
                 }}

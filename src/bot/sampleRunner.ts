@@ -18,7 +18,7 @@ export const defaultBotConfig: BotConfig = {
   marketDurationMinutes: 15,
   maxEntryPrice: 0.99, // بدون سقف سعر (تنفيذ مباشر بسعر السوق المتاح)
   zScore: {
-    period: 20,           // Lookback Window: آخر 20 شمعة على فريم الـ 5 دقائق (5m) لتعظيم الدقة الإحصائية
+    period: 12,           // Lookback Window: آخر 12 شمعة على فريم الـ 5 دقائق (5m = 60 دقيقة)
     upperThreshold: 2.00,  // إشارة هبوط عند Z-Score >= +2.00
     lowerThreshold: -2.00, // إشارة صعود عند Z-Score <= -2.00
   },

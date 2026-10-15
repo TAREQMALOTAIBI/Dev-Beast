@@ -52,7 +52,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'terminal' | 'portfolio' | 'setup'>('terminal');
   const [activeMarketSlug, setActiveMarketSlug] = useState<string>('btc-price-15m-now');
 
-  // إعدادات البوت والبارامترات - خيار الدقة العالية (Z = 2.00, Lookback: 30m, تنفيذ مباشر بسعر السوق بدون سقف سعر, سقف أمان الصفقة 1%)
+  // إعدادات البوت والبارامترات - خيار الدقة العالية (Z = 2.00, Lookback: 12 candles on 5m / 60m, تنفيذ مباشر بسعر السوق بدون سقف سعر, سقف أمان الصفقة 1%)
   const [config, setConfig] = useState<BotConfig>(() => {
     try {
       const saved = localStorage.getItem('limitless_bot_config');
@@ -67,7 +67,7 @@ export default function App() {
             ...(parsed.zScore || {}),
             upperThreshold: 2.00, // عتبة الهبوط: 2.00
             lowerThreshold: -2.00, // عتبة الصعود: -2.00
-            period: 30, // نافذة الحساب: 30 دقيقة
+            period: 12, // نافذة الحساب: 12 شمعة على فريم 5 دقائق (60 دقيقة كاملة)
           },
           maxEntryPrice: parsed.maxEntryPrice !== undefined ? parsed.maxEntryPrice : 0.99, // بدون سقف سعر (تنفيذ مباشر بسعر السوق)
         };
@@ -83,17 +83,17 @@ export default function App() {
         ...defaultBotConfig.zScore,
         upperThreshold: 2.00,
         lowerThreshold: -2.00,
-        period: 30,
+        period: 12,
       },
     };
   });
 
-  // مزامنة وتحديث فوري لعتبات Z-Score وسقف أمان الصفقة 1% وإلغاء سقف السعر (تنفيذ مباشر بسعر السوق على نافذة 30 دقيقة)
+  // مزامنة وتحديث فوري لعتبات Z-Score وسقف أمان الصفقة 1% وإلغاء سقف السعر (تنفيذ مباشر بسعر السوق على نافذة 12 شمعة / فريم 5m)
   useEffect(() => {
     if (
       config.zScore.upperThreshold !== 2.00 ||
       config.zScore.lowerThreshold !== -2.00 ||
-      config.zScore.period !== 30 ||
+      config.zScore.period !== 12 ||
       config.maxEntryPrice < 0.95 ||
       config.maxBankrollRiskPercent !== 0.01
     ) {
@@ -105,7 +105,7 @@ export default function App() {
           ...prev.zScore,
           upperThreshold: 2.00,
           lowerThreshold: -2.00,
-          period: 30,
+          period: 12,
         },
       }));
     }
@@ -861,7 +861,7 @@ export default function App() {
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                خطة التداول بالـ Z-Score فقط (Lookback: 30m • العتبة: &plusmn;2.00 • سقف الدخول: مفتوح بسعر السوق • إدارة المخاطر: Full Kelly 100%)
+                خطة التداول بالـ Z-Score فقط (Lookback: 12 شمعة على فريم 5m • العتبة: &plusmn;2.00 • سقف الدخول: مفتوح بسعر السوق • إدارة المخاطر: Full Kelly 100%)
               </p>
             </div>
           </div>
@@ -877,13 +877,13 @@ export default function App() {
 
             {/* مؤشر Z-Score السريع (التركيز على 2.00) */}
             <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800">
-              <span className="text-slate-400 text-[10px]">Z-Score (30m):</span>
+              <span className="text-slate-400 text-[10px]">Z-Score (5m • 12c):</span>
               <span
                 className={`font-mono font-bold text-xs ${
                   currentSignal.zScore >= 2.00
-                    ? 'text-rose-400 animate-pulse font-extrabold'
-                    : currentSignal.zScore <= -2.00
                     ? 'text-emerald-400 animate-pulse font-extrabold'
+                    : currentSignal.zScore <= -2.00
+                    ? 'text-rose-400 animate-pulse font-extrabold'
                     : 'text-cyan-300'
                 }`}
               >
@@ -894,18 +894,18 @@ export default function App() {
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800">
               <span
                 className={`w-2 h-2 rounded-full ${
-                  currentSignal.signal === 'OVERBOUGHT'
-                    ? 'bg-rose-500 animate-ping'
-                    : currentSignal.signal === 'OVERSOLD'
+                  currentSignal.zScore >= 2.00
                     ? 'bg-emerald-500 animate-ping'
+                    : currentSignal.zScore <= -2.00
+                    ? 'bg-rose-500 animate-ping'
                     : 'bg-cyan-500'
                 }`}
               />
               <span className="font-semibold text-slate-300">
-                {currentSignal.signal === 'OVERBOUGHT'
-                  ? 'إشارة هبوط (Z >= +2.00)'
-                  : currentSignal.signal === 'OVERSOLD'
-                  ? 'إشارة صعود (Z <= -2.00)'
+                {currentSignal.zScore >= 2.00
+                  ? 'إشارة صعود: شراء UP (Z >= +2.00)'
+                  : currentSignal.zScore <= -2.00
+                  ? 'إشارة هبوط: شراء DOWN (Z <= -2.00)'
                   : 'سوق محايد (Neutral)'}
               </span>
             </div>

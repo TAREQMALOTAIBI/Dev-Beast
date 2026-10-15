@@ -65,9 +65,9 @@ const CREDENTIALS = {
 
 // 2. إعدادات خطة الـ Z-Score المحدثة
 const CONFIG = {
-  lookback: 15,         // نافذة الحساب: آخر 15 شمعة على فريم الدقيقة (1m)
-  upperZScore: 2.00,    // إشارة هبوط: Z-Score >= +2.00
-  lowerZScore: -2.00,   // إشارة صعود: Z-Score <= -2.00
+  lookback: 12,         // نافذة الحساب: آخر 12 شمعة على فريم الـ 5 دقائق (5m)
+  upperZScore: 2.00,    // إشارة صعود (شراء UP): Z-Score >= +2.00
+  lowerZScore: -2.00,   // إشارة هبوط (شراء DOWN): Z-Score <= -2.00
   maxEntryPrice: ${config.maxEntryPrice >= 0.95 ? 'null /* بدون سقف - سعر السوق المباشر */' : config.maxEntryPrice},
   riskModel: 'FULL_KELLY', // إدارة المخاطر: Full Kelly (100% f*)
   kellyWinRate: 0.68,   // نسبة الفوز المقدرة لإشارة Z-Score ±2.00
@@ -89,7 +89,7 @@ let isExecuting = false;
 const tradedMarketSlugs = new Set<string>();
 
 // دالة حساب Z-Score بدقة إحصائية
-function computeZScore(prices: number[], period: number = 20) {
+function computeZScore(prices: number[], period: number = 12) {
   const window = prices.slice(-period);
   const current = window[window.length - 1];
   const mean = window.reduce((a, b) => a + b, 0) / window.length;
@@ -350,10 +350,10 @@ async function run() {
 
         if (zScore >= CONFIG.upperZScore) {
           console.log(\`🚨 إشارة هبوط! Z = +\${zScore.toFixed(2)} (>= +\${CONFIG.upperZScore})\`);
-          await findAndExecuteBestBtcTrade('NO', zScore);
+          await findAndExecuteBestBtcTrade('YES', zScore);
         } else if (zScore <= CONFIG.lowerZScore) {
           console.log(\`🚨 إشارة صعود! Z = \${zScore.toFixed(2)} (<= \${CONFIG.lowerZScore})\`);
-          await findAndExecuteBestBtcTrade('YES', zScore);
+          await findAndExecuteBestBtcTrade('NO', zScore);
         }
       }
     } catch (e) {}

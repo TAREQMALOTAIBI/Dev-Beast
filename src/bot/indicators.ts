@@ -21,7 +21,7 @@ import type { BotConfig, Candle, BollingerBandsValues, SignalEvaluation } from '
  */
 export function calculateZScore(
   closePrices: number[],
-  lookback: number = 20
+  lookback: number = 12
 ): {
   zScore: number;
   mean: number;
@@ -38,7 +38,7 @@ export function calculateZScore(
     };
   }
 
-  // أخذ آخر N شمعة (Lookback Window = 20 شمعة)
+  // أخذ آخر N شمعة (Lookback Window = 12 شمعة على فريم 5m)
   const windowPrices = closePrices.slice(-lookback);
   const currentPrice = windowPrices[windowPrices.length - 1];
 
@@ -64,7 +64,7 @@ export function calculateZScore(
 /**
  * وظيفة فحص وتقييم إشارة التداول بالـ Z-Score فقط
  * 
- * @param candles مصفوفة شموع البيتكوين (إطار 1 دقيقة)
+ * @param candles مصفوفة شموع البيتكوين (إطار 5 دقائق)
  * @param config إعدادات البوت والبارامترات
  * @returns SignalEvaluation نتيجة تقييم إشارة الـ Z-Score
  */
@@ -72,7 +72,7 @@ export function checkMeanReversionSignal(
   candles: Candle[],
   config: BotConfig
 ): SignalEvaluation {
-  const lookbackPeriod = config.zScore?.period || 30; // 30 شمعة على فريم الدقيقة لتعظيم الدقة وتصفية الضجيج
+  const lookbackPeriod = config.zScore?.period || 12; // 12 شمعة على فريم 5 دقائق (ساعة واحدة) لتعظيم الدقة وتصفية الضجيج
   const upperThreshold = config.zScore?.upperThreshold !== undefined ? config.zScore.upperThreshold : 2.00; // التركيز على +2.00
   const lowerThreshold = config.zScore?.lowerThreshold !== undefined ? config.zScore.lowerThreshold : -2.00; // التركيز على -2.00
 
@@ -129,7 +129,7 @@ export function checkMeanReversionSignal(
 
   if (isOverbought) {
     return {
-      signal: 'OVERBOUGHT', // إشارة هبوط للمؤشر
+      signal: 'OVERBOUGHT', // إشارة صعود مع الزخم (اختراق المقاومة)
       currentPrice,
       zScore,
       mean,
@@ -138,15 +138,15 @@ export function checkMeanReversionSignal(
       bollingerBands,
       isOverbought: true,
       isOversold: false,
-      explanationArabic: `🚨 [إشارة هبوط Z-Score]: القيمة الحالية = +${zScore} (تجاوزت سقف +${upperThreshold}). السعر ($${currentPrice.toLocaleString()}) أعلى من متوسط 15 دقيقة ($${mean.toLocaleString()}). الهدف: شراء عقد NO للقمة عبر أمر FAK فوراً بسعر السوق.`,
-      explanationEnglish: `Bearish Z-Score Trigger! Z = +${zScore} (>= +${upperThreshold}). Price is ${zScore} standard deviations above 15m mean ($${mean}). Target: NO contract via immediate market FAK order.`,
+      explanationArabic: `🚨 [إشارة صعود Z-Score]: القيمة الحالية = +${zScore} (تجاوزت سقف +${upperThreshold}). زخم صعودي قوي. الهدف: شراء عقد UP (YES) عبر أمر FAK فوراً بسعر السوق.`,
+      explanationEnglish: `Bullish Z-Score Trigger! Z = +${zScore} (>= +${upperThreshold}). Strong upward momentum. Target: YES (UP) contract via immediate market FAK order.`,
       evaluatedAt: Date.now(),
     };
   }
 
   if (isOversold) {
     return {
-      signal: 'OVERSOLD', // إشارة صعود للمؤشر
+      signal: 'OVERSOLD', // إشارة هبوط مع الزخم (كسر الدعم)
       currentPrice,
       zScore,
       mean,
@@ -155,8 +155,8 @@ export function checkMeanReversionSignal(
       bollingerBands,
       isOverbought: false,
       isOversold: true,
-      explanationArabic: `🚨 [إشارة صعود Z-Score]: القيمة الحالية = ${zScore} (كسرت قاع ${lowerThreshold}). السعر ($${currentPrice.toLocaleString()}) أدنى من متوسط 15 دقيقة ($${mean.toLocaleString()}). الهدف: شراء عقد YES للارتداد عبر أمر FAK فوراً بسعر السوق.`,
-      explanationEnglish: `Bullish Z-Score Trigger! Z = ${zScore} (<= ${lowerThreshold}). Price is ${Math.abs(zScore)} standard deviations below 15m mean ($${mean}). Target: YES contract via immediate market FAK order.`,
+      explanationArabic: `🚨 [إشارة هبوط Z-Score]: القيمة الحالية = ${zScore} (كسرت قاع ${lowerThreshold}). زخم هبوطي قوي. الهدف: شراء عقد DOWN (NO) عبر أمر FAK فوراً بسعر السوق.`,
+      explanationEnglish: `Bearish Z-Score Trigger! Z = ${zScore} (<= ${lowerThreshold}). Strong downward momentum. Target: NO (DOWN) contract via immediate market FAK order.`,
       evaluatedAt: Date.now(),
     };
   }
