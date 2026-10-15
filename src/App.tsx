@@ -607,9 +607,10 @@ export default function App() {
 
     const loadRealBinanceKlines = async () => {
       const endpoints = [
+        '/api/binance/klines-full?limit=50',
         '/api/binance/klines?limit=50',
-        'https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=50',
-        'https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=50',
+        'https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=50',
+        'https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=50',
       ];
 
       for (const endpoint of endpoints) {
@@ -618,11 +619,15 @@ export default function App() {
           if (!res.ok) continue;
           const data = await res.json();
 
-          if (data.closes && Array.isArray(data.closes) && data.closes.length > 0) {
+          if (data.candles && Array.isArray(data.candles) && data.candles.length > 0) {
+            if (isCancelled) return;
+            setCandles(data.candles);
+            break;
+          } else if (data.closes && Array.isArray(data.closes) && data.closes.length > 0) {
             if (isCancelled) return;
             const now = Date.now();
             const realCandles: Candle[] = data.closes.map((close: number, idx: number) => ({
-              timestamp: now - (data.closes.length - idx) * 60000,
+              timestamp: now - (data.closes.length - idx) * 300000,
               open: close,
               high: close,
               low: close,
@@ -641,7 +646,7 @@ export default function App() {
               const close = parseFloat(k[4]);
               const volume = parseFloat(k[5]) || 50;
               return {
-                timestamp: k[0] || (now - (data.length - idx) * 60000),
+                timestamp: k[0] || (now - (data.length - idx) * 300000),
                 open,
                 high,
                 low,
@@ -663,7 +668,7 @@ export default function App() {
     };
   }, []);
 
-  // 2. بث أسعار بينانس الحية عبر WebSocket في المتصفح مع معالجة الانقطاع
+  // 2. بث أسعار بينانس الحية عبر WebSocket في المتصفح على فريم 5 دقائق (kline_5m)
   useEffect(() => {
     if (!isStreaming) return;
 
@@ -671,7 +676,7 @@ export default function App() {
     let fallbackInterval: any = null;
 
     try {
-      ws = new WebSocket('wss://data-stream.binance.vision/ws/btcusdt@kline_1m');
+      ws = new WebSocket('wss://data-stream.binance.vision/ws/btcusdt@kline_5m');
 
       ws.onmessage = (event) => {
         try {
@@ -684,22 +689,35 @@ export default function App() {
             if (!prev || prev.length === 0) return prev;
             const updated = [...prev];
             const lastCandle = updated[updated.length - 1];
+            const candleTime = kline.t ? Number(kline.t) : Date.now();
 
             if (kline.x) {
-              // شمعة دقيقة مكتملة
-              updated.push({
-                timestamp: kline.t || Date.now(),
-                open: parseFloat(kline.o),
-                high: parseFloat(kline.h),
-                low: parseFloat(kline.l),
-                close: currentPrice,
-                volume: Math.round(parseFloat(kline.v)),
-              });
-              if (updated.length > 50) updated.shift();
+              // شمعة 5 دقائق مكتملة: التحقق من التوقيت لمنع تكرار الشمعة
+              if (lastCandle && lastCandle.timestamp === candleTime) {
+                updated[updated.length - 1] = {
+                  timestamp: candleTime,
+                  open: parseFloat(kline.o),
+                  high: parseFloat(kline.h),
+                  low: parseFloat(kline.l),
+                  close: currentPrice,
+                  volume: Math.round(parseFloat(kline.v)),
+                };
+              } else {
+                updated.push({
+                  timestamp: candleTime,
+                  open: parseFloat(kline.o),
+                  high: parseFloat(kline.h),
+                  low: parseFloat(kline.l),
+                  close: currentPrice,
+                  volume: Math.round(parseFloat(kline.v)),
+                });
+                if (updated.length > 50) updated.shift();
+              }
             } else {
               // تحديث الشمعة الحالية لحظياً
               updated[updated.length - 1] = {
                 ...lastCandle,
+                timestamp: candleTime,
                 close: currentPrice,
                 high: Math.max(lastCandle.high, currentPrice),
                 low: Math.min(lastCandle.low, currentPrice),

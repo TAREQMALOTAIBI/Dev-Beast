@@ -1977,26 +1977,29 @@ app.post('/api/bot/execute-trade', async (req, res) => {
 // ==========================================
 
 async function startServer() {
+  const isProd = process.env.NODE_ENV === 'production';
   const distPath = path.resolve(__dirname, 'dist');
-  let hasDist = fs.existsSync(distPath);
 
-  if (!hasDist) {
-    console.log('⚡ بناء ملفات الإنتاج الجاهزة لتفادي أخطاء WebSocket...');
-    try {
-      const { build } = await import('vite');
-      await build();
-      hasDist = fs.existsSync(distPath);
-    } catch (e: any) {
-      console.warn('تعذر بناء ملفات الإنتاج برمجياً:', e.message);
+  if (isProd) {
+    let hasDist = fs.existsSync(distPath);
+    if (!hasDist) {
+      console.log('⚡ بناء ملفات الإنتاج الجاهزة...');
+      try {
+        const { build } = await import('vite');
+        await build();
+        hasDist = fs.existsSync(distPath);
+      } catch (e: any) {
+        console.warn('تعذر بناء ملفات الإنتاج برمجياً:', e.message);
+      }
     }
-  }
 
-  if (hasDist) {
-    console.log('📦 تقديم ملفات الإنتاج الجاهزة من مجلد dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.resolve(distPath, 'index.html'));
-    });
+    if (hasDist) {
+      console.log('📦 تقديم ملفات الإنتاج الجاهزة من مجلد dist');
+      app.use(express.static(distPath));
+      app.get('*', (req, res) => {
+        res.sendFile(path.resolve(distPath, 'index.html'));
+      });
+    }
   } else {
     console.log('⚡ تشغيل Vite Middleware في وضع التطوير');
     const vite = await createViteServer({

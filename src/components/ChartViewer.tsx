@@ -59,7 +59,7 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
             <div className="flex items-center gap-2">
               <span className="font-bold text-white tracking-wide text-sm sm:text-base">البيتكوين مقابل الدولار (BTC/USD)</span>
               <span className="px-2 py-0.5 text-xs font-mono rounded bg-slate-800 text-cyan-400 border border-slate-700">
-                إطار 1 دقيقة
+                إطار 5 دقائق (5m)
               </span>
               <span className="px-2 py-0.5 text-xs rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/30">
                 بث عقود 15m
@@ -189,7 +189,7 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
             const color = isGreen ? '#10b981' : '#f43f5e';
 
             return (
-              <g key={candle.timestamp}>
+              <g key={`${candle.timestamp}-${idx}`}>
                 {/* Wick */}
                 <line
                   x1={x}
