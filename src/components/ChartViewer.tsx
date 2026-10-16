@@ -1,5 +1,6 @@
 import React from 'react';
-import type { Candle, BollingerBandsValues } from '../bot/types';
+import type { Candle, BollingerBandsValues, AdxInfo, RsiDivergenceInfo } from '../bot/types';
+import { Activity, Compass, Zap, ShieldAlert, CheckCircle2, AlertTriangle } from 'lucide-react';
 
 interface ChartViewerProps {
   candles: Candle[];
@@ -11,6 +12,8 @@ interface ChartViewerProps {
   zScore?: number;
   mean?: number;
   stdDev?: number;
+  adx?: AdxInfo;
+  rsiDivergence?: RsiDivergenceInfo;
 }
 
 export const ChartViewer: React.FC<ChartViewerProps> = ({
@@ -23,6 +26,8 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
   zScore = 0,
   mean,
   stdDev,
+  adx,
+  rsiDivergence,
 }) => {
   if (!candles || candles.length === 0) {
     return (
@@ -48,6 +53,10 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
   };
 
   const currentCandle = displayCandles[displayCandles.length - 1];
+
+  // ADX values fallback
+  const adxVal = adx?.adx ?? 22.0;
+  const isAdxRanging = adx ? adx.isFavorableForMeanReversion : adxVal <= 28;
 
   return (
     <div className="bg-slate-900/80 rounded-2xl border border-slate-800/80 p-4 shadow-2xl backdrop-blur-md">
@@ -77,7 +86,7 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
             الحد العلوي BB: <span className="font-mono font-bold">${bb.upper.toLocaleString()}</span>
           </div>
           <div className="px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-slate-300">
-            المتوسط: <span className="font-mono font-bold">${bb.middle.toLocaleString()}</span>
+            المتوسط (30m): <span className="font-mono font-bold">${bb.middle.toLocaleString()}</span>
           </div>
           <div className="px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300">
             الحد السفلي BB: <span className="font-mono font-bold">${bb.lower.toLocaleString()}</span>
@@ -234,87 +243,200 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
           >
             <span>
               {signal === 'OVERBOUGHT'
-                ? '⚡ إشارة ذروة شراء حادة (RSI > 85 وكسر الحد العلوي)'
-                : '🚀 إشارة ذروة بيع حادة (RSI < 15 وكسر الحد السفلي)'}
+                ? '⚡ إشارة ارتداد هابط (Z >= +2.00) - شراء عقد NO'
+                : '🚀 إشارة ارتداد صاعد (Z <= -2.00) - شراء عقد YES'}
             </span>
           </div>
         )}
       </div>
 
-      {/* Sub-Chart: RSI (14) Oscillator Panel */}
-      <div className="mt-3 pt-3 border-t border-slate-800/80">
-        {/* Sub-Chart: Z-Score (Lookback 5m - 20 candles) Visualizer Panel */}
-        <div className="flex flex-wrap items-center justify-between text-xs mb-1.5 gap-2">
-          <div className="flex items-center gap-2">
-            <span className="text-white font-bold">مؤشر Z-Score (فريم 1m • العتبة ±2.00):</span>
-            <span
-              dir="ltr"
-              className={`font-mono font-bold text-sm px-2 py-0.5 rounded ${
-                zScore >= 2.0
-                  ? 'bg-rose-950 text-rose-400 border border-rose-500/40 animate-pulse'
-                  : zScore <= -2.0
-                  ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/40 animate-pulse'
-                  : 'bg-slate-900 text-cyan-300 border border-slate-700'
-              }`}
-            >
-              {zScore > 0 ? '+' : ''}{zScore.toFixed(3)}
-            </span>
-            {mean && (
-              <span className="text-[11px] text-slate-400 font-mono" dir="ltr">
-                (المتوسط: ${mean.toLocaleString()} | الانحراف: ${stdDev})
+      {/* لوحة المؤشرات التأكيدية الثلاثة (Z-Score + ADX 14 + RSI Divergence) */}
+      <div className="mt-4 pt-4 border-t border-slate-800/80 space-y-3">
+        {/* 1. مؤشر Z-Score (Lookback 30 candles) */}
+        <div>
+          <div className="flex flex-wrap items-center justify-between text-xs mb-1.5 gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-white font-bold flex items-center gap-1.5">
+                <Activity className="w-3.5 h-3.5 text-cyan-400" />
+                مؤشر Z-Score (فريم 1m • نافذة 30 شمعة • العتبة ±2.00):
               </span>
-            )}
+              <span
+                dir="ltr"
+                className={`font-mono font-bold text-sm px-2 py-0.5 rounded ${
+                  zScore >= 2.0
+                    ? 'bg-rose-950 text-rose-400 border border-rose-500/40 animate-pulse'
+                    : zScore <= -2.0
+                    ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/40 animate-pulse'
+                    : 'bg-slate-900 text-cyan-300 border border-slate-700'
+                }`}
+              >
+                {zScore > 0 ? '+' : ''}{zScore.toFixed(3)}
+              </span>
+              {mean && (
+                <span className="text-[11px] text-slate-400 font-mono hidden sm:inline" dir="ltr">
+                  (المتوسط: ${mean.toLocaleString()} | الانحراف: ${stdDev})
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-3 text-[11px] text-slate-400">
+              <span className="flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-rose-500" />
+                إشارة هبوط (شراء NO): &ge; +2.00
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                إشارة صعود (شراء YES): &le; -2.00
+              </span>
+            </div>
           </div>
-          <div className="flex items-center gap-3 text-[11px] text-slate-400">
-            <span className="flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-rose-500" />
-              إشارة هبوط (شراء NO): &ge; +2.0
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              إشارة صعود (شراء YES): &le; -2.0
-            </span>
+
+          {/* Z-Score Meter Visualizer (-3.0 to +3.0) */}
+          <div className="relative h-6 bg-slate-950 rounded-lg overflow-hidden border border-slate-800 flex items-center px-2">
+            {/* Neutral center guide (0) */}
+            <div className="absolute top-0 bottom-0 left-1/2 w-px bg-slate-700 z-0" />
+            
+            {/* Bullish oversold zone (<= -2.0) on left */}
+            <div
+              className="absolute top-0 bottom-0 left-0 bg-emerald-500/20 border-r border-emerald-500/50"
+              style={{ width: '16.67%' }}
+              title="منطقة إشارة الصعود (Z <= -2.00)"
+            />
+            {/* Bearish overbought zone (>= +2.0) on right */}
+            <div
+              className="absolute top-0 bottom-0 right-0 bg-rose-500/20 border-l border-rose-500/50"
+              style={{ width: '16.67%' }}
+              title="منطقة إشارة الهبوط (Z >= +2.00)"
+            />
+
+            {/* Dynamic Z-Score Needle */}
+            {(() => {
+              const clampedZ = Math.min(Math.max(zScore, -3.0), 3.0);
+              const percent = ((clampedZ + 3.0) / 6.0) * 100;
+              return (
+                <div
+                  className="absolute top-0.5 bottom-0.5 w-3 rounded-full transition-all duration-300 -translate-x-1.5 shadow-md flex items-center justify-center z-10"
+                  style={{
+                    left: `${percent}%`,
+                    backgroundColor:
+                      zScore >= 2.0
+                        ? '#f43f5e'
+                        : zScore <= -2.0
+                        ? '#10b981'
+                        : '#38bdf8',
+                  }}
+                />
+              );
+            })()}
           </div>
         </div>
 
-        {/* Z-Score Meter Visualizer (-3.0 to +3.0) */}
-        <div className="relative h-6 bg-slate-950 rounded-lg overflow-hidden border border-slate-800 flex items-center px-2 mb-3">
-          {/* Neutral center guide (0) */}
-          <div className="absolute top-0 bottom-0 left-1/2 w-px bg-slate-700 z-0" />
-          
-          {/* Bullish oversold zone (<= -2.0) on left */}
-          <div
-            className="absolute top-0 bottom-0 left-0 bg-emerald-500/20 border-r border-emerald-500/50"
-            style={{ width: '16.67%' }}
-            title="منطقة إشارة الصعود (Z <= -2.00)"
-          />
-          {/* Bearish overbought zone (>= +2.0) on right */}
-          <div
-            className="absolute top-0 bottom-0 right-0 bg-rose-500/20 border-l border-rose-500/50"
-            style={{ width: '16.67%' }}
-            title="منطقة إشارة الهبوط (Z >= +2.00)"
-          />
+        {/* 2. مؤشرا التأكيد الإضافيان المتطابقان مع إعداداتك: ADX (14) و RSI Divergence */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+          {/* كرت مؤشر ADX (Average Directional Index) */}
+          <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800/80 flex flex-col justify-between">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <div className="flex items-center gap-1.5">
+                <Compass className="w-4 h-4 text-amber-400" />
+                <span className="font-bold text-xs text-white">فلتر نظام السوق (ADX 14):</span>
+                <span className="font-mono text-xs font-bold text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/30">
+                  {adxVal}
+                </span>
+              </div>
+              <span
+                className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                  isAdxRanging
+                    ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
+                    : 'bg-amber-500/10 border-amber-500/40 text-amber-300'
+                }`}
+              >
+                {isAdxRanging ? '✅ سوق عرضي ملائم (≤ 28)' : '⚡ اتجاه كاسح (> 28)'}
+              </span>
+            </div>
 
-          {/* Dynamic Z-Score Needle */}
-          {(() => {
-            // Map zScore from [-3, +3] to [0%, 100%]
-            const clampedZ = Math.min(Math.max(zScore, -3.0), 3.0);
-            const percent = ((clampedZ + 3.0) / 6.0) * 100;
-            return (
-              <div
-                className="absolute top-0.5 bottom-0.5 w-3 rounded-full transition-all duration-300 -translate-x-1.5 shadow-md flex items-center justify-center z-10"
-                style={{
-                  left: `${percent}%`,
-                  backgroundColor:
-                    zScore >= 2.0
-                      ? '#f43f5e'
-                      : zScore <= -2.0
-                      ? '#10b981'
-                      : '#38bdf8',
-                }}
-              />
-            );
-          })()}
+            {/* ADX mini visual progress */}
+            <div className="space-y-1">
+              <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden flex">
+                {/* Ranging region (0 to 28 = 56%) */}
+                <div
+                  className="h-full bg-emerald-500/30 border-r border-emerald-500/60"
+                  style={{ width: '56%' }}
+                  title="نطاق التذبذب العرضي المناسب للارتداد (ADX <= 28)"
+                />
+                {/* Trending region (28 to 50 = 44%) */}
+                <div
+                  className="h-full bg-amber-500/30"
+                  style={{ width: '44%' }}
+                  title="نطاق الاتجاه القوي (ADX > 28)"
+                />
+              </div>
+              <div className="flex items-center justify-between text-[10px] text-slate-400">
+                <span>0 (ركود تام)</span>
+                <span className="text-emerald-400 font-mono font-semibold">28 (عتبة الارتداد المثالي)</span>
+                <span>50+ (ترند عنيف)</span>
+              </div>
+            </div>
+
+            <p className="text-[11px] text-slate-400 mt-2 leading-tight">
+              {adx?.descriptionArabic || (isAdxRanging
+                ? 'السوق في تذبذب عرضي، مما يرفع احتمالية نجاح ارتداد السعر إلى المتوسط بشكل كبير.'
+                : 'السوق في ترند اتجاهي قوي، يشترط الروبوت وجود دايفرجنس لتأكيد الارتداد ومنع الدخول المعاكس.')}
+            </p>
+          </div>
+
+          {/* كرت انفراج مؤشر القوة النسبية (RSI Divergence) */}
+          <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800/80 flex flex-col justify-between">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <div className="flex items-center gap-1.5">
+                <Zap className="w-4 h-4 text-cyan-400" />
+                <span className="font-bold text-xs text-white">انفراج RSI (Divergence):</span>
+                <span className="font-mono text-xs text-slate-300 bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700">
+                  RSI: {rsi}
+                </span>
+              </div>
+              <span
+                className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1 ${
+                  rsiDivergence?.detected && rsiDivergence.type === 'BULLISH'
+                    ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 animate-pulse'
+                    : rsiDivergence?.detected && rsiDivergence.type === 'BEARISH'
+                    ? 'bg-rose-500/20 border-rose-500/50 text-rose-300 animate-pulse'
+                    : 'bg-slate-800 border-slate-700 text-slate-400'
+                }`}
+              >
+                {rsiDivergence?.detected && rsiDivergence.type === 'BULLISH' ? (
+                  <>🟢 دايفرجنس صاعد مؤكد (YES)</>
+                ) : rsiDivergence?.detected && rsiDivergence.type === 'BEARISH' ? (
+                  <>🔴 دايفرجنس هابط مؤكد (NO)</>
+                ) : (
+                  <>⚪ لا يوجد انفراج (زخم متطابق)</>
+                )}
+              </span>
+            </div>
+
+            {/* RSI Meter Visualizer */}
+            <div className="space-y-1">
+              <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden relative">
+                {/* Oversold zone (0 to 30) */}
+                <div className="absolute top-0 bottom-0 left-0 bg-emerald-500/30" style={{ width: '30%' }} />
+                {/* Overbought zone (70 to 100) */}
+                <div className="absolute top-0 bottom-0 right-0 bg-rose-500/30" style={{ width: '30%' }} />
+                {/* RSI Indicator Pin */}
+                <div
+                  className="absolute top-0 bottom-0 w-2 bg-cyan-400 rounded-full shadow"
+                  style={{ left: `${Math.min(Math.max(rsi, 0), 100)}%` }}
+                />
+              </div>
+              <div className="flex items-center justify-between text-[10px] text-slate-400">
+                <span className="text-emerald-400 font-mono">30 (تشبع بيع)</span>
+                <span className="text-slate-400 font-mono font-semibold">50 (حياد)</span>
+                <span className="text-rose-400 font-mono">70 (تشبع شراء)</span>
+              </div>
+            </div>
+
+            <p className="text-[11px] text-slate-400 mt-2 leading-tight">
+              {rsiDivergence?.descriptionArabic ||
+                'يقارن الروبوت قمم وقيعان السعر مع قمم وقيعان RSI لرصد ضعف الزخم واستباق الانعكاس بدقة.'}
+            </p>
+          </div>
         </div>
       </div>
     </div>

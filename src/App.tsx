@@ -129,6 +129,8 @@ export default function App() {
     isCurrentMarketTraded?: boolean;
     currentMarketTrade?: any;
     tradedContractsCount?: number;
+    adx?: any;
+    rsiDivergence?: any;
     active5mMarket?: {
       title: string;
       slug: string;
@@ -143,13 +145,13 @@ export default function App() {
     } | null;
   }>({
     running: false,
-    waitReason: 'في انتظار إشارة Z-Score مؤهلة لركوب الزخم (±2.00) على عقد BTC 15m بسعر السوق المباشر',
+    waitReason: 'في انتظار إشارة Z-Score مؤهلة للارتداد إلى المتوسط (±2.00) على عقد BTC 15m مع تأكيد ADX و RSI Divergence',
     tradeSizeUsdc: 0.50,
     maxBankrollRiskPercent: 0.01,
     isCurrentMarketTraded: false,
     currentMarketTrade: null,
     tradedContractsCount: 0,
-    targetMarketFocus: 'BTC 15 Min Only (عقود بيتكوين 15 دقيقة حصراً • استراتيجية ركوب الزخم)',
+    targetMarketFocus: 'BTC 15 Min Only (عقود بيتكوين 15 دقيقة حصراً • استراتيجية الارتداد إلى المتوسط)',
     active5mMarket: null,
     active15mMarket: null,
   });
@@ -1401,12 +1403,14 @@ export default function App() {
                 candles={candles}
                 bb={currentSignal.bollingerBands}
                 rsi={currentSignal.rsi || 50}
-                overboughtThreshold={85}
-                oversoldThreshold={15}
+                overboughtThreshold={70}
+                oversoldThreshold={30}
                 signal={currentSignal.signal}
                 zScore={currentSignal.zScore}
                 mean={currentSignal.mean}
                 stdDev={currentSignal.stdDev}
+                adx={currentSignal.adx || serverStatus.adx}
+                rsiDivergence={currentSignal.rsiDivergence || serverStatus.rsiDivergence}
               />
             </div>
 

@@ -15,6 +15,8 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import { fileURLToPath } from 'url';
+import { calculateAdx, detectRsiDivergence } from './src/bot/indicators';
+import type { Candle, AdxInfo, RsiDivergenceInfo } from './src/bot/types';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -809,13 +811,27 @@ function recordContractTraded(info: TradedContractInfo) {
 let isServerBotRunning = loadBotRunningState();
 let lastServerEvalTime = 0;
 const candleCloses: number[] = [];
+let serverCandles: Candle[] = [];
+let lastCalculatedAdx: AdxInfo = {
+  adx: 22.0,
+  pdi: 20.0,
+  mdi: 20.0,
+  regime: 'RANGING',
+  isFavorableForMeanReversion: true,
+  descriptionArabic: 'سوق تذبذب عرضي (ADX = 22.0 ≤ 28) • بيئة ملائمة للارتداد إلى المتوسط.',
+};
+let lastCalculatedDivergence: RsiDivergenceInfo = {
+  detected: false,
+  type: 'NONE',
+  descriptionArabic: 'لا يوجد انفراج دايفرجنس حالي.',
+};
 let lastEvaluatedSignal: string = 'NEUTRAL';
 let lastBtcPrice: number = 94500;
 let lastCalculatedZScore: number = 0.0;
 let lastCalculatedMean: number = 94500;
 let lastCalculatedStdDev: number = 50;
 let currentWaitReason: string = isServerBotRunning
-  ? 'في انتظار إشارة Z-Score مؤهلة للارتداد إلى المتوسط (> +2.00 لشراء NO أو < -2.00 لشراء YES على فريم 1m لآخر 30 شمعة) بأمر FAK بسعر السوق'
+  ? 'في انتظار إشارة Z-Score مؤهلة للارتداد إلى المتوسط (> +2.00 لشراء NO أو < -2.00 لشراء YES على فريم 1m لآخر 30 شمعة) مع تأكيد ADX و RSI Divergence'
   : 'الروبوت متوقف مؤقتاً (PAUSED) - اضغط تشغيل لتفعيل التداول الآلي';
 let lastExecutionError: string | null = null;
 
@@ -1629,12 +1645,18 @@ async function fetchBinanceFullCandles(limit: number = 50): Promise<Array<{
 
 async function startServerPriceFeed() {
   try {
-    // 1. جلب الشموع السابقة فوراً عبر Binance REST API (فريم 1 دقيقة)
-    const initialCloses = await fetchBinanceHistoricalCloses(50);
-    if (initialCloses.length > 0) {
-      candleCloses.push(...initialCloses);
+    // 1. جلب الشموع السابقة الكاملة فوراً عبر Binance REST API (فريم 1 دقيقة)
+    const initialCandles = await fetchBinanceFullCandles(50);
+    if (initialCandles.length > 0) {
+      serverCandles = initialCandles;
+      candleCloses.length = 0;
+      for (const c of initialCandles) {
+        candleCloses.push(c.close);
+      }
       lastBtcPrice = candleCloses[candleCloses.length - 1];
-      console.log(`✅ [Server Bot] تم جلب ${initialCloses.length} شمعة (فريم 1 دقيقة) عبر Binance REST API بنجاح! السعر الحالي: $${lastBtcPrice}`);
+      lastCalculatedAdx = calculateAdx(serverCandles, 14);
+      lastCalculatedDivergence = detectRsiDivergence(serverCandles, 14, ZSCORE_STRATEGY.lookbackPeriod);
+      console.log(`✅ [Server Bot] تم جلب ${initialCandles.length} شمعة (فريم 1 دقيقة) بنجاح! السعر: $${lastBtcPrice} | ADX = ${lastCalculatedAdx.adx} (${lastCalculatedAdx.regime}) | Divergence: ${lastCalculatedDivergence.type}`);
     }
 
     const WebSocketClient = (await import('ws')).default;
@@ -1651,9 +1673,21 @@ async function startServerPriceFeed() {
         const kline = payload.k;
         lastBtcPrice = parseFloat(kline.c);
 
+        const currentCandleObj: Candle = {
+          timestamp: kline.t,
+          open: parseFloat(kline.o),
+          high: parseFloat(kline.h),
+          low: parseFloat(kline.l),
+          close: parseFloat(kline.c),
+          volume: parseFloat(kline.v),
+        };
+
         if (kline.x) {
           candleCloses.push(lastBtcPrice);
           if (candleCloses.length > 50) candleCloses.shift();
+
+          serverCandles.push(currentCandleObj);
+          if (serverCandles.length > 50) serverCandles.shift();
         }
 
         const now = Date.now();
@@ -1663,34 +1697,70 @@ async function startServerPriceFeed() {
             ? candleCloses
             : [...candleCloses.slice(-(ZSCORE_STRATEGY.lookbackPeriod - 1)), lastBtcPrice];
 
+          const liveCandles = kline.x
+            ? serverCandles
+            : [...serverCandles.slice(-49), currentCandleObj];
+
           const { zScore, mean, stdDev } = calculateServerZScore(livePrices, ZSCORE_STRATEGY.lookbackPeriod);
           lastCalculatedZScore = zScore;
           lastCalculatedMean = mean;
           lastCalculatedStdDev = stdDev;
 
+          // حساب مؤشر ADX (14) وانفراج RSI
+          lastCalculatedAdx = calculateAdx(liveCandles, 14);
+          lastCalculatedDivergence = detectRsiDivergence(liveCandles, 14, ZSCORE_STRATEGY.lookbackPeriod);
+
           // إذا كان الروبوت متوقفاً، نوقف التداول تماماً ونحدث فقط شريط الانتظار
           if (!isServerBotRunning) {
-            currentWaitReason = `الروبوت متوقف مؤقتاً (PAUSED) - لن يتم فتح أي صفقات | Z-Score اللحظي (1m - 30c) = ${zScore > 0 ? '+' : ''}${zScore}`;
+            currentWaitReason = `الروبوت متوقف مؤقتاً (PAUSED) | Z-Score (1m - 30c) = ${zScore > 0 ? '+' : ''}${zScore} | ADX = ${lastCalculatedAdx.adx} (${lastCalculatedAdx.regime === 'RANGING' ? 'عرضي' : 'ترند'})`;
             lastEvaluatedSignal = zScore >= ZSCORE_STRATEGY.upperThreshold ? 'OVERBOUGHT' : (zScore <= ZSCORE_STRATEGY.lowerThreshold ? 'OVERSOLD' : 'NEUTRAL');
             return;
           }
 
-          // 1. إشارة ارتداد هابط (ذروة شراء متطرفة): Z-Score >= +2.00 -> شراء عقد NO (DOWN) للمراهنة على العودة إلى المتوسط
+          // 1. إشارة ارتداد هابط (ذروة شراء متطرفة): Z-Score >= +2.00 -> شراء عقد NO (DOWN)
           if (zScore >= ZSCORE_STRATEGY.upperThreshold) {
             lastEvaluatedSignal = 'OVERBOUGHT';
-            console.log(`🚨 [Server Bot]: إشارة ارتداد هابط (ذروة شراء Z >= +${ZSCORE_STRATEGY.upperThreshold}) على فريم 1m (نافذة ${ZSCORE_STRATEGY.lookbackPeriod} شمعة)! Z = +${zScore}. جاري شراء عقد DOWN (NO) بأمر FAK بسعر السوق...`);
-            await executeLimitlessTrade('NO', lastBtcPrice, zScore);
+            const isTrendHostile = lastCalculatedAdx.adx > 28;
+            const hasBearishDiv = lastCalculatedDivergence.detected && lastCalculatedDivergence.type === 'BEARISH';
+
+            // حماية فلتر الترند (ADX / RSI Divergence Guard):
+            if (isTrendHostile && !hasBearishDiv) {
+              currentWaitReason = `⚠️ ترند صاعد قوي (ADX = ${lastCalculatedAdx.adx} > 28) و Z = +${zScore} | بانتظار تأكيد دايفرجنس هابط (Bearish RSI Div) لتأكيد استنفاد الزخم وتفادي الانزلاق ضد الترند.`;
+              console.log(`🛡️ [ADX/Divergence Guard]: رصد Z = +${zScore} لكن ADX = ${lastCalculatedAdx.adx} (ترند صاعد حاد). تم تفعيل حماية الحساب حتى تشكل الدايفرجنس.`);
+            } else {
+              const confirmMsg = hasBearishDiv
+                ? `مع تأكيد انفراج هابط حاد (Bearish RSI Divergence 🔥)`
+                : `في بيئة تذبذب عرضي مثالية (ADX = ${lastCalculatedAdx.adx} ≤ 28 ✅)`;
+              console.log(`🚨 [Server Bot]: إشارة ارتداد هابط (Z >= +${ZSCORE_STRATEGY.upperThreshold}) ${confirmMsg}! Z = +${zScore}. جاري شراء عقد DOWN (NO) بأمر FAK بسعر السوق...`);
+              await executeLimitlessTrade('NO', lastBtcPrice, zScore);
+            }
           }
-          // 2. إشارة ارتداد صاعد (ذروة بيع متطرفة): Z-Score <= -2.00 -> شراء عقد YES (UP) للمراهنة على العودة إلى المتوسط
+          // 2. إشارة ارتداد صاعد (ذروة بيع متطرفة): Z-Score <= -2.00 -> شراء عقد YES (UP)
           else if (zScore <= ZSCORE_STRATEGY.lowerThreshold) {
             lastEvaluatedSignal = 'OVERSOLD';
-            console.log(`🚨 [Server Bot]: إشارة ارتداد صاعد (ذروة بيع Z <= ${ZSCORE_STRATEGY.lowerThreshold}) على فريم 1m (نافذة ${ZSCORE_STRATEGY.lookbackPeriod} شمعة)! Z = ${zScore}. جاري شراء عقد UP (YES) بأمر FAK بسعر السوق...`);
-            await executeLimitlessTrade('YES', lastBtcPrice, zScore);
+            const isTrendHostile = lastCalculatedAdx.adx > 28;
+            const hasBullishDiv = lastCalculatedDivergence.detected && lastCalculatedDivergence.type === 'BULLISH';
+
+            // حماية فلتر الترند (ADX / RSI Divergence Guard):
+            if (isTrendHostile && !hasBullishDiv) {
+              currentWaitReason = `⚠️ ترند هابط حاد (ADX = ${lastCalculatedAdx.adx} > 28) و Z = ${zScore} | بانتظار تأكيد دايفرجنس صاعد (Bullish RSI Div) لتأكيد استنفاد البائعين وتفادي السقوط الحر.`;
+              console.log(`🛡️ [ADX/Divergence Guard]: رصد Z = ${zScore} لكن ADX = ${lastCalculatedAdx.adx} (ترند هابط حاد). تم تفعيل حماية الحساب حتى تشكل الدايفرجنس.`);
+            } else {
+              const confirmMsg = hasBullishDiv
+                ? `مع تأكيد انفراج صاعد حاد (Bullish RSI Divergence 🔥)`
+                : `في بيئة تذبذب عرضي مثالية (ADX = ${lastCalculatedAdx.adx} ≤ 28 ✅)`;
+              console.log(`🚨 [Server Bot]: إشارة ارتداد صاعد (Z <= ${ZSCORE_STRATEGY.lowerThreshold}) ${confirmMsg}! Z = ${zScore}. جاري شراء عقد UP (YES) بأمر FAK بسعر السوق...`);
+              await executeLimitlessTrade('YES', lastBtcPrice, zScore);
+            }
           } else {
             lastEvaluatedSignal = 'NEUTRAL';
+            let divLabel = '';
+            if (lastCalculatedDivergence.detected) {
+              divLabel = lastCalculatedDivergence.type === 'BULLISH' ? ' | 🟢 دايفرجنس صاعد قيد التشكل' : ' | 🔴 دايفرجنس هابط قيد التشكل';
+            }
             currentWaitReason = lastExecutionError
               ? `⚠️ تنبيه من المحرك: ${lastExecutionError} | Z-Score (1m - 30c) = ${zScore > 0 ? '+' : ''}${zScore}`
-              : `سوق محايد: مؤشر Z-Score (1m - 30c) = ${zScore > 0 ? '+' : ''}${zScore} (المطلوب للانعكاس: > +${ZSCORE_STRATEGY.upperThreshold} لشراء NO أو < ${ZSCORE_STRATEGY.lowerThreshold} لشراء YES بأمر FAK) | متوسط 30 شمعة = $${mean.toLocaleString()}`;
+              : `سوق محايد: Z-Score = ${zScore > 0 ? '+' : ''}${zScore} (المطلوب: > +${ZSCORE_STRATEGY.upperThreshold} لشراء NO أو < ${ZSCORE_STRATEGY.lowerThreshold} لشراء YES) | ADX = ${lastCalculatedAdx.adx} (${lastCalculatedAdx.regime === 'RANGING' ? 'تذبذب عرضي ملائم ✅' : 'ترند اتجاهي ⚡'})${divLabel}`;
           }
         }
       } catch (feedErr: any) {
@@ -1781,9 +1851,10 @@ app.get('/api/bot/status', (req, res) => {
     tradeSizeUsdc: ZSCORE_STRATEGY.tradeSizeUsdc,
     maxEntryPrice: ZSCORE_STRATEGY.maxEntryPrice,
     upperThreshold: ZSCORE_STRATEGY.upperThreshold,
-    lowerThreshold: ZSCORE_STRATEGY.lowerThreshold,
     waitReason: currentWaitReason,
     lastExecutionError,
+    adx: lastCalculatedAdx,
+    rsiDivergence: lastCalculatedDivergence,
     isCurrentMarketTraded: cachedActive15mMarket ? isContractAlreadyTraded(cachedActive15mMarket.slug, Number(cachedActive15mMarket.expirationTimestamp)) : false,
     currentMarketTrade: cachedActive15mMarket ? findTradeForMarket(cachedActive15mMarket.slug, Number(cachedActive15mMarket.expirationTimestamp)) : null,
     tradedContractsCount: tradedContractsMap.size,

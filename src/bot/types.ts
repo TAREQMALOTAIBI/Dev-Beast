@@ -284,6 +284,18 @@ export interface ZScoreConfig {
   lowerThreshold: number; // إشارة هبوط (زخم قوي) إذا Z-Score <= -2.00 -> شراء عقد NO
 }
 
+export interface AdxConfig {
+  period: number;         // الفترة الزمنية: 14 شمعة دقيقة (1m)
+  maxThreshold: number;   // عتبة السوق العرضي (الافتراضي 28): أقل من 28 تذبذب ملائم للارتداد، أعلى من 28 ترند قوي
+  enabled: boolean;
+}
+
+export interface RsiDivergenceConfig {
+  lookbackCandles: number;           // نافذة فحص الدايفرجنس (آخر 15-30 شمعة)
+  requireStrictConfirmation: boolean; // اشتراط الدايفرجنس كفلتر أمان إلزامي إذا كان السوق في ترند قوي
+  enabled: boolean;
+}
+
 export interface BotConfig {
   symbol: string;
   candleTimeframe: '1m' | '5m' | '15m';
@@ -292,6 +304,8 @@ export interface BotConfig {
   zScore: ZScoreConfig;
   bollingerBands: BollingerBandsConfig;
   rsi: RsiConfig;
+  adx?: AdxConfig;
+  rsiDivergence?: RsiDivergenceConfig;
   riskPercent?: number; // نسبة المخاطرة للصفقة
   riskModel?: 'FULL_KELLY' | 'HALF_KELLY' | 'QUARTER_KELLY' | 'FIXED'; // استراتيجية إدارة المخاطر (Full Kelly)
   kellyWinRate?: number; // نسبة الفوز المقدرة لعتبة Z-Score (افتراضياً 0.68)
@@ -324,6 +338,23 @@ export interface BollingerBandsValues {
   pb?: number;
 }
 
+export interface RsiDivergenceInfo {
+  detected: boolean;
+  type: 'BULLISH' | 'BEARISH' | 'NONE';
+  descriptionArabic: string;
+  priceDeltaPercent?: number;
+  rsiDelta?: number;
+}
+
+export interface AdxInfo {
+  adx: number;
+  pdi: number;
+  mdi: number;
+  regime: 'RANGING' | 'TRENDING';
+  isFavorableForMeanReversion: boolean;
+  descriptionArabic: string;
+}
+
 export type SignalType = 'OVERBOUGHT' | 'OVERSOLD' | 'NEUTRAL';
 export type ContractTokenType = 'YES' | 'NO';
 
@@ -335,6 +366,8 @@ export interface SignalEvaluation {
   stdDev: number;
   rsi: number;
   bollingerBands: BollingerBandsValues;
+  adx?: AdxInfo;
+  rsiDivergence?: RsiDivergenceInfo;
   isOverbought: boolean;
   isOversold: boolean;
   explanationArabic: string;

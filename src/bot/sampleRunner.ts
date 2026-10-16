@@ -14,13 +14,13 @@ import type { BotConfig, Candle } from './types';
  */
 export const defaultBotConfig: BotConfig = {
   symbol: 'BTC/USD',
-  candleTimeframe: '5m',
+  candleTimeframe: '1m',
   marketDurationMinutes: 15,
-  maxEntryPrice: 0.99, // بدون سقف سعر (تنفيذ مباشر بسعر السوق المتاح)
+  maxEntryPrice: 0.99, // بدون سقف سعر (تنفيذ مباشر بسعر السوق المتاح عبر FAK)
   zScore: {
-    period: 12,           // Lookback Window: آخر 12 شمعة على فريم الـ 5 دقائق (5m = 60 دقيقة)
-    upperThreshold: 2.00,  // إشارة هبوط عند Z-Score >= +2.00
-    lowerThreshold: -2.00, // إشارة صعود عند Z-Score <= -2.00
+    period: 30,           // Lookback Window: آخر 30 شمعة على فريم الدقيقة (1m = 30 دقيقة)
+    upperThreshold: 2.00,  // عتبة الانعكاس الهابط (شراء NO): +2.00
+    lowerThreshold: -2.00, // عتبة الانعكاس الصاعد (شراء YES): -2.00
   },
   bollingerBands: {
     period: 20,
@@ -28,15 +28,25 @@ export const defaultBotConfig: BotConfig = {
   },
   rsi: {
     period: 14,
-    overboughtThreshold: 85, // شرط ذروة الشراء الحرج
-    oversoldThreshold: 15,  // شرط ذروة البيع الحرج
+    overboughtThreshold: 70, // تشبع شرائي
+    oversoldThreshold: 30,  // تشبع بيعي
+  },
+  adx: {
+    period: 14,
+    maxThreshold: 28, // عتبة السوق العرضي (أقل من 28 تذبذب عرضي، أعلى من 28 ترند قوي)
+    enabled: true,
+  },
+  rsiDivergence: {
+    lookbackCandles: 30,
+    requireStrictConfirmation: false,
+    enabled: true,
   },
   riskPercent: 1.0, // نسبة المخاطرة للصفقة
   riskModel: 'FULL_KELLY', // إدارة المخاطر: Full Kelly (100% f*)
   kellyWinRate: 0.68, // نسبة النجاح المقدرة لإشارة Z-Score ±2.00
   kellyMultiplier: 1.0, // Full Kelly = 100%
   maxBankrollRiskPercent: 0.01, // سقف أمان الصفقة الأقصى: 1% من المحفظة
-  tradeSizeUsdc: 8.0, // ميزانية الصفقة بالدولار (احتياطياً)
+  tradeSizeUsdc: 0.50, // الحد الأدنى المرجعي للميزانية بالدولار
   maxSlippagePercent: 1.0,
   apiBaseUrl: process.env.LIMITLESS_API_URL || 'https://api.limitless.exchange',
   lmtsTokenId: process.env.LMTS_TOKEN_ID,
