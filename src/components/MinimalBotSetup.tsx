@@ -228,19 +228,19 @@ async function findAndExecuteBestBtcTrade(targetSide: 'YES' | 'NO', zScore: numb
     const venueExchange = marketDetails?.venue?.exchange || btc15mMarket.venue?.exchange || '0x05c748E2f4DcDe0ec9Fa8DDc40DE6b867f923fa5';
 
     if (orderClient && tokenId) {
-      console.log(\`🚀 إرسال أمر FAK عبر OrderClient إلى سوق 15m...\`);
+      console.log(\`🚀 إرسال أمر GTC بسعر 0.50$ عبر OrderClient إلى سوق 15m...\`);
       const res = await withRetry(
         () => orderClient!.createOrder({
           marketSlug: btc15mMarket.slug,
           tokenId,
           side: Side.BUY,
-          price: bestAsk!,
+          price: 0.50,
           size: contracts,
-          orderType: OrderType.FAK,
+          orderType: OrderType.GTC,
         }),
         { statusCodes: [429, 500, 502, 503, 504], maxRetries: 3, delays: [1, 2, 4] }
       );
-      console.log('✅ تم تنفيذ أمر FAK بنجاح!', res.order?.id || JSON.stringify(res));
+      console.log('✅ تم وضع أمر GTC بنجاح!', res.order?.id || JSON.stringify(res));
     } else {
       console.log(\`✍️ توقيع مشفر EIP-712 بالمحفظة (\${wallet.address}) على عقد Venue (\${venueExchange})...\`);
       const domain = { name: 'Limitless OrderBook', version: '1', chainId: 8453, verifyingContract: venueExchange };

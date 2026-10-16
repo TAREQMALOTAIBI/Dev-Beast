@@ -542,7 +542,63 @@ export class LimitlessExchangeSDK {
     verifyingContract?: string;
     expirationSeconds?: number;
   }): EIP712OrderPayload {
-    return this.buildFakOrderPayload(params);
+    return this.buildGtcOrderPayload(params);
+  }
+
+  public buildGtcOrderPayload(params: {
+    tokenId: string;
+    targetPrice?: number;
+    contractsSize: number;
+    side: Side;
+    makerAddress: string;
+    verifyingContract?: string;
+    expirationSeconds?: number;
+  }): EIP712OrderPayload {
+    const { tokenId, contractsSize, makerAddress } = params;
+    const targetPrice = params.targetPrice !== undefined ? params.targetPrice : 0.50; // سعر 50 سنت بالضبط
+
+    const takerAmountUsdc = (targetPrice * contractsSize).toFixed(6);
+    const salt = (Math.floor(Math.random() * 1000000000) + 1).toString();
+    const expiration = Math.floor(Date.now() / 1000) + (params.expirationSeconds || 86400);
+
+    const domain = {
+      name: 'LimitlessExchange',
+      version: '1',
+      chainId: this.chainId,
+      verifyingContract: params.verifyingContract || this.verifyingContract,
+    };
+
+    const types = {
+      Order: [
+        { name: 'salt', type: 'uint256' },
+        { name: 'maker', type: 'address' },
+        { name: 'taker', type: 'address' },
+        { name: 'tokenId', type: 'uint256' },
+        { name: 'makerAmount', type: 'uint256' },
+        { name: 'takerAmount', type: 'uint256' },
+        { name: 'price', type: 'uint256' },
+        { name: 'side', type: 'uint8' },
+        { name: 'orderType', type: 'uint8' },
+        { name: 'expiration', type: 'uint256' },
+        { name: 'nonce', type: 'uint256' },
+      ],
+    };
+
+    const message: LimitlessOrderMessage = {
+      salt,
+      maker: makerAddress || this.wallet?.address || '0x0000000000000000000000000000000000000000',
+      taker: '0x0000000000000000000000000000000000000000',
+      tokenId: tokenId.replace(/[^0-9]/g, '').slice(0, 10) || '8453001',
+      makerAmount: contractsSize.toString(),
+      takerAmount: (parseFloat(takerAmountUsdc) * 1e6).toString(),
+      price: (targetPrice * 1e6).toString(),
+      side: params.side === Side.BUY ? 0 : 1,
+      orderType: 0, // OrderType.GTC
+      expiration: expiration.toString(),
+      nonce: '1',
+    };
+
+    return { domain, types, primaryType: 'Order', message };
   }
 
   public buildFakOrderPayload(params: {

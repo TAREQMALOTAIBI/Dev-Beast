@@ -138,8 +138,8 @@ export function checkMeanReversionSignal(
       bollingerBands,
       isOverbought: true,
       isOversold: false,
-      explanationArabic: `🚨 [إشارة صعود Z-Score - ركوب الزخم]: القيمة الحالية = +${zScore} (تجاوزت سقف +${upperThreshold}). زخم صعودي قوي. الهدف: شراء عقد UP (YES) عبر أمر FAK فوراً بسعر السوق.`,
-      explanationEnglish: `Bullish Z-Score Trigger! Z = +${zScore} (>= +${upperThreshold}). Strong upward momentum. Target: YES (UP) contract via immediate market FAK order.`,
+      explanationArabic: `🚨 [إشارة صعود Z-Score - ركوب الزخم]: القيمة الحالية = +${zScore} (تجاوزت سقف +${upperThreshold}). زخم صعودي قوي. الهدف: إرسال أمر GTC لشراء عقد UP (YES) بسعر 0.50$ (50 سنت بالضبط).`,
+      explanationEnglish: `Bullish Z-Score Trigger! Z = +${zScore} (>= +${upperThreshold}). Strong upward momentum. Target: YES (UP) GTC order placed at exactly $0.50.`,
       evaluatedAt: Date.now(),
     };
   }
@@ -155,8 +155,8 @@ export function checkMeanReversionSignal(
       bollingerBands,
       isOverbought: false,
       isOversold: true,
-      explanationArabic: `🚨 [إشارة هبوط Z-Score - ركوب الزخم]: القيمة الحالية = ${zScore} (كسرت قاع ${lowerThreshold}). زخم هبوطي قوي. الهدف: شراء عقد DOWN (NO) عبر أمر FAK فوراً بسعر السوق.`,
-      explanationEnglish: `Bearish Z-Score Trigger! Z = ${zScore} (<= ${lowerThreshold}). Strong downward momentum. Target: NO (DOWN) contract via immediate market FAK order.`,
+      explanationArabic: `🚨 [إشارة هبوط Z-Score - ركوب الزخم]: القيمة الحالية = ${zScore} (كسرت قاع ${lowerThreshold}). زخم هبوطي قوي. الهدف: إرسال أمر GTC لشراء عقد DOWN (NO) بسعر 0.50$ (50 سنت بالضبط).`,
+      explanationEnglish: `Bearish Z-Score Trigger! Z = ${zScore} (<= ${lowerThreshold}). Strong downward momentum. Target: NO (DOWN) GTC order placed at exactly $0.50.`,
       evaluatedAt: Date.now(),
     };
   }

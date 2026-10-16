@@ -362,7 +362,7 @@ export interface LimitlessOrderMessage {
   takerAmount: string;
   price: string;
   side: 0 | 1;
-  orderType: 1;
+  orderType: 0 | 1 | number;
   expiration: string;
   nonce: string;
 }

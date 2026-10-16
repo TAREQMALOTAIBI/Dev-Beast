@@ -815,7 +815,7 @@ let lastCalculatedZScore: number = 0.0;
 let lastCalculatedMean: number = 94500;
 let lastCalculatedStdDev: number = 50;
 let currentWaitReason: string = isServerBotRunning
-  ? 'في انتظار إشارة Z-Score مؤهلة لركوب الزخم (> +2.00 لشراء UP أو < -2.00 لشراء DOWN على فريم 1m لآخر 12 شمعة) للتنفيذ المباشر بسعر السوق على عقد BTC 15m'
+  ? 'في انتظار إشارة Z-Score مؤهلة لركوب الزخم (> +2.00 لشراء UP أو < -2.00 لشراء DOWN) بأمر GTC عند سعر 0.50$ بالضبط على عقد BTC 15m'
   : 'الروبوت متوقف مؤقتاً (PAUSED) - اضغط تشغيل لتفعيل التداول الآلي';
 let lastExecutionError: string | null = null;
 
@@ -1343,17 +1343,11 @@ async function executeLimitlessTrade(
       return;
     }
 
-    // محاذاة السعر مع دقة المنصة (Tick Alignment: 0.001)
-    const alignedPrice = Math.min(0.999, Math.max(0.001, Number((Math.round(rawPrice / 0.001) * 0.001).toFixed(3))));
+    // الدخول عند سعر 50 سنت ($0.50) بالضبط بأمر GTC عند تحقق الشرط
+    const targetOrderPrice = 0.50;
+    const alignedPrice = targetOrderPrice;
 
-    // التحقق من سقف سعر الدخول (إن وُجد، افتراضياً بدون سقف لتنفيذ مباشر بسعر السوق)
-    if (ZSCORE_STRATEGY.maxEntryPrice && alignedPrice > ZSCORE_STRATEGY.maxEntryPrice) {
-      currentWaitReason = `سعر عقد ${targetToken} ($${alignedPrice}) في سوق 15m أعلى من سقف الدخول المحدد ($${ZSCORE_STRATEGY.maxEntryPrice}). بانتظار فرصة مناسبة.`;
-      console.log(`⛔ [Server Bot] ${currentWaitReason}`);
-      return;
-    }
-
-    console.log(`🎯 [Server Bot] تم اقتناص فرصة في سوق BTC 15m: ${activeMarket.title} (${activeMarket.slug}) بسعر $${alignedPrice}`);
+    console.log(`🎯 [Server Bot] تحقق شرط الزخم Z-Score (${currentZScore > 0 ? '+' : ''}${currentZScore})! جاري وضع أمر GTC لعقد ${targetToken} بسعر $${targetOrderPrice.toFixed(2)} (50 سنت بالضبط) في سوق BTC 15m (${activeMarket.slug})`);
 
     // 1. جلب بيانات السوق والـ Venue وعناوين العقود عبر MarketFetcher
     const marketDetails = await serverMarketFetcher.getMarket(activeMarket.slug).catch(() => null);
@@ -1441,7 +1435,7 @@ async function executeLimitlessTrade(
     let orderTxHash = '';
 
     try {
-      console.log('📡 [Server Bot] جاري إرسال الأمر عبر OrderClient من SDK الرسمي...');
+      console.log(`📡 [Server Bot] جاري إرسال أمر GTC بسعر $${targetOrderPrice.toFixed(2)} عبر OrderClient من SDK الرسمي...`);
       const orderClient = limitlessClient.newOrderClient(serverWallet);
       const res = await withRetry(
         () =>
@@ -1449,15 +1443,15 @@ async function executeLimitlessTrade(
             marketSlug: activeMarket.slug,
             tokenId: selectedTokenId,
             side: Side.BUY,
-            price: alignedPrice,
+            price: targetOrderPrice,
             size: contracts,
-            orderType: OrderType.FAK,
+            orderType: OrderType.GTC,
           }),
         { statusCodes: [429, 500, 502, 503, 504], maxRetries: 2, delays: [1, 2] }
       );
 
-      console.log(`🎉 [Server Bot] تم تنفيذ الأمر بنجاح عبر SDK الرسمي! معرف الأمر: ${res.order?.id || 'OK'}`);
-      currentWaitReason = `✅ تم تنفيذ أمر شراء ${contracts} عقد ${targetToken} بنجاح على منصة Limitless! (معرف: ${res.order?.id || 'OK'})`;
+      console.log(`🎉 [Server Bot] تم وضع أمر GTC بنجاح عبر SDK الرسمي! معرف الأمر: ${res.order?.id || 'OK'}`);
+      currentWaitReason = `✅ تم إرسال أمر GTC لشراء ${contracts} عقد ${targetToken} بسعر $${targetOrderPrice.toFixed(2)} بنجاح على منصة Limitless! (معرف: ${res.order?.id || 'OK'})`;
       orderTxHash = res.order?.id || `0x${Date.now().toString(16)}`;
       orderSuccess = true;
       lastExecutionError = null;
@@ -1495,10 +1489,10 @@ async function executeLimitlessTrade(
           maker: serverWallet.address,
           tokenId: BigInt(selectedTokenId),
           amount: ethers.parseUnits(contracts.toFixed(2), 6),
-          price: ethers.parseUnits(String(alignedPrice), 6),
+          price: ethers.parseUnits('0.50', 6), // 0.50$ بالضبط
           side: 0,
           nonce: Date.now(),
-          deadline: Math.floor(Date.now() / 1000) + 120,
+          deadline: Math.floor(Date.now() / 1000) + 86400,
         };
 
         const signature = await serverWallet.signTypedData(domain, types, orderValue);
@@ -1510,18 +1504,18 @@ async function executeLimitlessTrade(
             price: orderValue.price.toString(),
           },
           signature,
-          orderType: 'FAK',
+          orderType: 'GTC',
           marketSlug: activeMarket.slug,
         };
 
         const directRes: any = await limitlessClient.http.post('/orders', orderPayload);
         if (directRes && (directRes.order || directRes.id)) {
-          console.log(`🎉 [Server Bot] تم تنفيذ الأمر المباشر بنجاح!`, directRes);
+          console.log(`🎉 [Server Bot] تم وضع أمر GTC المباشر بنجاح!`, directRes);
           orderTxHash = directRes.order?.id || directRes.id || signature.substring(0, 30);
           orderSuccess = true;
           lastExecutionError = null;
           lastExecutedTradeTime = Date.now();
-          currentWaitReason = `✅ تم تنفيذ أمر شراء ${contracts} عقد ${targetToken} بنجاح على منصة Limitless!`;
+          currentWaitReason = `✅ تم إرسال أمر GTC لشراء ${contracts} عقد ${targetToken} بسعر $0.50 بنجاح على منصة Limitless!`;
         }
       } catch (directErr: any) {
         console.warn('⚠️ [Server Bot] خطأ في الإرسال المباشر:', directErr.message);
@@ -1754,7 +1748,7 @@ app.get('/api/binance/klines-full', async (req, res) => {
 app.get('/api/bot/status', (req, res) => {
   res.json({
     running: isServerBotRunning,
-    strategy: 'Z-Score Momentum (Lookback: 12 candles on 5m • Z>=+2.00 -> UP/YES, Z<=-2.00 -> DOWN/NO • ركوب الزخم وتنفيذ فوري بسعر السوق)',
+    strategy: 'Z-Score Momentum (Lookback: 12 candles on 5m • Z>=+2.00 -> UP/YES, Z<=-2.00 -> DOWN/NO • أمر GTC عند سعر 0.50$ بالضبط)',
     targetMarketFocus: 'BTC 15 Min Only (عقود بيتكوين 15 دقيقة حصراً • تنفيذ مباشر بسعر السوق)',
     active15mMarket: cachedActive15mMarket
       ? {
@@ -1899,7 +1893,7 @@ app.post('/api/bot/toggle', (req, res) => {
     lastExecutionError = null;
   }
   currentWaitReason = isServerBotRunning
-    ? 'في انتظار إشارة Z-Score مؤهلة لركوب الزخم (> +2.00 لشراء UP أو < -2.00 لشراء DOWN) على عقد BTC 15m للتنفيذ المباشر بسعر السوق'
+    ? 'في انتظار إشارة Z-Score مؤهلة لركوب الزخم (> +2.00 لشراء UP أو < -2.00 لشراء DOWN) بأمر GTC عند سعر 0.50$ بالضبط على عقد BTC 15m'
     : 'الروبوت متوقف مؤقتاً (PAUSED) - اضغط تشغيل لتفعيل التداول الآلي';
   console.log(`🎛️ [Server Bot] تم تغيير حالة تشغيل الروبوت على السيرفر إلى: ${isServerBotRunning ? 'تشغيل (RUNNING)' : 'إيقاف (STOPPED)'}`);
   res.json({ running: isServerBotRunning, waitReason: currentWaitReason, lastExecutionError });

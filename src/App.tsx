@@ -477,15 +477,15 @@ export default function App() {
     if (targetToken && (currentSig.signal === 'OVERBOUGHT' || currentSig.signal === 'OVERSOLD')) {
       const now = Date.now();
       const tokenPrices = active15mInfo?.prices;
-      const orderPrice = targetToken === 'YES' ? (tokenPrices?.bestAskYes || 0.08) : (tokenPrices?.bestAskNo || 0.92);
+      const orderPrice = 0.50; // الدخول عند سعر 50 سنت بالضبط بأمر GTC
       const targetTokenId = (targetToken === 'YES' ? (active15mInfo as any)?.tokens?.yes : (active15mInfo as any)?.tokens?.no) || '8453001';
 
       // 1. توليد حمولة أمر EIP-712 فورياً لعرضها في فاحص EIP-712 المباشر
       let builtPayload: EIP712OrderPayload | undefined = undefined;
       try {
-        builtPayload = sdk.buildFakOrderPayload({
+        builtPayload = sdk.buildGtcOrderPayload({
           tokenId: targetTokenId,
-          targetPrice: orderPrice,
+          targetPrice: 0.50,
           contractsSize: 1,
           side: 0 /* Side.BUY */,
           makerAddress: connectedWallet || '0x807A7Ae675A0e16414875a2a318BEB6B55cDbB14',
@@ -879,7 +879,7 @@ export default function App() {
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                خطة التداول بركوب الزخم (Momentum) بالـ Z-Score (Lookback: 12 شمعة على فريم 1m • العتبة: &plusmn;2.00: Z&ge;+2 لشراء YES و Z&le;-2 لشراء NO • سقف الدخول: مفتوح بسعر السوق • إدارة المخاطر: Full Kelly 100%)
+                خطة التداول بركوب الزخم (Momentum) بأمر GTC عند 0.50$ (Lookback: 12 شمعة على فريم 1m • العتبة: &plusmn;2.00: Z&ge;+2 لشراء YES و Z&le;-2 لشراء NO • سعر الدخول: 0.50$ (50 سنت بالضبط) • إدارة المخاطر: Full Kelly 100%)
               </p>
             </div>
           </div>
@@ -1033,7 +1033,7 @@ export default function App() {
                   </div>
                   <p className="text-xs text-slate-300 mt-0.5">
                     {isBotRunning
-                      ? 'الروبوت يراقب بث أسعار بينانس ودفتر أوامر Limitless CLOB ويقتنص فرص ركوب الزخم فور تحقق الشرط (Z ≥ +2.00 لشراء YES أو Z ≤ -2.00 لشراء NO بتنفيذ مباشر بسعر السوق).'
+                      ? 'الروبوت يراقب بث أسعار بينانس ودفتر أوامر Limitless ويضع أمر GTC فورياً عند سعر 0.50$ (50 سنت بالضبط) فور تحقق شرط الزخم (Z ≥ +2.00 لشراء YES أو Z ≤ -2.00 لشراء NO).'
                       : 'تم تعليق التداول التلقائي وإرسال الأوامر. يمكنك استئناف التشغيل في أي وقت.'}
                   </p>
                 </div>
@@ -1434,7 +1434,7 @@ export default function App() {
                 <div className="mt-3 space-y-2 max-h-72 overflow-y-auto pl-1">
                   {executionLogs.length === 0 ? (
                     <div className="text-center py-10 text-slate-500 text-xs">
-                      الروبوت في وضع الاستعداد الحقيقي... بانتظار إشارة Z-Score مؤهلة لركوب الزخم (&ge; +2.00 لشراء YES أو &le; -2.00 لشراء NO) على عقد BTC 15m بسعر السوق المباشر.
+                      الروبوت في وضع الاستعداد الحقيقي... بانتظار إشارة Z-Score مؤهلة لركوب الزخم (&ge; +2.00 لشراء YES أو &le; -2.00 لشراء NO) لتنفيذ أمر GTC عند سعر 0.50$ بالضبط على عقد BTC 15m.
                     </div>
                   ) : (
                     executionLogs.map((log, index) => (

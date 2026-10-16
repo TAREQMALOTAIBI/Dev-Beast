@@ -103,7 +103,7 @@ console.log(`⏱️ نافذة الحساب (Lookback Window): آخر ${ZSCORE_S
 console.log(`📈 إشارة صعود (زخم قوي): Z-Score >= +${ZSCORE_STRATEGY.upperThreshold} -> شراء عقد YES (UP) لركوب الصعود`);
 console.log(`📉 إشارة هبوط (زخم قوي): Z-Score <= ${ZSCORE_STRATEGY.lowerThreshold} -> شراء عقد NO (DOWN) لركوب الهبوط`);
 console.log(`🧠 إدارة المخاطر: Full Kelly (100% f*) | نسبة الفوز المقدرة p: ${(ZSCORE_STRATEGY.kellyWinRate * 100).toFixed(0)}% | الحجم ديناميكي من رصيد المحفظة`);
-console.log(`⚡ التنفيذ: أمر FAK فوري | سقف الدخول: مفتوح (تنفيذ مباشر بسعر السوق)`);
+console.log(`⚡ التنفيذ: أمر GTC (Good-til-cancelled) | سعر الدخول: 0.50$ (50 سنت) بالضبط`);
 console.log('----------------------------------------------------');
 
 // أسعار إغلاق الشموع الحية
@@ -522,27 +522,27 @@ async function checkAndExecuteLimitlessOrder(targetToken: 'YES' | 'NO', btcPrice
     console.log(`   - السوق: ${activeMarket.title} (${activeMarket.slug})`);
     console.log(`   - نوع العقد: ${targetToken} (${targetToken === 'NO' ? 'مراهنة على الهبوط من القمة' : 'مراهنة على الصعود والارتداد'})`);
     console.log(`   - قيمة Z-Score: ${currentZScore}`);
-    console.log(`   - السعر: $${bestAsk} (أقل من الحد $${ZSCORE_STRATEGY.maxEntryPrice})`);
+    console.log(`   - السعر: $0.50 (50 سنت بالضبط)`);
     console.log(`   - الكمية: ${contractsCount} عقد`);
-    console.log(`   - التكلفة الإجمالية: $${totalCost.toFixed(2)} USDC`);
-    console.log(`   - العائد المتوقع: $${potentialPayout.toFixed(2)} USDC (+${((potentialPayout - totalCost) / totalCost * 100).toFixed(0)}% / مضاعف ${multiplier}x)`);
-    console.log(`⚡ [نوع التنفيذ]: أمر FAK فوري (Fill-and-Kill) لخطف السيولة`);
+    console.log(`   - التكلفة الإجمالية: $${(contractsCount * 0.50).toFixed(2)} USDC`);
+    console.log(`   - العائد المتوقع عند الفوز: $${(contractsCount * 1.00).toFixed(2)} USDC (+100% / مضاعف 2.0x)`);
+    console.log(`⚡ [نوع التنفيذ]: أمر GTC (Good-til-cancelled) محدد عند 0.50$ بالضبط`);
 
     // تنفيذ الأمر عبر OrderClient إذا كان مفعل بـ HMAC أو التوقيع المباشر EIP-712
     if (orderClient && selectedTokenId) {
-      console.log(`📤 تنفيذ الأمر عبر OrderClient الرسمي بـ Limitless SDK...`);
+      console.log(`📤 تنفيذ الأمر عبر OrderClient الرسمي بـ Limitless SDK بأمر GTC بسعر 0.50$...`);
       const result = await orderClient.createOrder({
         marketSlug: activeMarket.slug,
         tokenId: selectedTokenId,
         side: Side.BUY,
-        price: bestAsk,
+        price: 0.50,
         size: contractsCount,
-        orderType: OrderType.FAK,
+        orderType: OrderType.GTC,
       });
-      console.log(`✅ تم تنفيذ الأمر بنجاح عبر SDK! معرف الأمر: ${result.order?.id || 'OK'}`);
+      console.log(`✅ تم وضع أمر GTC بنجاح عبر SDK! معرف الأمر: ${result.order?.id || 'OK'}`);
     } else {
       // إنشاء وتوقيع أمر EIP-712 بالمحفظة الحقيقية مباشرة مع استخدام عقد التسوية الحقيقي المستخرج من Venue
-      console.log(`✍️ جاري التوقيع المشفر لأمر FAK بالمحفظة (${wallet.address}) على عقد Venue (${venueExchange})...`);
+      console.log(`✍️ جاري التوقيع المشفر لأمر GTC بسعر 0.50$ بالمحفظة (${wallet.address}) على عقد Venue (${venueExchange})...`);
 
       const domain = {
         name: 'Limitless OrderBook',
@@ -569,16 +569,16 @@ async function checkAndExecuteLimitlessOrder(targetToken: 'YES' | 'NO', btcPrice
         maker: wallet.address,
         tokenId: numericTokenId,
         amount: ethers.parseUnits(contractsCount.toFixed(2), 6),
-        price: ethers.parseUnits(String(bestAsk), 6),
+        price: ethers.parseUnits('0.50', 6), // 0.50$ بالضبط
         side: 0, // BUY
         nonce: Date.now(),
-        deadline: Math.floor(Date.now() / 1000) + 120, // صالح لمدة دقيقتين
+        deadline: Math.floor(Date.now() / 1000) + 86400, // صالح لمدة 24 ساعة (GTC)
       };
 
       const signature = await wallet.signTypedData(domain, types, orderValue);
       console.log(`🔐 تم إنشاء توقيع EIP-712 بنجاح: ${signature.substring(0, 20)}...`);
 
-      console.log(`📤 إرسال الأمر الموثق إلى محرك مطابقة Limitless...`);
+      console.log(`📤 إرسال أمر GTC إلى محرك مطابقة Limitless...`);
       const orderPayload = {
         order: {
           ...orderValue,
@@ -587,7 +587,7 @@ async function checkAndExecuteLimitlessOrder(targetToken: 'YES' | 'NO', btcPrice
           price: orderValue.price.toString(),
         },
         signature,
-        orderType: 'FAK',
+        orderType: 'GTC',
       };
 
       const submitRes = await fetch(`${LIMITLESS_API_URL}/orders`, {
