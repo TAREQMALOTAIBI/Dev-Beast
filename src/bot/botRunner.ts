@@ -85,8 +85,8 @@ async function ensureVenueApproval(venueExchange: string) {
 const ZSCORE_STRATEGY = {
   marketSlug: 'btc-price-15m-now',
   lookbackPeriod: 12,         // نافذة الحساب: آخر 12 شمعة على فريم الدقيقة (1m = 12 دقيقة)
-  upperThreshold: Number(process.env.Z_SCORE_THRESHOLD) || 2.00,        // إشارة انعكاس هابط عند القمة إذا أصبح Z-Score >= +2.00 -> شراء عقد NO
-  lowerThreshold: -(Number(process.env.Z_SCORE_THRESHOLD) || 2.00),       // إشارة انعكاس صاعد عند القاع إذا أصبح Z-Score <= -2.00 -> شراء عقد YES
+  upperThreshold: Number(process.env.Z_SCORE_THRESHOLD) || 2.00,        // إشارة صعود (ركوب الزخم الصاعد) عند Z-Score >= +2.00 -> شراء عقد YES
+  lowerThreshold: -(Number(process.env.Z_SCORE_THRESHOLD) || 2.00),       // إشارة هبوط (ركوب الزخم الهابط) عند Z-Score <= -2.00 -> شراء عقد NO
   maxEntryPrice: process.env.MAX_ENTRY_PRICE ? Number(process.env.MAX_ENTRY_PRICE) : null, // إزالة سقف السعر: شراء مباشر بسعر السوق
   riskPercent: 1.0,           // نسبة المخاطرة للصفقة
   riskModel: process.env.RISK_MODEL || 'FULL_KELLY', // استراتيجية إدارة المخاطر: Full Kelly (100% f*)
@@ -98,10 +98,10 @@ const ZSCORE_STRATEGY = {
   tradeSizeUsdc: Number(process.env.TRADE_SIZE_USDC) || 8.0,  // ميزانية احتياطية بالدولار USDC
 };
 
-console.log(`📊 الاستراتيجية الحالية: الانعكاس إلى المتوسط (Mean Reversion) بالـ Z-Score (عتبة ±2.00) مع إدارة المخاطر Full Kelly على عقود BTC 15m`);
+console.log(`📊 الاستراتيجية الحالية: ركوب الزخم (Momentum) بالـ Z-Score (عتبة ±2.00) مع إدارة المخاطر Full Kelly على عقود BTC 15m`);
 console.log(`⏱️ نافذة الحساب (Lookback Window): آخر ${ZSCORE_STRATEGY.lookbackPeriod} شموع على فريم الدقيقة (1m)`);
-console.log(`📉 إشارة قمة (تشبع شرائي): Z-Score >= +${ZSCORE_STRATEGY.upperThreshold} -> شراء عقد NO (DOWN) للمراهنة على العودة للمتوسط`);
-console.log(`📈 إشارة قاع (تشبع بيعي): Z-Score <= ${ZSCORE_STRATEGY.lowerThreshold} -> شراء عقد YES (UP) للمراهنة على الارتداد للمتوسط`);
+console.log(`📈 إشارة صعود (زخم قوي): Z-Score >= +${ZSCORE_STRATEGY.upperThreshold} -> شراء عقد YES (UP) لركوب الصعود`);
+console.log(`📉 إشارة هبوط (زخم قوي): Z-Score <= ${ZSCORE_STRATEGY.lowerThreshold} -> شراء عقد NO (DOWN) لركوب الهبوط`);
 console.log(`🧠 إدارة المخاطر: Full Kelly (100% f*) | نسبة الفوز المقدرة p: ${(ZSCORE_STRATEGY.kellyWinRate * 100).toFixed(0)}% | الحجم ديناميكي من رصيد المحفظة`);
 console.log(`⚡ التنفيذ: أمر FAK فوري | سقف الدخول: مفتوح (تنفيذ مباشر بسعر السوق)`);
 console.log('----------------------------------------------------');
@@ -320,17 +320,17 @@ async function evaluateTradingSignal(lastPrice: number, isClosed: boolean = true
 
   console.log(`🔍 [فحص Z-Score]: السعر=$${lastPrice.toLocaleString()} | المتوسط(5m - 12 شمعة)=$${mean.toLocaleString()} | الانحراف=$${stdDev} | Z-Score=${zScore > 0 ? '+' : ''}${zScore}`);
 
-  // 1. إشارة قمة (تشبع شرائي مفرط): إذا أصبح Z-Score >= +2.00 -> شراء عقد NO (DOWN) للانعكاس إلى المتوسط
+  // 1. إشارة صعود (زخم قوي): إذا أصبح Z-Score >= +2.00 -> شراء عقد YES (UP) لركوب الصعود
   if (zScore >= ZSCORE_STRATEGY.upperThreshold) {
-    console.log(`🚨 [إشارة انعكاس إلى المتوسط - قمة!]: القيمة = +${zScore} (تجاوزت سقف +${ZSCORE_STRATEGY.upperThreshold}). ذروة شراء متطرفة. الهدف: شراء عقد NO (DOWN) بسعر السوق عبر أمر FAK.`);
-    await checkAndExecuteLimitlessOrder('NO', lastPrice, zScore);
-  }
-  // 2. إشارة قاع (تشبع بيعي مفرط): إذا أصبح Z-Score <= -2.00 -> شراء عقد YES (UP) للانعكاس إلى المتوسط
-  else if (zScore <= ZSCORE_STRATEGY.lowerThreshold) {
-    console.log(`🚨 [إشارة انعكاس إلى المتوسط - قاع!]: القيمة = ${zScore} (كسرت قاع ${ZSCORE_STRATEGY.lowerThreshold}). ذروة بيع متطرفة. الهدف: شراء عقد YES (UP) بسعر السوق عبر أمر FAK.`);
+    console.log(`🚨 [إشارة صعود Z-Score - ركوب الزخم!]: القيمة = +${zScore} (تجاوزت سقف +${ZSCORE_STRATEGY.upperThreshold}). اختراق صاعد قوي. الهدف: شراء عقد YES (UP) بسعر السوق عبر أمر FAK.`);
     await checkAndExecuteLimitlessOrder('YES', lastPrice, zScore);
+  }
+  // 2. إشارة هبوط (زخم قوي): إذا أصبح Z-Score <= -2.00 -> شراء عقد NO (DOWN) لركوب الهبوط
+  else if (zScore <= ZSCORE_STRATEGY.lowerThreshold) {
+    console.log(`🚨 [إشارة هبوط Z-Score - ركوب الزخم!]: القيمة = ${zScore} (كسرت قاع ${ZSCORE_STRATEGY.lowerThreshold}). كسر هابط قوي. الهدف: شراء عقد NO (DOWN) بسعر السوق عبر أمر FAK.`);
+    await checkAndExecuteLimitlessOrder('NO', lastPrice, zScore);
   } else {
-    console.log(`⚖️ [Z-Score محايد]: القيمة = ${zScore > 0 ? '+' : ''}${zScore} ضمن النطاق الطبيعي [${ZSCORE_STRATEGY.lowerThreshold} إلى +${ZSCORE_STRATEGY.upperThreshold}]. في انتظار اختراق العتبة للانعكاس إلى المتوسط.`);
+    console.log(`⚖️ [Z-Score محايد]: القيمة = ${zScore > 0 ? '+' : ''}${zScore} ضمن النطاق الطبيعي [${ZSCORE_STRATEGY.lowerThreshold} إلى +${ZSCORE_STRATEGY.upperThreshold}]. في انتظار اختراق العتبة لركوب الزخم.`);
   }
 }
 

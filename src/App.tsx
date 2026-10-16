@@ -143,13 +143,13 @@ export default function App() {
     } | null;
   }>({
     running: false,
-    waitReason: 'في انتظار إشارة Z-Score مؤهلة للانعكاس إلى المتوسط (±2.00) على عقد BTC 15m بسعر السوق المباشر',
+    waitReason: 'في انتظار إشارة Z-Score مؤهلة لركوب الزخم (±2.00) على عقد BTC 15m بسعر السوق المباشر',
     tradeSizeUsdc: 0.50,
     maxBankrollRiskPercent: 0.08,
     isCurrentMarketTraded: false,
     currentMarketTrade: null,
     tradedContractsCount: 0,
-    targetMarketFocus: 'BTC 15 Min Only (عقود بيتكوين 15 دقيقة حصراً • استراتيجية الانعكاس إلى المتوسط)',
+    targetMarketFocus: 'BTC 15 Min Only (عقود بيتكوين 15 دقيقة حصراً • استراتيجية ركوب الزخم)',
     active5mMarket: null,
     active15mMarket: null,
   });
@@ -456,7 +456,7 @@ export default function App() {
   const triggerExecutionCheck = useCallback(async () => {
     const currentSig = checkMeanReversionSignal(candles, config);
     const targetToken: 'YES' | 'NO' | undefined =
-      currentSig.signal === 'OVERBOUGHT' ? 'NO' : (currentSig.signal === 'OVERSOLD' ? 'YES' : undefined);
+      currentSig.signal === 'OVERBOUGHT' ? 'YES' : (currentSig.signal === 'OVERSOLD' ? 'NO' : undefined);
 
     if (!isBotRunning) {
       setLatestReport({
@@ -473,7 +473,7 @@ export default function App() {
     const serverReason = serverStatus.waitReason || 'الروبوت يراقب السوق المباشر وينتظر تحقق شروط Z-Score (±2.00)...';
     const isExceedingPrice = serverReason.includes('أعلى من سقف') || serverReason.includes('أعلى من قيد');
 
-    // إذا تحققت إشارة Z-Score مؤهلة (> +2.00 للهبوط أو < -2.00 للصعود)
+    // إذا تحققت إشارة Z-Score مؤهلة (> +2.00 للصعود أو < -2.00 للهبوط)
     if (targetToken && (currentSig.signal === 'OVERBOUGHT' || currentSig.signal === 'OVERSOLD')) {
       const now = Date.now();
       const tokenPrices = active15mInfo?.prices;
@@ -879,7 +879,7 @@ export default function App() {
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                خطة التداول بالانعكاس إلى المتوسط (Mean Reversion) بالـ Z-Score (Lookback: 12 شمعة على فريم 1m • العتبة: &plusmn;2.00: Z&ge;+2 لشراء NO و Z&le;-2 لشراء YES • سقف الدخول: مفتوح بسعر السوق • إدارة المخاطر: Full Kelly 100%)
+                خطة التداول بركوب الزخم (Momentum) بالـ Z-Score (Lookback: 12 شمعة على فريم 1m • العتبة: &plusmn;2.00: Z&ge;+2 لشراء YES و Z&le;-2 لشراء NO • سقف الدخول: مفتوح بسعر السوق • إدارة المخاطر: Full Kelly 100%)
               </p>
             </div>
           </div>
@@ -899,9 +899,9 @@ export default function App() {
               <span
                 className={`font-mono font-bold text-xs ${
                   currentSignal.zScore >= 2.00
-                    ? 'text-rose-400 animate-pulse font-extrabold'
-                    : currentSignal.zScore <= -2.00
                     ? 'text-emerald-400 animate-pulse font-extrabold'
+                    : currentSignal.zScore <= -2.00
+                    ? 'text-rose-400 animate-pulse font-extrabold'
                     : 'text-cyan-300'
                 }`}
               >
@@ -1033,7 +1033,7 @@ export default function App() {
                   </div>
                   <p className="text-xs text-slate-300 mt-0.5">
                     {isBotRunning
-                      ? 'الروبوت يراقب بث أسعار بينانس ودفتر أوامر Limitless CLOB ويقتنص فرص الانعكاس إلى المتوسط فور تحقق الشرط (Z ≥ +2.00 لشراء NO أو Z ≤ -2.00 لشراء YES بتنفيذ مباشر بسعر السوق).'
+                      ? 'الروبوت يراقب بث أسعار بينانس ودفتر أوامر Limitless CLOB ويقتنص فرص ركوب الزخم فور تحقق الشرط (Z ≥ +2.00 لشراء YES أو Z ≤ -2.00 لشراء NO بتنفيذ مباشر بسعر السوق).'
                       : 'تم تعليق التداول التلقائي وإرسال الأوامر. يمكنك استئناف التشغيل في أي وقت.'}
                   </p>
                 </div>
@@ -1351,9 +1351,9 @@ export default function App() {
                       }`}
                     >
                       {currentSignal.signal === 'OVERBOUGHT'
-                        ? 'انعكاس هابط من القمة (Z >= +2.00) -> شراء NO'
+                        ? 'زخم صاعد قوي (Z >= +2.00) -> شراء YES'
                         : currentSignal.signal === 'OVERSOLD'
-                        ? 'انعكاس صاعد من القاع (Z <= -2.00) -> شراء YES'
+                        ? 'زخم هابط قوي (Z <= -2.00) -> شراء NO'
                         : 'حياد (NEUTRAL)'}
                     </span>
                   </h3>
@@ -1434,7 +1434,7 @@ export default function App() {
                 <div className="mt-3 space-y-2 max-h-72 overflow-y-auto pl-1">
                   {executionLogs.length === 0 ? (
                     <div className="text-center py-10 text-slate-500 text-xs">
-                      الروبوت في وضع الاستعداد الحقيقي... بانتظار إشارة Z-Score مؤهلة (&ge; +2.00 للهبوط أو &le; -2.00 للصعود) على عقد BTC 15m بسعر السوق المباشر.
+                      الروبوت في وضع الاستعداد الحقيقي... بانتظار إشارة Z-Score مؤهلة لركوب الزخم (&ge; +2.00 لشراء YES أو &le; -2.00 لشراء NO) على عقد BTC 15m بسعر السوق المباشر.
                     </div>
                   ) : (
                     executionLogs.map((log, index) => (

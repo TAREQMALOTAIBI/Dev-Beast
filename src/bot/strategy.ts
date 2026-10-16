@@ -56,18 +56,18 @@ export async function executeAsymmetricMeanReversion(
     };
   }
 
-  // الخطوة 4: تحديد رمز العقد المستهدف (Contract Selection بناءً على Z-Score)
-  // - إشارة هبوط (Z-Score >= +1.0): السعر تضخم فوق قمة 20 دقيقة؛ نشتري عقد "NO" للمراهنة على الهبوط.
-  // - إشارة صعود (Z-Score <= -1.0): السعر انهار تحت قاع 20 دقيقة؛ نشتري عقد "YES" للمراهنة على الصعود والارتداد.
+  // الخطوة 4: تحديد رمز العقد المستهدف (Contract Selection بناءً على ركوب الزخم Z-Score)
+  // - إشارة صعود (Z-Score >= +2.0): زخم صعودي قوي؛ نشتري عقد "YES" لركوب الصعود.
+  // - إشارة هبوط (Z-Score <= -2.0): زخم هبوطي قوي؛ نشتري عقد "NO" لركوب الهبوط.
   let targetTokenType: ContractTokenType;
   let targetTokenId: string;
 
   if (signalEval.signal === 'OVERBOUGHT') {
-    targetTokenType = 'NO';
-    targetTokenId = market.tokens.no;
-  } else {
     targetTokenType = 'YES';
     targetTokenId = market.tokens.yes;
+  } else {
+    targetTokenType = 'NO';
+    targetTokenId = market.tokens.no;
   }
 
   // الخطوة 5: جلب دفتر الأوامر (Orderbook) عبر getOrderBook واحتساب Midpoint و Spread

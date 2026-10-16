@@ -119,17 +119,17 @@ export function checkMeanReversionSignal(
   // شروط الدخول بالـ Z-Score فقط
   // ==========================================
 
-  // 1. إشارة ذروة شراء / انعكاس هابط: إذا أصبح Z-Score >= +2.00
-  // السعر تضخم إحصائياً بأكثر من انحرافين معياريين فوق المتوسط -> استهداف عقد NO للقمة (مراهنة على الهبوط والعودة للمتوسط)
+  // 1. إشارة صعود / زخم صاعد: إذا أصبح Z-Score >= +2.00
+  // السعر تجاوز سقف الانحراف المعياري بقوة -> استهداف عقد YES لركوب الزخم الصاعد
   const isOverbought = zScore >= upperThreshold;
 
-  // 2. إشارة ذروة بيع / انعكاس صاعد: إذا أصبح Z-Score <= -2.00
-  // السعر انهار إحصائياً بأكثر من انحرافين معياريين تحت المتوسط -> استهداف عقد YES للقاع (مراهنة على الصعود والارتداد للمتوسط)
+  // 2. إشارة هبوط / زخم هابط: إذا أصبح Z-Score <= -2.00
+  // السعر كسر قاع الانحراف المعياري بقوة -> استهداف عقد NO لركوب الزخم الهابط
   const isOversold = zScore <= lowerThreshold;
 
   if (isOverbought) {
     return {
-      signal: 'OVERBOUGHT', // إشارة انعكاس هابط إلى المتوسط (ذروة شراء متطرفة)
+      signal: 'OVERBOUGHT', // إشارة صعود مع الزخم (اختراق المقاومة)
       currentPrice,
       zScore,
       mean,
@@ -138,15 +138,15 @@ export function checkMeanReversionSignal(
       bollingerBands,
       isOverbought: true,
       isOversold: false,
-      explanationArabic: `🚨 [إشارة انعكاس إلى المتوسط - قمة]: القيمة الحالية = +${zScore} (تجاوزت سقف +${upperThreshold}). ذروة شراء متطرفة فوق المتوسط. الهدف: شراء عقد DOWN (NO) للمراهنة على عودة السعر للمتوسط.`,
-      explanationEnglish: `Bearish Mean Reversion Trigger! Z = +${zScore} (>= +${upperThreshold}). Overbought extreme above mean. Target: NO (DOWN) contract expecting price reversion.`,
+      explanationArabic: `🚨 [إشارة صعود Z-Score - ركوب الزخم]: القيمة الحالية = +${zScore} (تجاوزت سقف +${upperThreshold}). زخم صعودي قوي. الهدف: شراء عقد UP (YES) عبر أمر FAK فوراً بسعر السوق.`,
+      explanationEnglish: `Bullish Z-Score Trigger! Z = +${zScore} (>= +${upperThreshold}). Strong upward momentum. Target: YES (UP) contract via immediate market FAK order.`,
       evaluatedAt: Date.now(),
     };
   }
 
   if (isOversold) {
     return {
-      signal: 'OVERSOLD', // إشارة انعكاس صاعد إلى المتوسط (ذروة بيع متطرفة)
+      signal: 'OVERSOLD', // إشارة هبوط مع الزخم (كسر الدعم)
       currentPrice,
       zScore,
       mean,
@@ -155,8 +155,8 @@ export function checkMeanReversionSignal(
       bollingerBands,
       isOverbought: false,
       isOversold: true,
-      explanationArabic: `🚨 [إشارة انعكاس إلى المتوسط - قاع]: القيمة الحالية = ${zScore} (كسرت قاع ${lowerThreshold}). ذروة بيع متطرفة تحت المتوسط. الهدف: شراء عقد UP (YES) للمراهنة على ارتداد السعر للمتوسط.`,
-      explanationEnglish: `Bullish Mean Reversion Trigger! Z = ${zScore} (<= ${lowerThreshold}). Oversold extreme below mean. Target: YES (UP) contract expecting price reversion.`,
+      explanationArabic: `🚨 [إشارة هبوط Z-Score - ركوب الزخم]: القيمة الحالية = ${zScore} (كسرت قاع ${lowerThreshold}). زخم هبوطي قوي. الهدف: شراء عقد DOWN (NO) عبر أمر FAK فوراً بسعر السوق.`,
+      explanationEnglish: `Bearish Z-Score Trigger! Z = ${zScore} (<= ${lowerThreshold}). Strong downward momentum. Target: NO (DOWN) contract via immediate market FAK order.`,
       evaluatedAt: Date.now(),
     };
   }

@@ -280,8 +280,8 @@ export interface RsiConfig {
 
 export interface ZScoreConfig {
   period: number;         // Lookback Window: آخر 12 شمعة على فريم الدقيقة (1m)
-  upperThreshold: number; // إشارة انعكاس هابط (تشبع شرائي مفرط) إذا Z-Score >= +2.00 -> شراء عقد NO
-  lowerThreshold: number; // إشارة انعكاس صاعد (تشبع بيعي مفرط) إذا Z-Score <= -2.00 -> شراء عقد YES
+  upperThreshold: number; // إشارة صعود (زخم قوي) إذا Z-Score >= +2.00 -> شراء عقد YES
+  lowerThreshold: number; // إشارة هبوط (زخم قوي) إذا Z-Score <= -2.00 -> شراء عقد NO
 }
 
 export interface BotConfig {
