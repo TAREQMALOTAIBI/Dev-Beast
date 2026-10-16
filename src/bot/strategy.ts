@@ -56,18 +56,18 @@ export async function executeAsymmetricMeanReversion(
     };
   }
 
-  // الخطوة 4: تحديد رمز العقد المستهدف (Contract Selection بناءً على ركوب الزخم Z-Score)
-  // - إشارة صعود (Z-Score >= +2.0): زخم صعودي قوي؛ نشتري عقد "YES" لركوب الصعود.
-  // - إشارة هبوط (Z-Score <= -2.0): زخم هبوطي قوي؛ نشتري عقد "NO" لركوب الهبوط.
+  // الخطوة 4: تحديد رمز العقد المستهدف (استراتيجية الارتداد إلى المتوسط Z-Score Mean Reversion)
+  // - إشارة ذروة شراء (Z-Score >= +2.0): السعر تضخم لأعلى؛ نشتري عقد "NO" للمراهنة على الهبوط والارتداد.
+  // - إشارة ذروة بيع (Z-Score <= -2.0): السعر انهار لأسفل؛ نشتري عقد "YES" للمراهنة على الصعود والارتداد.
   let targetTokenType: ContractTokenType;
   let targetTokenId: string;
 
   if (signalEval.signal === 'OVERBOUGHT') {
-    targetTokenType = 'YES';
-    targetTokenId = market.tokens.yes;
-  } else {
     targetTokenType = 'NO';
     targetTokenId = market.tokens.no;
+  } else {
+    targetTokenType = 'YES';
+    targetTokenId = market.tokens.yes;
   }
 
   // الخطوة 5: جلب دفتر الأوامر (Orderbook) عبر getOrderBook واحتساب Midpoint و Spread
@@ -141,15 +141,15 @@ export async function executeAsymmetricMeanReversion(
   const roiMultiplier = (1.00 / executionPrice).toFixed(1);
   const profitPercentage = Math.round(((1.00 - executionPrice) / executionPrice) * 100);
 
-  // الخطوة 9: بناء حمولة أمر Good-Til-Cancelled (GTC) بنظام التوقيع EIP-712
-  const orderPayload = sdk.buildGtcOrderPayload({
+  // الخطوة 9: بناء حمولة أمر Fill-and-Kill (FAK) بنظام التوقيع EIP-712 بسعر السوق المتاح
+  const orderPayload = sdk.buildFakOrderPayload({
     tokenId: targetTokenId,
-    targetPrice: 0.50,
+    targetPrice: executionPrice,
     contractsSize: contractsToBuy,
     side: Side.BUY,
     makerAddress: config.walletAddress,
     verifyingContract: market.venue.exchange,
-    expirationSeconds: 86400,
+    expirationSeconds: 300,
   });
 
   // الخطوة 10: التوقيع الرقمي بنظام EIP-712 عبر ethers
@@ -198,6 +198,6 @@ export async function executeAsymmetricMeanReversion(
     potentialPayoutUsdc,
     asymmetricMultiplier: `${roiMultiplier}x (+${profitPercentage}%)`,
     messageArabic: `تم تنفيذ أمر الشراء بنجاح! نوع العقد: [${targetTokenType}] بسعر $${executionPrice.toFixed(2)}. الحجم: ${contractsToBuy} عقد. تم مطابقة ${summary.makerMatches.length} عروض مستقرة (Fills) بحالة تسوية [${summary.settlementStatus}]. التكلفة: $${totalCostUsdc} USDC. العائد المتوقع عند الفوز: $${potentialPayoutUsdc} USDC (مضاعف ${roiMultiplier}x / +${profitPercentage}%).`,
-    messageEnglish: `Order executed successfully via GTC! Token: [${targetTokenType}] at $0.50. Filled ${summary.filledContracts} contracts across ${summary.makerMatches.length} fills. Settlement: ${summary.settlementStatus}.`,
+    messageEnglish: `Order executed successfully via FAK! Token: [${targetTokenType}] at $${executionPrice.toFixed(2)}. Filled ${summary.filledContracts} contracts across ${summary.makerMatches.length} fills. Settlement: ${summary.settlementStatus}.`,
   };
 }

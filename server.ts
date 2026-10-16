@@ -815,7 +815,7 @@ let lastCalculatedZScore: number = 0.0;
 let lastCalculatedMean: number = 94500;
 let lastCalculatedStdDev: number = 50;
 let currentWaitReason: string = isServerBotRunning
-  ? 'في انتظار إشارة Z-Score مؤهلة لركوب الزخم (> +2.00 لشراء UP أو < -2.00 لشراء DOWN) بأمر GTC عند سعر 0.50$ بالضبط على عقد BTC 15m'
+  ? 'في انتظار إشارة Z-Score مؤهلة للارتداد إلى المتوسط (> +2.00 لشراء NO أو < -2.00 لشراء YES على فريم 1m لآخر 30 شمعة) بأمر FAK بسعر السوق'
   : 'الروبوت متوقف مؤقتاً (PAUSED) - اضغط تشغيل لتفعيل التداول الآلي';
 let lastExecutionError: string | null = null;
 
@@ -889,13 +889,13 @@ async function syncLimitlessUserHistory() {
   }
 }
 
-// خطة التداول بالـ Z-Score مع إدارة المخاطر Full Kelly (100% f*)
+// خطة التداول بالـ Z-Score مع إدارة المخاطر Full Kelly (الارتداد إلى المتوسط - Mean Reversion)
 const ZSCORE_STRATEGY = {
   marketSlug: 'btc-price-15m-now',
-  lookbackPeriod: Number(process.env.LOOKBACK_PERIOD) || 12,         // نافذة الحساب: آخر 12 شمعة على فريم الدقيقة (1m = 12 دقيقة)
-  upperThreshold: Number(process.env.Z_SCORE_THRESHOLD) || 2.00,        // إشارة صعود (ركوب الزخم الصاعد): شراء عقد YES (UP) عند Z-Score >= +2.00
-  lowerThreshold: -(Number(process.env.Z_SCORE_THRESHOLD) || 2.00),       // إشارة هبوط (ركوب الزخم الهابط): شراء عقد NO (DOWN) عند Z-Score <= -2.00
-  maxEntryPrice: null as number | null, // تم إزالة سقف السعر نهائياً: شراء مباشر بسعر السوق المتاح (Market Price)
+  lookbackPeriod: Number(process.env.LOOKBACK_PERIOD) || 30,         // نافذة الحساب: آخر 30 شمعة على فريم الدقيقة (1m = 30 دقيقة)
+  upperThreshold: Number(process.env.Z_SCORE_THRESHOLD) || 2.00,        // إشارة انعكاس هابط (ذروة شراء): شراء عقد NO (DOWN) عند Z-Score >= +2.00
+  lowerThreshold: -(Number(process.env.Z_SCORE_THRESHOLD) || 2.00),       // إشارة انعكاس صاعد (ذروة بيع): شراء عقد YES (UP) عند Z-Score <= -2.00
+  maxEntryPrice: null as number | null, // تم إزالة سقف السعر نهائياً: شراء مباشر بأمر FAK بسعر السوق المتاح بدون سقف أعلى أو أدنى
   riskPercent: 1.0,           // نسبة المخاطرة للصفقة
   riskModel: (process.env.RISK_MODEL as 'FULL_KELLY' | 'HALF_KELLY' | 'FIXED') || 'FULL_KELLY', // استراتيجية كيلي الكاملة (Full Kelly 100%)
   kellyWinRate: Number(process.env.KELLY_WIN_RATE) || 0.68, // نسبة النجاح المقدرة 68% لإشارة Z-Score ±2.00
@@ -906,7 +906,7 @@ const ZSCORE_STRATEGY = {
   tradeSizeUsdc: Number(process.env.TRADE_SIZE_USDC) || 0.50, // الحد الأدنى المرجعي للميزانية بالدولار
 };
 
-function calculateServerZScore(prices: number[], lookback: number = 12) {
+function calculateServerZScore(prices: number[], lookback: number = 30) {
   const window = prices.slice(-lookback);
   const current = window[window.length - 1];
   const sum = window.reduce((a, b) => a + b, 0);
@@ -1343,11 +1343,10 @@ async function executeLimitlessTrade(
       return;
     }
 
-    // الدخول عند سعر 50 سنت ($0.50) بالضبط بأمر GTC عند تحقق الشرط
-    const targetOrderPrice = 0.50;
-    const alignedPrice = targetOrderPrice;
+    // أمر FAK بدون سقف أعلى أو أدنى - تنفيذ فوري بسعر السوق المتاح (Best Ask)
+    const alignedPrice = Math.min(0.999, Math.max(0.001, Number((Math.round(rawPrice / 0.001) * 0.001).toFixed(3))));
 
-    console.log(`🎯 [Server Bot] تحقق شرط الزخم Z-Score (${currentZScore > 0 ? '+' : ''}${currentZScore})! جاري وضع أمر GTC لعقد ${targetToken} بسعر $${targetOrderPrice.toFixed(2)} (50 سنت بالضبط) في سوق BTC 15m (${activeMarket.slug})`);
+    console.log(`🎯 [Server Bot] تحقق شرط الارتداد للمتوسط Z-Score (${currentZScore > 0 ? '+' : ''}${currentZScore})! جاري وضع أمر FAK لعقد ${targetToken} بسعر السوق المتاح $${alignedPrice.toFixed(3)} بدون سقف أعلى أو أدنى في سوق BTC 15m (${activeMarket.slug})`);
 
     // 1. جلب بيانات السوق والـ Venue وعناوين العقود عبر MarketFetcher
     const marketDetails = await serverMarketFetcher.getMarket(activeMarket.slug).catch(() => null);
@@ -1435,7 +1434,7 @@ async function executeLimitlessTrade(
     let orderTxHash = '';
 
     try {
-      console.log(`📡 [Server Bot] جاري إرسال أمر GTC بسعر $${targetOrderPrice.toFixed(2)} عبر OrderClient من SDK الرسمي...`);
+      console.log(`📡 [Server Bot] جاري إرسال أمر FAK بسعر السوق $${alignedPrice.toFixed(3)} عبر OrderClient من SDK الرسمي...`);
       const orderClient = limitlessClient.newOrderClient(serverWallet);
       const res = await withRetry(
         () =>
@@ -1443,15 +1442,15 @@ async function executeLimitlessTrade(
             marketSlug: activeMarket.slug,
             tokenId: selectedTokenId,
             side: Side.BUY,
-            price: targetOrderPrice,
+            price: alignedPrice,
             size: contracts,
-            orderType: OrderType.GTC,
+            orderType: OrderType.FAK,
           }),
         { statusCodes: [429, 500, 502, 503, 504], maxRetries: 2, delays: [1, 2] }
       );
 
-      console.log(`🎉 [Server Bot] تم وضع أمر GTC بنجاح عبر SDK الرسمي! معرف الأمر: ${res.order?.id || 'OK'}`);
-      currentWaitReason = `✅ تم إرسال أمر GTC لشراء ${contracts} عقد ${targetToken} بسعر $${targetOrderPrice.toFixed(2)} بنجاح على منصة Limitless! (معرف: ${res.order?.id || 'OK'})`;
+      console.log(`🎉 [Server Bot] تم تنفيذ أمر FAK بنجاح عبر SDK الرسمي! معرف الأمر: ${res.order?.id || 'OK'}`);
+      currentWaitReason = `✅ تم تنفيذ أمر FAK لشراء ${contracts} عقد ${targetToken} بسعر $${alignedPrice.toFixed(3)} بنجاح على منصة Limitless! (معرف: ${res.order?.id || 'OK'})`;
       orderTxHash = res.order?.id || `0x${Date.now().toString(16)}`;
       orderSuccess = true;
       lastExecutionError = null;
@@ -1489,10 +1488,10 @@ async function executeLimitlessTrade(
           maker: serverWallet.address,
           tokenId: BigInt(selectedTokenId),
           amount: ethers.parseUnits(contracts.toFixed(2), 6),
-          price: ethers.parseUnits('0.50', 6), // 0.50$ بالضبط
+          price: ethers.parseUnits(alignedPrice.toFixed(3), 6),
           side: 0,
           nonce: Date.now(),
-          deadline: Math.floor(Date.now() / 1000) + 86400,
+          deadline: Math.floor(Date.now() / 1000) + 300,
         };
 
         const signature = await serverWallet.signTypedData(domain, types, orderValue);
@@ -1504,18 +1503,18 @@ async function executeLimitlessTrade(
             price: orderValue.price.toString(),
           },
           signature,
-          orderType: 'GTC',
+          orderType: 'FAK',
           marketSlug: activeMarket.slug,
         };
 
         const directRes: any = await limitlessClient.http.post('/orders', orderPayload);
-        if (directRes && (directRes.order || directRes.id)) {
-          console.log(`🎉 [Server Bot] تم وضع أمر GTC المباشر بنجاح!`, directRes);
+        if (directRes && (directRes.order || directRes.id || directRes.execution)) {
+          console.log(`🎉 [Server Bot] تم وضع أمر FAK المباشر بنجاح!`, directRes);
           orderTxHash = directRes.order?.id || directRes.id || signature.substring(0, 30);
           orderSuccess = true;
           lastExecutionError = null;
           lastExecutedTradeTime = Date.now();
-          currentWaitReason = `✅ تم إرسال أمر GTC لشراء ${contracts} عقد ${targetToken} بسعر $0.50 بنجاح على منصة Limitless!`;
+          currentWaitReason = `✅ تم إرسال أمر FAK لشراء ${contracts} عقد ${targetToken} بسعر $${alignedPrice.toFixed(3)} بنجاح على منصة Limitless!`;
         }
       } catch (directErr: any) {
         console.warn('⚠️ [Server Bot] خطأ في الإرسال المباشر:', directErr.message);
@@ -1671,27 +1670,27 @@ async function startServerPriceFeed() {
 
           // إذا كان الروبوت متوقفاً، نوقف التداول تماماً ونحدث فقط شريط الانتظار
           if (!isServerBotRunning) {
-            currentWaitReason = `الروبوت متوقف مؤقتاً (PAUSED) - لن يتم فتح أي صفقات | Z-Score اللحظي (1m) = ${zScore > 0 ? '+' : ''}${zScore}`;
-            lastEvaluatedSignal = zScore >= ZSCORE_STRATEGY.upperThreshold ? 'MOMENTUM_UP' : (zScore <= ZSCORE_STRATEGY.lowerThreshold ? 'MOMENTUM_DOWN' : 'NEUTRAL');
+            currentWaitReason = `الروبوت متوقف مؤقتاً (PAUSED) - لن يتم فتح أي صفقات | Z-Score اللحظي (1m - 30c) = ${zScore > 0 ? '+' : ''}${zScore}`;
+            lastEvaluatedSignal = zScore >= ZSCORE_STRATEGY.upperThreshold ? 'OVERBOUGHT' : (zScore <= ZSCORE_STRATEGY.lowerThreshold ? 'OVERSOLD' : 'NEUTRAL');
             return;
           }
 
-          // 1. إشارة صعود (ركوب الزخم الصاعد): Z-Score >= +2.00 -> شراء عقد YES (UP) لركوب زخم الصعود
+          // 1. إشارة ارتداد هابط (ذروة شراء متطرفة): Z-Score >= +2.00 -> شراء عقد NO (DOWN) للمراهنة على العودة إلى المتوسط
           if (zScore >= ZSCORE_STRATEGY.upperThreshold) {
-            lastEvaluatedSignal = 'MOMENTUM_UP';
-            console.log(`🚨 [Server Bot]: إشارة صعود Z-Score (ركوب الزخم) على فريم 1m! Z = +${zScore} (أعلى من +${ZSCORE_STRATEGY.upperThreshold}). جاري شراء عقد UP (YES)...`);
-            await executeLimitlessTrade('YES', lastBtcPrice, zScore);
-          }
-          // 2. إشارة هبوط (ركوب الزخم الهابط): Z-Score <= -2.00 -> شراء عقد NO (DOWN) لركوب زخم الهبوط
-          else if (zScore <= ZSCORE_STRATEGY.lowerThreshold) {
-            lastEvaluatedSignal = 'MOMENTUM_DOWN';
-            console.log(`🚨 [Server Bot]: إشارة هبوط Z-Score (ركوب الزخم) على فريم 1m! Z = ${zScore} (أدنى من ${ZSCORE_STRATEGY.lowerThreshold}). جاري شراء عقد DOWN (NO)...`);
+            lastEvaluatedSignal = 'OVERBOUGHT';
+            console.log(`🚨 [Server Bot]: إشارة ارتداد هابط (ذروة شراء Z >= +${ZSCORE_STRATEGY.upperThreshold}) على فريم 1m (نافذة ${ZSCORE_STRATEGY.lookbackPeriod} شمعة)! Z = +${zScore}. جاري شراء عقد DOWN (NO) بأمر FAK بسعر السوق...`);
             await executeLimitlessTrade('NO', lastBtcPrice, zScore);
+          }
+          // 2. إشارة ارتداد صاعد (ذروة بيع متطرفة): Z-Score <= -2.00 -> شراء عقد YES (UP) للمراهنة على العودة إلى المتوسط
+          else if (zScore <= ZSCORE_STRATEGY.lowerThreshold) {
+            lastEvaluatedSignal = 'OVERSOLD';
+            console.log(`🚨 [Server Bot]: إشارة ارتداد صاعد (ذروة بيع Z <= ${ZSCORE_STRATEGY.lowerThreshold}) على فريم 1m (نافذة ${ZSCORE_STRATEGY.lookbackPeriod} شمعة)! Z = ${zScore}. جاري شراء عقد UP (YES) بأمر FAK بسعر السوق...`);
+            await executeLimitlessTrade('YES', lastBtcPrice, zScore);
           } else {
             lastEvaluatedSignal = 'NEUTRAL';
             currentWaitReason = lastExecutionError
-              ? `⚠️ تنبيه من المحرك: ${lastExecutionError} | Z-Score (1m) = ${zScore > 0 ? '+' : ''}${zScore}`
-              : `سوق محايد: مؤشر Z-Score (1m) = ${zScore > 0 ? '+' : ''}${zScore} (المطلوب: > +${ZSCORE_STRATEGY.upperThreshold} لشراء UP أو < ${ZSCORE_STRATEGY.lowerThreshold} لشراء DOWN لركوب الزخم) | متوسط 12 شمعة (1m) = $${mean.toLocaleString()}`;
+              ? `⚠️ تنبيه من المحرك: ${lastExecutionError} | Z-Score (1m - 30c) = ${zScore > 0 ? '+' : ''}${zScore}`
+              : `سوق محايد: مؤشر Z-Score (1m - 30c) = ${zScore > 0 ? '+' : ''}${zScore} (المطلوب للانعكاس: > +${ZSCORE_STRATEGY.upperThreshold} لشراء NO أو < ${ZSCORE_STRATEGY.lowerThreshold} لشراء YES بأمر FAK) | متوسط 30 شمعة = $${mean.toLocaleString()}`;
           }
         }
       } catch (feedErr: any) {
@@ -1748,7 +1747,7 @@ app.get('/api/binance/klines-full', async (req, res) => {
 app.get('/api/bot/status', (req, res) => {
   res.json({
     running: isServerBotRunning,
-    strategy: 'Z-Score Momentum (Lookback: 12 candles on 1m • Z>=+2.00 -> UP/YES, Z<=-2.00 -> DOWN/NO • أمر GTC عند سعر 0.50$ بالضبط)',
+    strategy: 'Z-Score Mean Reversion (Lookback: 30 candles on 1m • Z>=+2.00 -> NO/DOWN, Z<=-2.00 -> YES/UP • أمر FAK بسعر السوق المتاح بدون سقف)',
     targetMarketFocus: 'BTC 15 Min Only (عقود بيتكوين 15 دقيقة حصراً • تنفيذ مباشر بسعر السوق)',
     active15mMarket: cachedActive15mMarket
       ? {
@@ -1893,7 +1892,7 @@ app.post('/api/bot/toggle', (req, res) => {
     lastExecutionError = null;
   }
   currentWaitReason = isServerBotRunning
-    ? 'في انتظار إشارة Z-Score مؤهلة لركوب الزخم (> +2.00 لشراء UP أو < -2.00 لشراء DOWN) بأمر GTC عند سعر 0.50$ بالضبط على عقد BTC 15m'
+    ? 'في انتظار إشارة Z-Score مؤهلة للارتداد إلى المتوسط (> +2.00 لشراء NO أو < -2.00 لشراء YES على فريم 1m لآخر 30 شمعة) بأمر FAK بسعر السوق'
     : 'الروبوت متوقف مؤقتاً (PAUSED) - اضغط تشغيل لتفعيل التداول الآلي';
   console.log(`🎛️ [Server Bot] تم تغيير حالة تشغيل الروبوت على السيرفر إلى: ${isServerBotRunning ? 'تشغيل (RUNNING)' : 'إيقاف (STOPPED)'}`);
   res.json({ running: isServerBotRunning, waitReason: currentWaitReason, lastExecutionError });

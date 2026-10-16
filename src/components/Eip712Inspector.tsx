@@ -61,7 +61,7 @@ export const Eip712Inspector: React.FC<Eip712InspectorProps> = ({
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
         <div className="p-2 rounded-lg bg-slate-950 border border-slate-800">
           <span className="text-slate-400 text-[10px] block font-sans">نوع الأمر (OrderType)</span>
-          <span className="text-cyan-400 font-bold font-mono">OrderType.GTC (Good-Til-Cancelled)</span>
+          <span className="text-cyan-400 font-bold font-mono">OrderType.FAK (Fill-and-Kill)</span>
         </div>
         <div className="p-2 rounded-lg bg-slate-950 border border-slate-800">
           <span className="text-slate-400 text-[10px] block font-sans">اتجاه الأمر (Side)</span>

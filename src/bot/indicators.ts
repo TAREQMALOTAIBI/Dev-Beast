@@ -38,7 +38,7 @@ export function calculateZScore(
     };
   }
 
-  // أخذ آخر N شمعة (Lookback Window = 12 شمعة على فريم دقيقة واحدة 1m = 12 دقيقة)
+  // أخذ آخر N شمعة (Lookback Window = 30 شمعة على فريم دقيقة واحدة 1m = 30 دقيقة)
   const windowPrices = closePrices.slice(-lookback);
   const currentPrice = windowPrices[windowPrices.length - 1];
 
@@ -119,17 +119,17 @@ export function checkMeanReversionSignal(
   // شروط الدخول بالـ Z-Score فقط
   // ==========================================
 
-  // 1. إشارة صعود / زخم صاعد: إذا أصبح Z-Score >= +2.00
-  // السعر تجاوز سقف الانحراف المعياري بقوة -> استهداف عقد YES لركوب الزخم الصاعد
+  // 1. إشارة ذروة شراء / تضخم سعري: إذا أصبح Z-Score >= +2.00
+  // السعر تضخم إحصائياً بأكثر من انحرافين معياريين فوق المتوسط -> استهداف عقد NO للارتداد هبوطاً
   const isOverbought = zScore >= upperThreshold;
 
-  // 2. إشارة هبوط / زخم هابط: إذا أصبح Z-Score <= -2.00
-  // السعر كسر قاع الانحراف المعياري بقوة -> استهداف عقد NO لركوب الزخم الهابط
+  // 2. إشارة ذروة بيع / انهيار سعري: إذا أصبح Z-Score <= -2.00
+  // السعر هبط بأكثر من انحرافين معياريين تحت المتوسط -> استهداف عقد YES للارتداد صعوداً
   const isOversold = zScore <= lowerThreshold;
 
   if (isOverbought) {
     return {
-      signal: 'OVERBOUGHT', // إشارة صعود مع الزخم (اختراق المقاومة)
+      signal: 'OVERBOUGHT', // إشارة ارتداد هابط (تضخم سعري)
       currentPrice,
       zScore,
       mean,
@@ -138,15 +138,15 @@ export function checkMeanReversionSignal(
       bollingerBands,
       isOverbought: true,
       isOversold: false,
-      explanationArabic: `🚨 [إشارة صعود Z-Score - ركوب الزخم]: القيمة الحالية = +${zScore} (تجاوزت سقف +${upperThreshold}). زخم صعودي قوي. الهدف: إرسال أمر GTC لشراء عقد UP (YES) بسعر 0.50$ (50 سنت بالضبط).`,
-      explanationEnglish: `Bullish Z-Score Trigger! Z = +${zScore} (>= +${upperThreshold}). Strong upward momentum. Target: YES (UP) GTC order placed at exactly $0.50.`,
+      explanationArabic: `🚨 [إشارة ارتداد هابط - ذروة شراء]: القيمة الحالية = +${zScore} (تجاوزت سقف +${upperThreshold}). السعر متضخم إحصائياً. الهدف: إرسال أمر FAK لشراء عقد DOWN (NO) بسعر السوق المتاح بدون سقف.`,
+      explanationEnglish: `Overbought Mean Reversion Trigger! Z = +${zScore} (>= +${upperThreshold}). Extreme statistical extension. Target: NO (DOWN) FAK market order.`,
       evaluatedAt: Date.now(),
     };
   }
 
   if (isOversold) {
     return {
-      signal: 'OVERSOLD', // إشارة هبوط مع الزخم (كسر الدعم)
+      signal: 'OVERSOLD', // إشارة ارتداد صاعد (انهيار سعري)
       currentPrice,
       zScore,
       mean,
@@ -155,8 +155,8 @@ export function checkMeanReversionSignal(
       bollingerBands,
       isOverbought: false,
       isOversold: true,
-      explanationArabic: `🚨 [إشارة هبوط Z-Score - ركوب الزخم]: القيمة الحالية = ${zScore} (كسرت قاع ${lowerThreshold}). زخم هبوطي قوي. الهدف: إرسال أمر GTC لشراء عقد DOWN (NO) بسعر 0.50$ (50 سنت بالضبط).`,
-      explanationEnglish: `Bearish Z-Score Trigger! Z = ${zScore} (<= ${lowerThreshold}). Strong downward momentum. Target: NO (DOWN) GTC order placed at exactly $0.50.`,
+      explanationArabic: `🚨 [إشارة ارتداد صاعد - ذروة بيع]: القيمة الحالية = ${zScore} (كسرت قاع ${lowerThreshold}). السعر تشبع بيعياً. الهدف: إرسال أمر FAK لشراء عقد UP (YES) بسعر السوق المتاح بدون سقف.`,
+      explanationEnglish: `Oversold Mean Reversion Trigger! Z = ${zScore} (<= ${lowerThreshold}). Extreme oversold condition. Target: YES (UP) FAK market order.`,
       evaluatedAt: Date.now(),
     };
   }

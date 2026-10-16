@@ -84,10 +84,10 @@ async function ensureVenueApproval(venueExchange: string) {
 
 const ZSCORE_STRATEGY = {
   marketSlug: 'btc-price-15m-now',
-  lookbackPeriod: 12,         // نافذة الحساب: آخر 12 شمعة على فريم الدقيقة (1m = 12 دقيقة)
-  upperThreshold: Number(process.env.Z_SCORE_THRESHOLD) || 2.00,        // إشارة صعود (ركوب الزخم الصاعد) عند Z-Score >= +2.00 -> شراء عقد YES
-  lowerThreshold: -(Number(process.env.Z_SCORE_THRESHOLD) || 2.00),       // إشارة هبوط (ركوب الزخم الهابط) عند Z-Score <= -2.00 -> شراء عقد NO
-  maxEntryPrice: process.env.MAX_ENTRY_PRICE ? Number(process.env.MAX_ENTRY_PRICE) : null, // إزالة سقف السعر: شراء مباشر بسعر السوق
+  lookbackPeriod: 30,         // نافذة الحساب: آخر 30 شمعة على فريم الدقيقة (1m = 30 دقيقة)
+  upperThreshold: Number(process.env.Z_SCORE_THRESHOLD) || 2.00,        // إشارة ارتداد هابط عند Z-Score >= +2.00 -> شراء عقد NO
+  lowerThreshold: -(Number(process.env.Z_SCORE_THRESHOLD) || 2.00),       // إشارة ارتداد صاعد عند Z-Score <= -2.00 -> شراء عقد YES
+  maxEntryPrice: process.env.MAX_ENTRY_PRICE ? Number(process.env.MAX_ENTRY_PRICE) : null, // إزالة سقف السعر: شراء مباشر بسعر السوق بأمر FAK
   riskPercent: 1.0,           // نسبة المخاطرة للصفقة
   riskModel: process.env.RISK_MODEL || 'FULL_KELLY', // استراتيجية إدارة المخاطر: Full Kelly (100% f*)
   kellyWinRate: Number(process.env.KELLY_WIN_RATE) || 0.68, // نسبة النجاح المقدرة 68% لإشارة Z-Score ±2.00
@@ -98,12 +98,12 @@ const ZSCORE_STRATEGY = {
   tradeSizeUsdc: Number(process.env.TRADE_SIZE_USDC) || 0.50,  // ميزانية احتياطية بالدولار USDC
 };
 
-console.log(`📊 الاستراتيجية الحالية: ركوب الزخم (Momentum) بالـ Z-Score (عتبة ±2.00) مع إدارة المخاطر Full Kelly على عقود BTC 15m`);
-console.log(`⏱️ نافذة الحساب (Lookback Window): آخر ${ZSCORE_STRATEGY.lookbackPeriod} شموع على فريم الدقيقة (1m)`);
-console.log(`📈 إشارة صعود (زخم قوي): Z-Score >= +${ZSCORE_STRATEGY.upperThreshold} -> شراء عقد YES (UP) لركوب الصعود`);
-console.log(`📉 إشارة هبوط (زخم قوي): Z-Score <= ${ZSCORE_STRATEGY.lowerThreshold} -> شراء عقد NO (DOWN) لركوب الهبوط`);
+console.log(`📊 الاستراتيجية الحالية: الارتداد إلى المتوسط (Mean Reversion) بالـ Z-Score (عتبة ±2.00) مع إدارة المخاطر Full Kelly على عقود BTC 15m`);
+console.log(`⏱️ نافذة الحساب (Lookback Window): آخر ${ZSCORE_STRATEGY.lookbackPeriod} شمعة على فريم الدقيقة (1m = 30 دقيقة)`);
+console.log(`📉 إشارة ارتداد هابط (ذروة شراء): Z-Score >= +${ZSCORE_STRATEGY.upperThreshold} -> شراء عقد NO (DOWN)`);
+console.log(`📈 إشارة ارتداد صاعد (ذروة بيع): Z-Score <= ${ZSCORE_STRATEGY.lowerThreshold} -> شراء عقد YES (UP)`);
 console.log(`🧠 إدارة المخاطر: Full Kelly (100% f*) | نسبة الفوز المقدرة p: ${(ZSCORE_STRATEGY.kellyWinRate * 100).toFixed(0)}% | الحجم ديناميكي من رصيد المحفظة`);
-console.log(`⚡ التنفيذ: أمر GTC (Good-til-cancelled) | سعر الدخول: 0.50$ (50 سنت) بالضبط`);
+console.log(`⚡ التنفيذ: أمر FAK (Fill-and-Kill) بسعر السوق المتاح بدون سقف أعلى أو أدنى`);
 console.log('----------------------------------------------------');
 
 // أسعار إغلاق الشموع الحية
@@ -308,7 +308,7 @@ function computeZScore(prices: number[], lookback: number = 12) {
 
 async function evaluateTradingSignal(lastPrice: number, isClosed: boolean = true) {
   if (candleCloses.length < (ZSCORE_STRATEGY.lookbackPeriod - 1)) {
-    console.log(`⏳ في انتظار تجميع 12 شمعة (فريم دقيقة واحدة 1m) لحساب الـ Z-Score (${candleCloses.length}/${ZSCORE_STRATEGY.lookbackPeriod})...`);
+    console.log(`⏳ في انتظار تجميع 30 شمعة (فريم دقيقة واحدة 1m) لحساب الـ Z-Score (${candleCloses.length}/${ZSCORE_STRATEGY.lookbackPeriod})...`);
     return;
   }
 
@@ -318,19 +318,19 @@ async function evaluateTradingSignal(lastPrice: number, isClosed: boolean = true
 
   const { zScore, mean, stdDev } = computeZScore(livePrices, ZSCORE_STRATEGY.lookbackPeriod);
 
-  console.log(`🔍 [فحص Z-Score]: السعر=$${lastPrice.toLocaleString()} | المتوسط(1m - 12 شمعة = 12 دقيقة)=$${mean.toLocaleString()} | الانحراف=$${stdDev} | Z-Score=${zScore > 0 ? '+' : ''}${zScore}`);
+  console.log(`🔍 [فحص Z-Score]: السعر=$${lastPrice.toLocaleString()} | المتوسط(1m - 30 شمعة = 30 دقيقة)=$${mean.toLocaleString()} | الانحراف=$${stdDev} | Z-Score=${zScore > 0 ? '+' : ''}${zScore}`);
 
-  // 1. إشارة صعود (زخم قوي): إذا أصبح Z-Score >= +2.00 -> شراء عقد YES (UP) لركوب الصعود
+  // 1. إشارة ارتداد هابط (ذروة شراء): إذا أصبح Z-Score >= +2.00 -> شراء عقد NO (DOWN) للمراهنة على العودة إلى المتوسط
   if (zScore >= ZSCORE_STRATEGY.upperThreshold) {
-    console.log(`🚨 [إشارة صعود Z-Score - ركوب الزخم!]: القيمة = +${zScore} (تجاوزت سقف +${ZSCORE_STRATEGY.upperThreshold}). اختراق صاعد قوي. الهدف: شراء عقد YES (UP) بسعر 0.50$ عبر أمر GTC.`);
-    await checkAndExecuteLimitlessOrder('YES', lastPrice, zScore);
-  }
-  // 2. إشارة هبوط (زخم قوي): إذا أصبح Z-Score <= -2.00 -> شراء عقد NO (DOWN) لركوب الهبوط
-  else if (zScore <= ZSCORE_STRATEGY.lowerThreshold) {
-    console.log(`🚨 [إشارة هبوط Z-Score - ركوب الزخم!]: القيمة = ${zScore} (كسرت قاع ${ZSCORE_STRATEGY.lowerThreshold}). كسر هابط قوي. الهدف: شراء عقد NO (DOWN) بسعر 0.50$ عبر أمر GTC.`);
+    console.log(`🚨 [إشارة ارتداد هابط - ذروة شراء!]: القيمة = +${zScore} (تجاوزت سقف +${ZSCORE_STRATEGY.upperThreshold}). الهدف: شراء عقد NO (DOWN) بأمر FAK بسعر السوق المتاح.`);
     await checkAndExecuteLimitlessOrder('NO', lastPrice, zScore);
+  }
+  // 2. إشارة ارتداد صاعد (ذروة بيع): إذا أصبح Z-Score <= -2.00 -> شراء عقد YES (UP) للمراهنة على العودة إلى المتوسط
+  else if (zScore <= ZSCORE_STRATEGY.lowerThreshold) {
+    console.log(`🚨 [إشارة ارتداد صاعد - ذروة بيع!]: القيمة = ${zScore} (كسرت قاع ${ZSCORE_STRATEGY.lowerThreshold}). الهدف: شراء عقد YES (UP) بأمر FAK بسعر السوق المتاح.`);
+    await checkAndExecuteLimitlessOrder('YES', lastPrice, zScore);
   } else {
-    console.log(`⚖️ [Z-Score محايد]: القيمة = ${zScore > 0 ? '+' : ''}${zScore} ضمن النطاق الطبيعي [${ZSCORE_STRATEGY.lowerThreshold} إلى +${ZSCORE_STRATEGY.upperThreshold}]. في انتظار اختراق العتبة لركوب الزخم.`);
+    console.log(`⚖️ [Z-Score محايد]: القيمة = ${zScore > 0 ? '+' : ''}${zScore} ضمن النطاق الطبيعي [${ZSCORE_STRATEGY.lowerThreshold} إلى +${ZSCORE_STRATEGY.upperThreshold}]. في انتظار اختراق العتبة للارتداد.`);
   }
 }
 
@@ -518,31 +518,31 @@ async function checkAndExecuteLimitlessOrder(targetToken: 'YES' | 'NO', btcPrice
     const potentialPayout = contractsCount * 1.0;
     const multiplier = (1.0 / bestAsk).toFixed(1);
 
-    console.log(`🚀 [فرصة Z-Score مؤهلة في سوق BTC 15m (Full Kelly)]: تم استيفاء جميع الشروط!`);
+    console.log(`🚀 [فرصة Z-Score مؤهلة في سوق BTC 15m (الارتداد إلى المتوسط)]: تم استيفاء جميع الشروط!`);
     console.log(`   - السوق: ${activeMarket.title} (${activeMarket.slug})`);
-    console.log(`   - نوع العقد: ${targetToken} (${targetToken === 'YES' ? 'ركوب زخم الصعود (UP)' : 'ركوب زخم الهبوط (DOWN)'})`);
+    console.log(`   - نوع العقد: ${targetToken} (${targetToken === 'NO' ? 'ارتداد هابط من القمة (NO)' : 'ارتداد صاعد من القاع (YES)'})`);
     console.log(`   - قيمة Z-Score: ${currentZScore}`);
-    console.log(`   - السعر: $0.50 (50 سنت بالضبط)`);
+    console.log(`   - السعر: $${bestAsk.toFixed(3)} (سعر السوق المتاح عبر أمر FAK بدون سقف)`);
     console.log(`   - الكمية: ${contractsCount} عقد`);
-    console.log(`   - التكلفة الإجمالية: $${(contractsCount * 0.50).toFixed(2)} USDC`);
-    console.log(`   - العائد المتوقع عند الفوز: $${(contractsCount * 1.00).toFixed(2)} USDC (+100% / مضاعف 2.0x)`);
-    console.log(`⚡ [نوع التنفيذ]: أمر GTC (Good-til-cancelled) محدد عند 0.50$ بالضبط`);
+    console.log(`   - التكلفة الإجمالية: $${totalCost.toFixed(2)} USDC`);
+    console.log(`   - العائد المتوقع عند الفوز: $${potentialPayout.toFixed(2)} USDC (مضاعف ${multiplier}x)`);
+    console.log(`⚡ [نوع التنفيذ]: أمر FAK (Fill-and-Kill) بسعر السوق المتاح`);
 
     // تنفيذ الأمر عبر OrderClient إذا كان مفعل بـ HMAC أو التوقيع المباشر EIP-712
     if (orderClient && selectedTokenId) {
-      console.log(`📤 تنفيذ الأمر عبر OrderClient الرسمي بـ Limitless SDK بأمر GTC بسعر 0.50$...`);
+      console.log(`📤 تنفيذ الأمر عبر OrderClient الرسمي بـ Limitless SDK بأمر FAK بسعر $${bestAsk.toFixed(3)}...`);
       const result = await orderClient.createOrder({
         marketSlug: activeMarket.slug,
         tokenId: selectedTokenId,
         side: Side.BUY,
-        price: 0.50,
+        price: bestAsk,
         size: contractsCount,
-        orderType: OrderType.GTC,
+        orderType: OrderType.FAK,
       });
-      console.log(`✅ تم وضع أمر GTC بنجاح عبر SDK! معرف الأمر: ${result.order?.id || 'OK'}`);
+      console.log(`✅ تم تنفيذ أمر FAK بنجاح عبر SDK! معرف الأمر: ${result.order?.id || 'OK'}`);
     } else {
       // إنشاء وتوقيع أمر EIP-712 بالمحفظة الحقيقية مباشرة مع استخدام عقد التسوية الحقيقي المستخرج من Venue
-      console.log(`✍️ جاري التوقيع المشفر لأمر GTC بسعر 0.50$ بالمحفظة (${wallet.address}) على عقد Venue (${venueExchange})...`);
+      console.log(`✍️ جاري التوقيع المشفر لأمر FAK بسعر $${bestAsk.toFixed(3)} بالمحفظة (${wallet.address}) على عقد Venue (${venueExchange})...`);
 
       const domain = {
         name: 'Limitless OrderBook',

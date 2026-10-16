@@ -52,7 +52,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'terminal' | 'portfolio' | 'setup'>('terminal');
   const [activeMarketSlug, setActiveMarketSlug] = useState<string>('btc-price-15m-now');
 
-  // إعدادات البوت والبارامترات - خيار الدقة العالية (Z = 2.00, Lookback: 12 candles on 1m / 12m, أمر GTC عند سعر 0.50$ بالضبط لركوب الزخم, سقف أمان الصفقة 1%)
+  // إعدادات البوت والبارامترات - استراتيجية الارتداد إلى المتوسط (Z = ±2.00, Lookback: 30 candles on 1m, أمر FAK بسعر السوق بدون سقف, سقف أمان الصفقة 1%)
   const [config, setConfig] = useState<BotConfig>(() => {
     try {
       const saved = localStorage.getItem('limitless_bot_config');
@@ -65,11 +65,11 @@ export default function App() {
           zScore: {
             ...defaultBotConfig.zScore,
             ...(parsed.zScore || {}),
-            upperThreshold: 2.00, // عتبة الصعود (شراء YES): +2.00
-            lowerThreshold: -2.00, // عتبة الهبوط (شراء NO): -2.00
-            period: 12, // نافذة الحساب: 12 شمعة على فريم دقيقة واحدة (12 دقيقة كاملة)
+            upperThreshold: 2.00, // عتبة الانعكاس الهابط (شراء NO): +2.00
+            lowerThreshold: -2.00, // عتبة الانعكاس الصاعد (شراء YES): -2.00
+            period: 30, // نافذة الحساب: 30 شمعة على فريم دقيقة واحدة (30 دقيقة كاملة)
           },
-          maxEntryPrice: parsed.maxEntryPrice !== undefined ? parsed.maxEntryPrice : 0.99, // بدون سقف سعر (تنفيذ مباشر بسعر السوق)
+          maxEntryPrice: parsed.maxEntryPrice !== undefined ? parsed.maxEntryPrice : 0.99, // بدون سقف سعر (تنفيذ فوري بسعر السوق عبر أمر FAK)
         };
       }
     } catch (e) {
@@ -83,17 +83,17 @@ export default function App() {
         ...defaultBotConfig.zScore,
         upperThreshold: 2.00,
         lowerThreshold: -2.00,
-        period: 12,
+        period: 30,
       },
     };
   });
 
-  // مزامنة وتحديث فوري لعتبات Z-Score وسقف أمان الصفقة 1% وإلغاء سقف السعر (أمر GTC بسعر 0.50$ بالضبط على نافذة 12 شمعة / فريم 1m)
+  // مزامنة وتحديث فوري لعتبات Z-Score وسقف أمان الصفقة 1% وإلغاء سقف السعر (أمر FAK بسعر السوق المتاح على نافذة 30 شمعة / فريم 1m)
   useEffect(() => {
     if (
       config.zScore.upperThreshold !== 2.00 ||
       config.zScore.lowerThreshold !== -2.00 ||
-      config.zScore.period !== 12 ||
+      config.zScore.period !== 30 ||
       config.maxEntryPrice < 0.95 ||
       config.maxBankrollRiskPercent !== 0.01
     ) {
@@ -105,7 +105,7 @@ export default function App() {
           ...prev.zScore,
           upperThreshold: 2.00,
           lowerThreshold: -2.00,
-          period: 12,
+          period: 30,
         },
       }));
     }
@@ -456,7 +456,7 @@ export default function App() {
   const triggerExecutionCheck = useCallback(async () => {
     const currentSig = checkMeanReversionSignal(candles, config);
     const targetToken: 'YES' | 'NO' | undefined =
-      currentSig.signal === 'OVERBOUGHT' ? 'YES' : (currentSig.signal === 'OVERSOLD' ? 'NO' : undefined);
+      currentSig.signal === 'OVERBOUGHT' ? 'NO' : (currentSig.signal === 'OVERSOLD' ? 'YES' : undefined);
 
     if (!isBotRunning) {
       setLatestReport({
@@ -470,26 +470,27 @@ export default function App() {
       return;
     }
 
-    const serverReason = serverStatus.waitReason || 'الروبوت يراقب السوق المباشر وينتظر تحقق شروط Z-Score (±2.00)...';
+    const serverReason = serverStatus.waitReason || 'الروبوت يراقب السوق المباشر وينتظر تحقق شروط Z-Score (±2.00 للانعكاس)...';
     const isExceedingPrice = serverReason.includes('أعلى من سقف') || serverReason.includes('أعلى من قيد');
 
-    // إذا تحققت إشارة Z-Score مؤهلة (> +2.00 للصعود أو < -2.00 للهبوط)
+    // إذا تحققت إشارة Z-Score مؤهلة (> +2.00 لشراء NO أو < -2.00 لشراء YES)
     if (targetToken && (currentSig.signal === 'OVERBOUGHT' || currentSig.signal === 'OVERSOLD')) {
       const now = Date.now();
       const tokenPrices = active15mInfo?.prices;
-      const orderPrice = 0.50; // الدخول عند سعر 50 سنت بالضبط بأمر GTC
+      const orderPrice = (targetToken === 'YES' ? tokenPrices?.bestAskYes : tokenPrices?.bestAskNo) || 0.50; // تنفيذ فوري بسعر السوق المتاح عبر أمر FAK
       const targetTokenId = (targetToken === 'YES' ? (active15mInfo as any)?.tokens?.yes : (active15mInfo as any)?.tokens?.no) || '8453001';
 
-      // 1. توليد حمولة أمر EIP-712 فورياً لعرضها في فاحص EIP-712 المباشر
+      // 1. توليد حمولة أمر EIP-712 فورياً لعرضها في فاحص EIP-712 المباشر (أمر FAK بسعر السوق)
       let builtPayload: EIP712OrderPayload | undefined = undefined;
       try {
-        builtPayload = sdk.buildGtcOrderPayload({
+        builtPayload = sdk.buildFakOrderPayload({
           tokenId: targetTokenId,
-          targetPrice: 0.50,
+          targetPrice: orderPrice,
           contractsSize: 1,
           side: 0 /* Side.BUY */,
           makerAddress: connectedWallet || '0x807A7Ae675A0e16414875a2a318BEB6B55cDbB14',
           verifyingContract: (active15mInfo as any)?.venueExchange || '0x05c748E2f4DcDe0ec9Fa8DDc40DE6b867f923fa5',
+          expirationSeconds: 300,
         });
       } catch (e: any) {
         console.warn('⚠️ تعذر بناء حمولة EIP-712 مؤقتاً:', e.message);
@@ -879,7 +880,7 @@ export default function App() {
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                خطة التداول بركوب الزخم (Momentum) بأمر GTC عند 0.50$ (Lookback: 12 شمعة على فريم 1m • العتبة: &plusmn;2.00: Z&ge;+2 لشراء YES و Z&le;-2 لشراء NO • سعر الدخول: 0.50$ (50 سنت بالضبط) • إدارة المخاطر: Full Kelly 100% • سقف أمان الصفقة: 1%)
+                خطة التداول بالارتداد إلى المتوسط (Mean Reversion) بأمر FAK بسعر السوق (Lookback: 30 شمعة على فريم 1m • العتبة: &plusmn;2.00: Z&ge;+2 لشراء NO و Z&le;-2 لشراء YES • نوع الأمر: FAK بدون سقف أعلى أو أدنى • سقف أمان الصفقة: 1%)
               </p>
             </div>
           </div>
@@ -1434,7 +1435,7 @@ export default function App() {
                 <div className="mt-3 space-y-2 max-h-72 overflow-y-auto pl-1">
                   {executionLogs.length === 0 ? (
                     <div className="text-center py-10 text-slate-500 text-xs">
-                      الروبوت في وضع الاستعداد الحقيقي... بانتظار إشارة Z-Score مؤهلة لركوب الزخم (&ge; +2.00 لشراء YES أو &le; -2.00 لشراء NO) لتنفيذ أمر GTC عند سعر 0.50$ بالضبط على عقد BTC 15m.
+                      الروبوت في وضع الاستعداد الحقيقي... بانتظار إشارة Z-Score مؤهلة للارتداد إلى المتوسط (&ge; +2.00 لشراء NO أو &le; -2.00 لشراء YES) لتنفيذ أمر FAK بسعر السوق المتاح على عقد BTC 15m.
                     </div>
                   ) : (
                     executionLogs.map((log, index) => (

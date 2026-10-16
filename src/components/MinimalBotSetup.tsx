@@ -213,7 +213,7 @@ async function findAndExecuteBestBtcTrade(targetSide: 'YES' | 'NO', zScore: numb
       const bal = Number(ethers.formatUnits(await usdc.balanceOf(wallet.address), 6));
       if (bestAsk < CONFIG.kellyWinRate && bal > 0) {
         const fStar = (CONFIG.kellyWinRate - bestAsk) / (1 - bestAsk);
-        const safeFraction = Math.min(fStar * CONFIG.kellyMultiplier, 0.08);
+        const safeFraction = Math.min(fStar * CONFIG.kellyMultiplier, 0.01);
         currentTradeBudget = Math.max(0.05, Number((bal * safeFraction).toFixed(2)));
         console.log(\`🧠 [Full Kelly]: نسبة كيلي f*: \${(fStar * 100).toFixed(1)}% | ميزانية الصفقة: $\${currentTradeBudget} USDC من رصيد $\${bal.toFixed(2)} USDC\`);
       }
@@ -228,19 +228,19 @@ async function findAndExecuteBestBtcTrade(targetSide: 'YES' | 'NO', zScore: numb
     const venueExchange = marketDetails?.venue?.exchange || btc15mMarket.venue?.exchange || '0x05c748E2f4DcDe0ec9Fa8DDc40DE6b867f923fa5';
 
     if (orderClient && tokenId) {
-      console.log(\`🚀 إرسال أمر GTC بسعر 0.50$ عبر OrderClient إلى سوق 15m...\`);
+      console.log(\`🚀 إرسال أمر FAK بسعر السوق $\${bestAsk} عبر OrderClient إلى سوق 15m...\`);
       const res = await withRetry(
         () => orderClient!.createOrder({
           marketSlug: btc15mMarket.slug,
           tokenId,
           side: Side.BUY,
-          price: 0.50,
+          price: bestAsk,
           size: contracts,
-          orderType: OrderType.GTC,
+          orderType: OrderType.FAK,
         }),
         { statusCodes: [429, 500, 502, 503, 504], maxRetries: 3, delays: [1, 2, 4] }
       );
-      console.log('✅ تم وضع أمر GTC بنجاح!', res.order?.id || JSON.stringify(res));
+      console.log('✅ تم تنفيذ أمر FAK بنجاح!', res.order?.id || JSON.stringify(res));
     } else {
       console.log(\`✍️ توقيع مشفر EIP-712 بالمحفظة (\${wallet.address}) على عقد Venue (\${venueExchange})...\`);
       const domain = { name: 'Limitless OrderBook', version: '1', chainId: 8453, verifyingContract: venueExchange };
