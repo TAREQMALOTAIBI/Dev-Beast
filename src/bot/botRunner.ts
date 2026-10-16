@@ -84,7 +84,7 @@ async function ensureVenueApproval(venueExchange: string) {
 
 const ZSCORE_STRATEGY = {
   marketSlug: 'btc-price-15m-now',
-  lookbackPeriod: 12,         // نافذة الحساب: آخر 12 شمعة على فريم الـ 5 دقائق (5m = 60 دقيقة كاملة)
+  lookbackPeriod: 12,         // نافذة الحساب: آخر 12 شمعة على فريم الدقيقة (1m = 12 دقيقة)
   upperThreshold: Number(process.env.Z_SCORE_THRESHOLD) || 2.00,        // إشارة هبوط إذا أصبح Z-Score >= +2.00
   lowerThreshold: -(Number(process.env.Z_SCORE_THRESHOLD) || 2.00),       // إشارة صعود إذا أصبح Z-Score <= -2.00
   maxEntryPrice: process.env.MAX_ENTRY_PRICE ? Number(process.env.MAX_ENTRY_PRICE) : null, // إزالة سقف السعر: شراء مباشر بسعر السوق
@@ -99,7 +99,7 @@ const ZSCORE_STRATEGY = {
 };
 
 console.log(`📊 الاستراتيجية الحالية: Z-Score فقط (عتبة ±2.00) مع إدارة المخاطر Full Kelly (100% f*) على عقود BTC 15m`);
-console.log(`⏱️ نافذة الحساب (Lookback Window): آخر ${ZSCORE_STRATEGY.lookbackPeriod} شموع على فريم الـ 5 دقائق (5m)`);
+console.log(`⏱️ نافذة الحساب (Lookback Window): آخر ${ZSCORE_STRATEGY.lookbackPeriod} شموع على فريم الدقيقة (1m)`);
 console.log(`📈 إشارة صعود: Z-Score >= +${ZSCORE_STRATEGY.upperThreshold} -> شراء عقد YES (UP) بسعر السوق المباشر`);
 console.log(`📉 إشارة هبوط: Z-Score <= ${ZSCORE_STRATEGY.lowerThreshold} -> شراء عقد NO (DOWN) بسعر السوق المباشر`);
 console.log(`🧠 إدارة المخاطر: Full Kelly (100% f*) | نسبة الفوز المقدرة p: ${(ZSCORE_STRATEGY.kellyWinRate * 100).toFixed(0)}% | الحجم ديناميكي من رصيد المحفظة`);
@@ -116,10 +116,10 @@ let isProcessingOrder = false;
 
 async function fetchBinanceHistoricalKlines(limit: number = 50): Promise<number[]> {
   const restEndpoints = [
-    `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=${limit}`,
-    `https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=${limit}`,
-    `https://api1.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=${limit}`,
-    `https://api3.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=${limit}`,
+    `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
+    `https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
+    `https://api1.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
+    `https://api3.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
   ];
 
   for (const endpoint of restEndpoints) {
@@ -152,7 +152,7 @@ async function fetchBinanceHistoricalKlines(limit: number = 50): Promise<number[
 // ==========================================
 
 async function startPriceFeed() {
-  const BINANCE_WS_URL = 'wss://data-stream.binance.vision/ws/btcusdt@kline_5m';
+  const BINANCE_WS_URL = 'wss://data-stream.binance.vision/ws/btcusdt@kline_1m';
   console.log(`⚡ جاري الاتصال ببث أسعار بينانس المباشر: ${BINANCE_WS_URL}`);
 
   try {
@@ -160,7 +160,7 @@ async function startPriceFeed() {
     const ws = new WebSocketClient(BINANCE_WS_URL);
 
     ws.on('open', () => {
-      console.log('🟢 متصل ببث بينانس الحي (BTC/USDT 5m). مراقبة مستمرة للأسعار وإغلاق الشموع...');
+      console.log('🟢 متصل ببث بينانس الحي (BTC/USDT 1m). مراقبة مستمرة للأسعار وإغلاق الشموع...');
     });
 
     let lastEvaluatedTime = 0;

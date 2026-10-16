@@ -815,7 +815,7 @@ let lastCalculatedZScore: number = 0.0;
 let lastCalculatedMean: number = 94500;
 let lastCalculatedStdDev: number = 50;
 let currentWaitReason: string = isServerBotRunning
-  ? 'في انتظار إشارة Z-Score مؤهلة (> +2.00 لشراء UP أو < -2.00 لشراء DOWN على فريم 5m لآخر 12 شمعة) للتنفيذ المباشر بسعر السوق على عقد BTC 15m'
+  ? 'في انتظار إشارة Z-Score مؤهلة (> +2.00 لشراء UP أو < -2.00 لشراء DOWN على فريم 1m لآخر 12 شمعة) للتنفيذ المباشر بسعر السوق على عقد BTC 15m'
   : 'الروبوت متوقف مؤقتاً (PAUSED) - اضغط تشغيل لتفعيل التداول الآلي';
 let lastExecutionError: string | null = null;
 
@@ -892,7 +892,7 @@ async function syncLimitlessUserHistory() {
 // خطة التداول بالـ Z-Score مع إدارة المخاطر Full Kelly (100% f*)
 const ZSCORE_STRATEGY = {
   marketSlug: 'btc-price-15m-now',
-  lookbackPeriod: Number(process.env.LOOKBACK_PERIOD) || 12,         // نافذة الحساب: آخر 12 شمعة على فريم الـ 5 دقائق (5m = 60 دقيقة كاملة)
+  lookbackPeriod: Number(process.env.LOOKBACK_PERIOD) || 12,         // نافذة الحساب: آخر 12 شمعة على فريم الدقيقة (1m = 12 دقيقة)
   upperThreshold: Number(process.env.Z_SCORE_THRESHOLD) || 2.00,        // إشارة صعود: شراء عقد YES (UP) إذا أصبح Z-Score >= +2.00
   lowerThreshold: -(Number(process.env.Z_SCORE_THRESHOLD) || 2.00),       // إشارة هبوط: شراء عقد NO (DOWN) إذا أصبح Z-Score <= -2.00
   maxEntryPrice: null as number | null, // تم إزالة سقف السعر نهائياً: شراء مباشر بسعر السوق المتاح (Market Price)
@@ -1577,10 +1577,10 @@ async function executeLimitlessTrade(
 
 async function fetchBinanceHistoricalCloses(limit: number = 50): Promise<number[]> {
   const restEndpoints = [
-    `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=${limit}`,
-    `https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=${limit}`,
-    `https://api1.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=${limit}`,
-    `https://api3.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=${limit}`,
+    `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
+    `https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
+    `https://api1.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
+    `https://api3.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
   ];
 
   for (const endpoint of restEndpoints) {
@@ -1607,10 +1607,10 @@ async function fetchBinanceFullCandles(limit: number = 50): Promise<Array<{
   volume: number;
 }>> {
   const restEndpoints = [
-    `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=${limit}`,
-    `https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=${limit}`,
-    `https://api1.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=${limit}`,
-    `https://api3.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=${limit}`,
+    `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
+    `https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
+    `https://api1.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
+    `https://api3.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=${limit}`,
   ];
 
   for (const endpoint of restEndpoints) {
@@ -1636,19 +1636,19 @@ async function fetchBinanceFullCandles(limit: number = 50): Promise<Array<{
 
 async function startServerPriceFeed() {
   try {
-    // 1. جلب الشموع السابقة فوراً عبر Binance REST API (فريم 5 دقائق)
+    // 1. جلب الشموع السابقة فوراً عبر Binance REST API (فريم 1 دقيقة)
     const initialCloses = await fetchBinanceHistoricalCloses(50);
     if (initialCloses.length > 0) {
       candleCloses.push(...initialCloses);
       lastBtcPrice = candleCloses[candleCloses.length - 1];
-      console.log(`✅ [Server Bot] تم جلب ${initialCloses.length} شمعة (فريم 5 دقائق) عبر Binance REST API بنجاح! السعر الحالي: $${lastBtcPrice}`);
+      console.log(`✅ [Server Bot] تم جلب ${initialCloses.length} شمعة (فريم 1 دقيقة) عبر Binance REST API بنجاح! السعر الحالي: $${lastBtcPrice}`);
     }
 
     const WebSocketClient = (await import('ws')).default;
-    const ws = new WebSocketClient('wss://data-stream.binance.vision/ws/btcusdt@kline_5m');
+    const ws = new WebSocketClient('wss://data-stream.binance.vision/ws/btcusdt@kline_1m');
 
     ws.on('open', () => {
-      console.log('⚡ [Server Bot] متصل ببث بينانس المباشر لأسعار BTC على فريم 5 دقائق (5m).');
+      console.log('⚡ [Server Bot] متصل ببث بينانس المباشر لأسعار BTC على فريم الدقيقة (1m).');
     });
 
     ws.on('message', async (raw: string) => {
@@ -1677,7 +1677,7 @@ async function startServerPriceFeed() {
 
           // إذا كان الروبوت متوقفاً، نوقف التداول تماماً ونحدث فقط شريط الانتظار
           if (!isServerBotRunning) {
-            currentWaitReason = `الروبوت متوقف مؤقتاً (PAUSED) - لن يتم فتح أي صفقات | Z-Score اللحظي (5m) = ${zScore > 0 ? '+' : ''}${zScore}`;
+            currentWaitReason = `الروبوت متوقف مؤقتاً (PAUSED) - لن يتم فتح أي صفقات | Z-Score اللحظي (1m) = ${zScore > 0 ? '+' : ''}${zScore}`;
             lastEvaluatedSignal = zScore >= ZSCORE_STRATEGY.upperThreshold ? 'MOMENTUM_UP' : (zScore <= ZSCORE_STRATEGY.lowerThreshold ? 'MOMENTUM_DOWN' : 'NEUTRAL');
             return;
           }
@@ -1685,19 +1685,19 @@ async function startServerPriceFeed() {
           // 1. إشارة صعود: Z-Score >= +2.00 -> شراء عقد YES (UP) مع زخم الصعود
           if (zScore >= ZSCORE_STRATEGY.upperThreshold) {
             lastEvaluatedSignal = 'MOMENTUM_UP';
-            console.log(`🚨 [Server Bot]: إشارة صعود Z-Score على فريم 5m! Z = +${zScore} (أعلى من +${ZSCORE_STRATEGY.upperThreshold}). جاري شراء عقد UP (YES)...`);
+            console.log(`🚨 [Server Bot]: إشارة صعود Z-Score على فريم 1m! Z = +${zScore} (أعلى من +${ZSCORE_STRATEGY.upperThreshold}). جاري شراء عقد UP (YES)...`);
             await executeLimitlessTrade('YES', lastBtcPrice, zScore);
           }
           // 2. إشارة هبوط: Z-Score <= -2.00 -> شراء عقد NO (DOWN) مع زخم الهبوط
           else if (zScore <= ZSCORE_STRATEGY.lowerThreshold) {
             lastEvaluatedSignal = 'MOMENTUM_DOWN';
-            console.log(`🚨 [Server Bot]: إشارة هبوط Z-Score على فريم 5m! Z = ${zScore} (أدنى من ${ZSCORE_STRATEGY.lowerThreshold}). جاري شراء عقد DOWN (NO)...`);
+            console.log(`🚨 [Server Bot]: إشارة هبوط Z-Score على فريم 1m! Z = ${zScore} (أدنى من ${ZSCORE_STRATEGY.lowerThreshold}). جاري شراء عقد DOWN (NO)...`);
             await executeLimitlessTrade('NO', lastBtcPrice, zScore);
           } else {
             lastEvaluatedSignal = 'NEUTRAL';
             currentWaitReason = lastExecutionError
-              ? `⚠️ تنبيه من المحرك: ${lastExecutionError} | Z-Score (5m) = ${zScore > 0 ? '+' : ''}${zScore}`
-              : `سوق محايد: مؤشر Z-Score (5m) = ${zScore > 0 ? '+' : ''}${zScore} (المطلوب: > +${ZSCORE_STRATEGY.upperThreshold} لشراء UP أو < ${ZSCORE_STRATEGY.lowerThreshold} لشراء DOWN) | متوسط 12 شمعة (5m) = $${mean.toLocaleString()}`;
+              ? `⚠️ تنبيه من المحرك: ${lastExecutionError} | Z-Score (1m) = ${zScore > 0 ? '+' : ''}${zScore}`
+              : `سوق محايد: مؤشر Z-Score (1m) = ${zScore > 0 ? '+' : ''}${zScore} (المطلوب: > +${ZSCORE_STRATEGY.upperThreshold} لشراء UP أو < ${ZSCORE_STRATEGY.lowerThreshold} لشراء DOWN) | متوسط 12 شمعة (1m) = $${mean.toLocaleString()}`;
           }
         }
       } catch (feedErr: any) {

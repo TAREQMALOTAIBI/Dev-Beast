@@ -59,7 +59,7 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
             <div className="flex items-center gap-2">
               <span className="font-bold text-white tracking-wide text-sm sm:text-base">البيتكوين مقابل الدولار (BTC/USD)</span>
               <span className="px-2 py-0.5 text-xs font-mono rounded bg-slate-800 text-cyan-400 border border-slate-700">
-                إطار 5 دقائق (5m)
+                إطار 1 دقيقة (1m)
               </span>
               <span className="px-2 py-0.5 text-xs rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/30">
                 بث عقود 15m
@@ -246,7 +246,7 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
         {/* Sub-Chart: Z-Score (Lookback 5m - 20 candles) Visualizer Panel */}
         <div className="flex flex-wrap items-center justify-between text-xs mb-1.5 gap-2">
           <div className="flex items-center gap-2">
-            <span className="text-white font-bold">مؤشر Z-Score (فريم 5m • العتبة ±2.00):</span>
+            <span className="text-white font-bold">مؤشر Z-Score (فريم 1m • العتبة ±2.00):</span>
             <span
               dir="ltr"
               className={`font-mono font-bold text-sm px-2 py-0.5 rounded ${

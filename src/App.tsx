@@ -609,8 +609,8 @@ export default function App() {
       const endpoints = [
         '/api/binance/klines-full?limit=50',
         '/api/binance/klines?limit=50',
-        'https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=50',
-        'https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=50',
+        'https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=50',
+        'https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=50',
       ];
 
       for (const endpoint of endpoints) {
@@ -627,7 +627,7 @@ export default function App() {
             if (isCancelled) return;
             const now = Date.now();
             const realCandles: Candle[] = data.closes.map((close: number, idx: number) => ({
-              timestamp: now - (data.closes.length - idx) * 300000,
+              timestamp: now - (data.closes.length - idx) * 60000,
               open: close,
               high: close,
               low: close,
@@ -646,7 +646,7 @@ export default function App() {
               const close = parseFloat(k[4]);
               const volume = parseFloat(k[5]) || 50;
               return {
-                timestamp: k[0] || (now - (data.length - idx) * 300000),
+                timestamp: k[0] || (now - (data.length - idx) * 60000),
                 open,
                 high,
                 low,
@@ -668,7 +668,7 @@ export default function App() {
     };
   }, []);
 
-  // 2. بث أسعار بينانس الحية عبر WebSocket في المتصفح على فريم 5 دقائق (kline_5m)
+  // 2. بث أسعار بينانس الحية عبر WebSocket في المتصفح على فريم الدقيقة (kline_1m)
   useEffect(() => {
     if (!isStreaming) return;
 
@@ -676,7 +676,7 @@ export default function App() {
     let fallbackInterval: any = null;
 
     try {
-      ws = new WebSocket('wss://data-stream.binance.vision/ws/btcusdt@kline_5m');
+      ws = new WebSocket('wss://data-stream.binance.vision/ws/btcusdt@kline_1m');
 
       ws.onmessage = (event) => {
         try {
@@ -692,7 +692,7 @@ export default function App() {
             const candleTime = kline.t ? Number(kline.t) : Date.now();
 
             if (kline.x) {
-              // شمعة 5 دقائق مكتملة: التحقق من التوقيت لمنع تكرار الشمعة
+              // شمعة 1 دقيقة مكتملة: التحقق من التوقيت لمنع تكرار الشمعة
               if (lastCandle && lastCandle.timestamp === candleTime) {
                 updated[updated.length - 1] = {
                   timestamp: candleTime,
@@ -879,7 +879,7 @@ export default function App() {
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                خطة التداول بالـ Z-Score فقط (Lookback: 12 شمعة على فريم 5m • العتبة: &plusmn;2.00 • سقف الدخول: مفتوح بسعر السوق • إدارة المخاطر: Full Kelly 100%)
+                خطة التداول بالـ Z-Score فقط (Lookback: 12 شمعة على فريم 1m • العتبة: &plusmn;2.00 • سقف الدخول: مفتوح بسعر السوق • إدارة المخاطر: Full Kelly 100%)
               </p>
             </div>
           </div>
@@ -895,7 +895,7 @@ export default function App() {
 
             {/* مؤشر Z-Score السريع (التركيز على 2.00) */}
             <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800">
-              <span className="text-slate-400 text-[10px]">Z-Score (5m • 12c):</span>
+              <span className="text-slate-400 text-[10px]">Z-Score (1m • 12c):</span>
               <span
                 className={`font-mono font-bold text-xs ${
                   currentSignal.zScore >= 2.00

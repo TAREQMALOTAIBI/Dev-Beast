@@ -28,8 +28,8 @@ export const MinimalBotSetup: React.FC<MinimalBotSetupProps> = ({
 
   const selectedBinanceWs =
     binanceEndpoint === 'vision'
-      ? 'wss://data-stream.binance.vision/ws/btcusdt@kline_5m'
-      : 'wss://stream.binance.us:9443/ws/btcusdt@kline_5m';
+      ? 'wss://data-stream.binance.vision/ws/btcusdt@kline_1m'
+      : 'wss://stream.binance.us:9443/ws/btcusdt@kline_1m';
 
 // كود البوت الكامل والمستقل مع خطة التداول بالـ Z-Score ومسح جميع أسواق BTC وأمر FAK الفوري
   const dualWsBotScript = `import WebSocket from 'ws';
