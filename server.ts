@@ -1748,7 +1748,7 @@ app.get('/api/binance/klines-full', async (req, res) => {
 app.get('/api/bot/status', (req, res) => {
   res.json({
     running: isServerBotRunning,
-    strategy: 'Z-Score Momentum (Lookback: 12 candles on 5m • Z>=+2.00 -> UP/YES, Z<=-2.00 -> DOWN/NO • أمر GTC عند سعر 0.50$ بالضبط)',
+    strategy: 'Z-Score Momentum (Lookback: 12 candles on 1m • Z>=+2.00 -> UP/YES, Z<=-2.00 -> DOWN/NO • أمر GTC عند سعر 0.50$ بالضبط)',
     targetMarketFocus: 'BTC 15 Min Only (عقود بيتكوين 15 دقيقة حصراً • تنفيذ مباشر بسعر السوق)',
     active15mMarket: cachedActive15mMarket
       ? {
