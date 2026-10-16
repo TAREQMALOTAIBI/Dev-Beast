@@ -35,7 +35,7 @@ export const defaultBotConfig: BotConfig = {
   riskModel: 'FULL_KELLY', // إدارة المخاطر: Full Kelly (100% f*)
   kellyWinRate: 0.68, // نسبة النجاح المقدرة لإشارة Z-Score ±2.00
   kellyMultiplier: 1.0, // Full Kelly = 100%
-  maxBankrollRiskPercent: 0.08, // سقف أمان الصفقة الأقصى: 8% من المحفظة
+  maxBankrollRiskPercent: 0.01, // سقف أمان الصفقة الأقصى: 1% من المحفظة
   tradeSizeUsdc: 8.0, // ميزانية الصفقة بالدولار (احتياطياً)
   maxSlippagePercent: 1.0,
   apiBaseUrl: process.env.LIMITLESS_API_URL || 'https://api.limitless.exchange',

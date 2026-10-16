@@ -296,7 +296,7 @@ export interface BotConfig {
   riskModel?: 'FULL_KELLY' | 'HALF_KELLY' | 'QUARTER_KELLY' | 'FIXED'; // استراتيجية إدارة المخاطر (Full Kelly)
   kellyWinRate?: number; // نسبة الفوز المقدرة لعتبة Z-Score (افتراضياً 0.68)
   kellyMultiplier?: number; // مضاعف كيلي (1.0 لـ Full Kelly)
-  maxBankrollRiskPercent?: number; // سقف أمان الصفقة الأقصى من المحفظة (0.08 = 8%)
+  maxBankrollRiskPercent?: number; // سقف أمان الصفقة الأقصى من المحفظة (0.01 = 1%)
   tradeSizeUsdc: number;
   maxSlippagePercent: number;
   apiBaseUrl: string;

@@ -92,10 +92,10 @@ const ZSCORE_STRATEGY = {
   riskModel: process.env.RISK_MODEL || 'FULL_KELLY', // استراتيجية إدارة المخاطر: Full Kelly (100% f*)
   kellyWinRate: Number(process.env.KELLY_WIN_RATE) || 0.68, // نسبة النجاح المقدرة 68% لإشارة Z-Score ±2.00
   kellyMultiplier: 1.0,       // Full Kelly = 100% من ناتج كيلي
-  maxBankrollRiskPercent: (process.env.MAX_BANKROLL_RISK_PERCENT && Number(process.env.MAX_BANKROLL_RISK_PERCENT) !== 0.04 && Number(process.env.MAX_BANKROLL_RISK_PERCENT) !== 0.01)
+  maxBankrollRiskPercent: process.env.MAX_BANKROLL_RISK_PERCENT
     ? Number(process.env.MAX_BANKROLL_RISK_PERCENT)
-    : 0.08, // سقف حماية أقصى: 8% من المحفظة
-  tradeSizeUsdc: Number(process.env.TRADE_SIZE_USDC) || 8.0,  // ميزانية احتياطية بالدولار USDC
+    : 0.01, // سقف حماية أقصى: 1% من المحفظة
+  tradeSizeUsdc: Number(process.env.TRADE_SIZE_USDC) || 0.50,  // ميزانية احتياطية بالدولار USDC
 };
 
 console.log(`📊 الاستراتيجية الحالية: ركوب الزخم (Momentum) بالـ Z-Score (عتبة ±2.00) مع إدارة المخاطر Full Kelly على عقود BTC 15m`);
