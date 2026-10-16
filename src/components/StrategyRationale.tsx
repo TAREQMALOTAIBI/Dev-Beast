@@ -58,17 +58,17 @@ export const StrategyRationale: React.FC = () => {
 
       {/* Deep Dive Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Card 1: FAK Order Type */}
+        {/* Card 1: GTC Order Type */}
         <div className="bg-slate-900/80 p-5 rounded-2xl border border-slate-800/80 shadow-xl backdrop-blur-md">
           <div className="flex items-center gap-2 text-cyan-400 font-bold mb-3">
             <Cpu className="w-5 h-5" />
-            <h3>لماذا أمر Fill-and-Kill (FAK) حصراً؟</h3>
+            <h3>اعتماد أمر Good-Til-Cancelled (GTC) عند 0.50$</h3>
           </div>
           <p className="text-xs text-slate-300 leading-relaxed">
-            في أسواق التوقعات شديدة السيولة والسرعة، إذا وضعت أمراً معلقاً عادياً (GTC)، واستمر السعر في الانزلاق ضداً، فقد يتم تنفيذ أمرك عندما يكون الارتداد قد فشل (Adverse Selection).
+            عند تحقق إشارة الـ Z-Score، يتم وضع أمر GTC مباشر بسعر 0.50$ (50 سنت بالضبط) لضمان الدخول عند السعر المستهدف تماماً بنسبة عائد 100% ومضاعف 2.0x.
           </p>
           <div className="mt-3 p-2.5 bg-slate-950 rounded-xl border border-slate-800 text-[11px] text-slate-400 font-mono">
-            أمر FAK يأخذ فوراً السيولة المعروضة عند &le; 0.20$ ويلغي الباقي في نفس الجزء من الثانية، مما يحميك من الأوامر العالقة السامة.
+            أمر GTC يستقر في دفتر الأوامر (Orderbook) بسعر 0.50$ حتى تتم مطابقته وتعبئته بالكامل أو تسوية العقد، دون قبول أي انزلاق سعري.
           </div>
         </div>
 

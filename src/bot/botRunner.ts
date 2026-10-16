@@ -172,7 +172,7 @@ async function startPriceFeed() {
 
         const kline = payload.k;
         const currentPrice = parseFloat(kline.c);
-        const isClosed = kline.x; // هل اكتمل إغلاق شمعة الـ 5 دقائق؟
+        const isClosed = kline.x; // هل اكتمل إغلاق شمعة الـ دقيقة (1m)؟
         const now = Date.now();
 
         if (isClosed) {
@@ -308,7 +308,7 @@ function computeZScore(prices: number[], lookback: number = 12) {
 
 async function evaluateTradingSignal(lastPrice: number, isClosed: boolean = true) {
   if (candleCloses.length < (ZSCORE_STRATEGY.lookbackPeriod - 1)) {
-    console.log(`⏳ في انتظار تجميع 12 شمعة (فريم 5m) لحساب الـ Z-Score (${candleCloses.length}/${ZSCORE_STRATEGY.lookbackPeriod})...`);
+    console.log(`⏳ في انتظار تجميع 12 شمعة (فريم دقيقة واحدة 1m) لحساب الـ Z-Score (${candleCloses.length}/${ZSCORE_STRATEGY.lookbackPeriod})...`);
     return;
   }
 
@@ -318,16 +318,16 @@ async function evaluateTradingSignal(lastPrice: number, isClosed: boolean = true
 
   const { zScore, mean, stdDev } = computeZScore(livePrices, ZSCORE_STRATEGY.lookbackPeriod);
 
-  console.log(`🔍 [فحص Z-Score]: السعر=$${lastPrice.toLocaleString()} | المتوسط(5m - 12 شمعة)=$${mean.toLocaleString()} | الانحراف=$${stdDev} | Z-Score=${zScore > 0 ? '+' : ''}${zScore}`);
+  console.log(`🔍 [فحص Z-Score]: السعر=$${lastPrice.toLocaleString()} | المتوسط(1m - 12 شمعة = 12 دقيقة)=$${mean.toLocaleString()} | الانحراف=$${stdDev} | Z-Score=${zScore > 0 ? '+' : ''}${zScore}`);
 
   // 1. إشارة صعود (زخم قوي): إذا أصبح Z-Score >= +2.00 -> شراء عقد YES (UP) لركوب الصعود
   if (zScore >= ZSCORE_STRATEGY.upperThreshold) {
-    console.log(`🚨 [إشارة صعود Z-Score - ركوب الزخم!]: القيمة = +${zScore} (تجاوزت سقف +${ZSCORE_STRATEGY.upperThreshold}). اختراق صاعد قوي. الهدف: شراء عقد YES (UP) بسعر السوق عبر أمر FAK.`);
+    console.log(`🚨 [إشارة صعود Z-Score - ركوب الزخم!]: القيمة = +${zScore} (تجاوزت سقف +${ZSCORE_STRATEGY.upperThreshold}). اختراق صاعد قوي. الهدف: شراء عقد YES (UP) بسعر 0.50$ عبر أمر GTC.`);
     await checkAndExecuteLimitlessOrder('YES', lastPrice, zScore);
   }
   // 2. إشارة هبوط (زخم قوي): إذا أصبح Z-Score <= -2.00 -> شراء عقد NO (DOWN) لركوب الهبوط
   else if (zScore <= ZSCORE_STRATEGY.lowerThreshold) {
-    console.log(`🚨 [إشارة هبوط Z-Score - ركوب الزخم!]: القيمة = ${zScore} (كسرت قاع ${ZSCORE_STRATEGY.lowerThreshold}). كسر هابط قوي. الهدف: شراء عقد NO (DOWN) بسعر السوق عبر أمر FAK.`);
+    console.log(`🚨 [إشارة هبوط Z-Score - ركوب الزخم!]: القيمة = ${zScore} (كسرت قاع ${ZSCORE_STRATEGY.lowerThreshold}). كسر هابط قوي. الهدف: شراء عقد NO (DOWN) بسعر 0.50$ عبر أمر GTC.`);
     await checkAndExecuteLimitlessOrder('NO', lastPrice, zScore);
   } else {
     console.log(`⚖️ [Z-Score محايد]: القيمة = ${zScore > 0 ? '+' : ''}${zScore} ضمن النطاق الطبيعي [${ZSCORE_STRATEGY.lowerThreshold} إلى +${ZSCORE_STRATEGY.upperThreshold}]. في انتظار اختراق العتبة لركوب الزخم.`);
@@ -368,7 +368,7 @@ if (LMTS_TOKEN_ID && LMTS_TOKEN_SECRET && !LMTS_TOKEN_ID.includes('ضع_رمز')
 const tradedMarketSlugs = new Set<string>();
 
 // ==========================================
-// 5. اكتشاف سوق BTC 15 دقيقة النشط حصرياً وفحص دفتر الأوامر وتنفيذ أمر FAK فوري
+// 5. اكتشاف سوق BTC 15 دقيقة النشط حصرياً وفحص دفتر الأوامر وتنفيذ أمر GTC محدد
 // ==========================================
 
 async function getLiveActiveBtc15mMarket(): Promise<any | null> {
@@ -520,7 +520,7 @@ async function checkAndExecuteLimitlessOrder(targetToken: 'YES' | 'NO', btcPrice
 
     console.log(`🚀 [فرصة Z-Score مؤهلة في سوق BTC 15m (Full Kelly)]: تم استيفاء جميع الشروط!`);
     console.log(`   - السوق: ${activeMarket.title} (${activeMarket.slug})`);
-    console.log(`   - نوع العقد: ${targetToken} (${targetToken === 'NO' ? 'مراهنة على الهبوط من القمة' : 'مراهنة على الصعود والارتداد'})`);
+    console.log(`   - نوع العقد: ${targetToken} (${targetToken === 'YES' ? 'ركوب زخم الصعود (UP)' : 'ركوب زخم الهبوط (DOWN)'})`);
     console.log(`   - قيمة Z-Score: ${currentZScore}`);
     console.log(`   - السعر: $0.50 (50 سنت بالضبط)`);
     console.log(`   - الكمية: ${contractsCount} عقد`);

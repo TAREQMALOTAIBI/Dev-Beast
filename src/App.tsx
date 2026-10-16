@@ -52,7 +52,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'terminal' | 'portfolio' | 'setup'>('terminal');
   const [activeMarketSlug, setActiveMarketSlug] = useState<string>('btc-price-15m-now');
 
-  // إعدادات البوت والبارامترات - خيار الدقة العالية (Z = 2.00, Lookback: 12 candles on 5m / 60m, تنفيذ مباشر بسعر السوق بدون سقف سعر, سقف أمان الصفقة 8%)
+  // إعدادات البوت والبارامترات - خيار الدقة العالية (Z = 2.00, Lookback: 12 candles on 1m / 12m, أمر GTC عند سعر 0.50$ بالضبط لركوب الزخم, سقف أمان الصفقة 8%)
   const [config, setConfig] = useState<BotConfig>(() => {
     try {
       const saved = localStorage.getItem('limitless_bot_config');
@@ -65,9 +65,9 @@ export default function App() {
           zScore: {
             ...defaultBotConfig.zScore,
             ...(parsed.zScore || {}),
-            upperThreshold: 2.00, // عتبة الهبوط: 2.00
-            lowerThreshold: -2.00, // عتبة الصعود: -2.00
-            period: 12, // نافذة الحساب: 12 شمعة على فريم 5 دقائق (60 دقيقة كاملة)
+            upperThreshold: 2.00, // عتبة الصعود (شراء YES): +2.00
+            lowerThreshold: -2.00, // عتبة الهبوط (شراء NO): -2.00
+            period: 12, // نافذة الحساب: 12 شمعة على فريم دقيقة واحدة (12 دقيقة كاملة)
           },
           maxEntryPrice: parsed.maxEntryPrice !== undefined ? parsed.maxEntryPrice : 0.99, // بدون سقف سعر (تنفيذ مباشر بسعر السوق)
         };
@@ -88,7 +88,7 @@ export default function App() {
     };
   });
 
-  // مزامنة وتحديث فوري لعتبات Z-Score وسقف أمان الصفقة 8% وإلغاء سقف السعر (تنفيذ مباشر بسعر السوق على نافذة 12 شمعة / فريم 5m)
+  // مزامنة وتحديث فوري لعتبات Z-Score وسقف أمان الصفقة 8% وإلغاء سقف السعر (أمر GTC بسعر 0.50$ بالضبط على نافذة 12 شمعة / فريم 1m)
   useEffect(() => {
     if (
       config.zScore.upperThreshold !== 2.00 ||
@@ -1239,10 +1239,10 @@ export default function App() {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20 font-medium font-mono">
-                    سعر الدخول: مفتوح (تنفيذ مباشر بسعر السوق)
+                    سعر الدخول: 0.50$ (50 سنت بالضبط)
                   </span>
                   <span className="text-[11px] text-indigo-400 bg-indigo-500/10 px-2.5 py-1 rounded-lg border border-indigo-500/20 font-medium">
-                    إدارة المخاطر: Full Kelly (100% f*) • تنفيذ FAK
+                    إدارة المخاطر: Full Kelly (100% f*) • أمر GTC
                   </span>
                 </div>
               </div>
@@ -1482,7 +1482,7 @@ export default function App() {
                             <div className="flex items-center justify-between text-[10px] text-cyan-300 font-mono">
                               <span>التكلفة: ${log.totalCostUsdc} USDC</span>
                               <span>أقصى ربح: ${log.potentialPayoutUsdc} USDC ({log.asymmetricMultiplier})</span>
-                              <span className="text-emerald-400 font-sans">تنفيذ FAK</span>
+                              <span className="text-emerald-400 font-sans">أمر GTC (50 سنت)</span>
                             </div>
                             {log.txHash && (
                               <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono pt-1">
@@ -1537,7 +1537,7 @@ export default function App() {
         </div>
         <div className="flex items-center gap-4 text-slate-400">
           <span>عقود بيتكوين 15 دقيقة (BTC 15 Min)</span>
-          <span>أوامر FAK فورية</span>
+          <span>أوامر GTC محددة بسعر 0.50$</span>
         </div>
       </footer>
 

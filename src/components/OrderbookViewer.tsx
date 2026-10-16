@@ -144,7 +144,7 @@ export const OrderbookViewer: React.FC<OrderbookViewerProps> = ({
                   <span className="text-rose-400 font-bold">${ask.price.toFixed(2)}</span>
                   {isAsymmetric && (
                     <span className="text-[10px] px-1 py-0.2 rounded bg-emerald-500 text-slate-950 font-bold font-sans">
-                      شراء FAK
+                      شراء GTC
                     </span>
                   )}
                 </span>

@@ -4,7 +4,7 @@
  * متوافق بالكامل مع توثيق Trading & Orders:
  * - التحقق من سلامة السعر (0 < price < 1) والحجم
  * - فحص اعتماد عملة USDC لعقد venue.exchange
- * - تنفيذ أمر FAK الفوري واحتساب مطابقات makerMatches وحالة التسوية CONFIRMED.
+ * - تنفيذ أمر GTC المحدد بسعر 0.50$ واحتساب مطابقات makerMatches وحالة التسوية CONFIRMED.
  */
 
 import { Side } from './types';
@@ -116,10 +116,9 @@ export async function executeAsymmetricMeanReversion(
   }
 
   // الخطوة 8: حساب عدد العقود وتكلفة الشراء
-  const optimalAsk = validAsks[0];
-  const executionPrice = optimalAsk.price;
+  const executionPrice = 0.50; // الدخول عند سعر 50 سنت بالضبط بأمر GTC
   const maxContractsByBudget = Number((config.tradeSizeUsdc / executionPrice).toFixed(2));
-  const contractsToBuy = Math.min(maxContractsByBudget, optimalAsk.size);
+  const contractsToBuy = Math.max(1, maxContractsByBudget);
 
   // قواعد التحقق من السعر والحجم (Validation Rules)
   const validation = sdk.validateOrderParams(executionPrice, contractsToBuy);
@@ -142,15 +141,15 @@ export async function executeAsymmetricMeanReversion(
   const roiMultiplier = (1.00 / executionPrice).toFixed(1);
   const profitPercentage = Math.round(((1.00 - executionPrice) / executionPrice) * 100);
 
-  // الخطوة 9: بناء حمولة أمر Fill and Kill (FAK) بنظام التوقيع EIP-712
-  const orderPayload = sdk.buildFakOrderPayload({
+  // الخطوة 9: بناء حمولة أمر Good-Til-Cancelled (GTC) بنظام التوقيع EIP-712
+  const orderPayload = sdk.buildGtcOrderPayload({
     tokenId: targetTokenId,
-    targetPrice: executionPrice,
+    targetPrice: 0.50,
     contractsSize: contractsToBuy,
     side: Side.BUY,
     makerAddress: config.walletAddress,
     verifyingContract: market.venue.exchange,
-    expirationSeconds: 120,
+    expirationSeconds: 86400,
   });
 
   // الخطوة 10: التوقيع الرقمي بنظام EIP-712 عبر ethers
@@ -199,6 +198,6 @@ export async function executeAsymmetricMeanReversion(
     potentialPayoutUsdc,
     asymmetricMultiplier: `${roiMultiplier}x (+${profitPercentage}%)`,
     messageArabic: `تم تنفيذ أمر الشراء بنجاح! نوع العقد: [${targetTokenType}] بسعر $${executionPrice.toFixed(2)}. الحجم: ${contractsToBuy} عقد. تم مطابقة ${summary.makerMatches.length} عروض مستقرة (Fills) بحالة تسوية [${summary.settlementStatus}]. التكلفة: $${totalCostUsdc} USDC. العائد المتوقع عند الفوز: $${potentialPayoutUsdc} USDC (مضاعف ${roiMultiplier}x / +${profitPercentage}%).`,
-    messageEnglish: `Order executed successfully via FAK! Token: [${targetTokenType}] at $${executionPrice.toFixed(2)}. Filled ${summary.filledContracts} contracts across ${summary.makerMatches.length} fills. Settlement: ${summary.settlementStatus}.`,
+    messageEnglish: `Order executed successfully via GTC! Token: [${targetTokenType}] at $0.50. Filled ${summary.filledContracts} contracts across ${summary.makerMatches.length} fills. Settlement: ${summary.settlementStatus}.`,
   };
 }

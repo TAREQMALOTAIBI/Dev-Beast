@@ -38,7 +38,7 @@ export function calculateZScore(
     };
   }
 
-  // أخذ آخر N شمعة (Lookback Window = 12 شمعة على فريم 5m)
+  // أخذ آخر N شمعة (Lookback Window = 12 شمعة على فريم دقيقة واحدة 1m = 12 دقيقة)
   const windowPrices = closePrices.slice(-lookback);
   const currentPrice = windowPrices[windowPrices.length - 1];
 

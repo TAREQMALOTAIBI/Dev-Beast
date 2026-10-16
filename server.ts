@@ -433,7 +433,7 @@ app.post('/api/portfolio/sell', async (req, res) => {
     console.log(`📤 [Manual Sell] إرسال أمر بيع ${sharesToSell} عقد ${outcomeUpper} بسعر $${alignedPrice} في سوق ${marketSlug}...`);
 
     const orderClient = client.newOrderClient(wallet);
-    const selectedOrderType = orderType === 'GTC' ? OrderType.GTC : OrderType.FAK;
+    const selectedOrderType = orderType === 'FAK' ? OrderType.FAK : OrderType.GTC;
 
     const resOrder = await orderClient.createOrder({
       marketSlug,

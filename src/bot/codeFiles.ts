@@ -18,8 +18,8 @@ export const BOT_CODE_FILES: CodeFileRecord[] = [
     id: 'strategy',
     name: 'strategy.ts',
     path: 'src/bot/strategy.ts',
-    descriptionArabic: 'منطق الاستراتيجية وفق معايير MarketFetcher: جلب وتخزين venue.exchange مسبقاً، فحص السيولة الثنائية، وتطبيق سقف 0.20$ مع أمر FAK.',
-    descriptionEnglish: 'Core strategy execution engine, asymmetric pricing validation (Ask <= $0.20), token selection, and FAK dispatch.',
+    descriptionArabic: 'منطق الاستراتيجية وفق معايير MarketFetcher: جلب وتخزين venue.exchange مسبقاً، ركوب الزخم بالـ Z-Score، وإرسال أمر GTC عند 0.50$ بالضبط.',
+    descriptionEnglish: 'Core momentum strategy execution engine, Z-Score thresholds (±2.00), token selection, and GTC dispatch at $0.50.',
     code: `import { Side, OrderType } from '@limitless-exchange/sdk';
 import { checkMeanReversionSignal } from './indicators';
 import type { LimitlessExchangeSDK } from './limitlessSdk';
@@ -139,15 +139,15 @@ export async function executeAsymmetricMeanReversion(
   const roiMultiplier = (1.00 / executionPrice).toFixed(1);
   const profitPercentage = Math.round(((1.00 - executionPrice) / executionPrice) * 100);
 
-  // الخطوة 8: بناء حمولة أمر Fill-and-Kill (FAK) بنظام EIP-712 باستخدام venue.exchange المعتمد
-  const orderPayload = sdk.buildFakOrderPayload({
+  // الخطوة 8: بناء حمولة أمر Good-Til-Cancelled (GTC) بنظام EIP-712 بسعر 0.50$ بالضبط
+  const orderPayload = sdk.buildGtcOrderPayload({
     tokenId: targetTokenId,
-    targetPrice: executionPrice,
+    targetPrice: 0.50,
     contractsSize: contractsToBuy,
     side: Side.BUY,
     makerAddress: config.walletAddress,
     verifyingContract: market.venue.exchange,
-    expirationSeconds: 120,
+    expirationSeconds: 86400,
   });
 
   // الخطوة 9: التوقيع الرقمي EIP-712 المشفر
