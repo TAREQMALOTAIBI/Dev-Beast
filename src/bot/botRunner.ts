@@ -368,7 +368,7 @@ if (LMTS_TOKEN_ID && LMTS_TOKEN_SECRET && !LMTS_TOKEN_ID.includes('ضع_رمز')
 const tradedMarketSlugs = new Set<string>();
 
 // ==========================================
-// 5. اكتشاف سوق BTC 15 دقيقة النشط حصرياً وفحص دفتر الأوامر وتنفيذ أمر GTC محدد
+// 5. اكتشاف سوق BTC 15 دقيقة النشط حصرياً وفحص دفتر الأوامر وتنفيذ أمر FAK بسعر السوق
 // ==========================================
 
 async function getLiveActiveBtc15mMarket(): Promise<any | null> {
@@ -569,16 +569,16 @@ async function checkAndExecuteLimitlessOrder(targetToken: 'YES' | 'NO', btcPrice
         maker: wallet.address,
         tokenId: numericTokenId,
         amount: ethers.parseUnits(contractsCount.toFixed(2), 6),
-        price: ethers.parseUnits('0.50', 6), // 0.50$ بالضبط
+        price: ethers.parseUnits(bestAsk.toFixed(3), 6),
         side: 0, // BUY
         nonce: Date.now(),
-        deadline: Math.floor(Date.now() / 1000) + 86400, // صالح لمدة 24 ساعة (GTC)
+        deadline: Math.floor(Date.now() / 1000) + 300, // أمر FAK فوري
       };
 
       const signature = await wallet.signTypedData(domain, types, orderValue);
       console.log(`🔐 تم إنشاء توقيع EIP-712 بنجاح: ${signature.substring(0, 20)}...`);
 
-      console.log(`📤 إرسال أمر GTC إلى محرك مطابقة Limitless...`);
+      console.log(`📤 إرسال أمر FAK إلى محرك مطابقة Limitless...`);
       const orderPayload = {
         order: {
           ...orderValue,
@@ -587,7 +587,7 @@ async function checkAndExecuteLimitlessOrder(targetToken: 'YES' | 'NO', btcPrice
           price: orderValue.price.toString(),
         },
         signature,
-        orderType: 'GTC',
+        orderType: 'FAK',
       };
 
       const submitRes = await fetch(`${LIMITLESS_API_URL}/orders`, {

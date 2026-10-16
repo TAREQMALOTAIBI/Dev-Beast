@@ -21,7 +21,7 @@ export const Eip712Inspector: React.FC<Eip712InspectorProps> = ({
         <Key className="w-8 h-8 text-cyan-600/60 mb-2" />
         <p className="font-semibold text-slate-300">في انتظار بناء وتوقيع أمر EIP-712...</p>
         <span className="text-xs text-slate-400 mt-1 max-w-sm">
-          عند تحقق إشارة الـ Z-Score (أعلى من +2.00 للصعود أو أدنى من -2.00 للهبوط)، يقوم النظام فورياً بتوليد التوقيع المشفر لأمر GTC بسعر 0.50$ (50 سنت بالضبط) وإرساله لمحرك Limitless.
+          عند تحقق إشارة الـ Z-Score (أعلى من +2.00 للانعكاس الهابط أو أدنى من -2.00 للانعكاس الصاعد)، يقوم النظام فورياً بتوليد التوقيع المشفر لأمر FAK بسعر السوق المتاح وإرساله لمحرك Limitless للتنفيذ الفوري.
         </span>
       </div>
     );

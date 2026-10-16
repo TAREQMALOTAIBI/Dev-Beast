@@ -317,7 +317,7 @@ export class LimitlessExchangeSDK {
             outcomeTokenAmount: String(t.amount),
             outcomeTokenPrice: t.price,
             collateralAmount: (t.amount * t.price).toFixed(2),
-            strategy: 'Real Z-Score GTC Order (0.50$)',
+            strategy: 'Real Z-Score FAK Market Order',
             transactionHash: t.txHash || '0x...',
             orderId: t.txHash || 'ORD_LIMITLESS',
           }));

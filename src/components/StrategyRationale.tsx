@@ -58,17 +58,17 @@ export const StrategyRationale: React.FC = () => {
 
       {/* Deep Dive Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Card 1: GTC Order Type */}
+        {/* Card 1: FAK Order Type */}
         <div className="bg-slate-900/80 p-5 rounded-2xl border border-slate-800/80 shadow-xl backdrop-blur-md">
           <div className="flex items-center gap-2 text-cyan-400 font-bold mb-3">
             <Cpu className="w-5 h-5" />
-            <h3>اعتماد أمر Good-Til-Cancelled (GTC) عند 0.50$</h3>
+            <h3>اعتماد أمر Fill-and-Kill (FAK) بسعر السوق</h3>
           </div>
           <p className="text-xs text-slate-300 leading-relaxed">
-            عند تحقق إشارة الـ Z-Score، يتم وضع أمر GTC مباشر بسعر 0.50$ (50 سنت بالضبط) لضمان الدخول عند السعر المستهدف تماماً بنسبة عائد 100% ومضاعف 2.0x.
+            عند تحقق إشارة الـ Z-Score، يتم إرسال أمر FAK فوري بسعر السوق المتاح للتنفيذ المباشر والتقاط السيولة المعروضة في اللحظة نفسها دون انتظار.
           </p>
           <div className="mt-3 p-2.5 bg-slate-950 rounded-xl border border-slate-800 text-[11px] text-slate-400 font-mono">
-            أمر GTC يستقر في دفتر الأوامر (Orderbook) بسعر 0.50$ حتى تتم مطابقته وتعبئته بالكامل أو تسوية العقد، دون قبول أي انزلاق سعري.
+            أمر FAK يلتهم أفضل العروض كـ Taker؛ وإذا انتهت الكمية يُلغى المتبقي فوراً دون أن يعلق في دفتر الأوامر، مما يضمن سرعة الدخول وتفادي تجميد السيولة.
           </div>
         </div>
 

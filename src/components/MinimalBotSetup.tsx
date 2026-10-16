@@ -31,7 +31,7 @@ export const MinimalBotSetup: React.FC<MinimalBotSetupProps> = ({
       ? 'wss://data-stream.binance.vision/ws/btcusdt@kline_1m'
       : 'wss://stream.binance.us:9443/ws/btcusdt@kline_1m';
 
-// كود البوت الكامل والمستقل مع خطة التداول بالـ Z-Score ومسح جميع أسواق BTC وأمر GTC المحدد بسعر 0.50$
+// كود البوت الكامل والمستقل مع خطة التداول بالـ Z-Score ومسح جميع أسواق BTC وأمر FAK بسعر السوق المتاح
   const dualWsBotScript = `import WebSocket from 'ws';
 import { ethers } from 'ethers';
 import {
@@ -269,7 +269,7 @@ async function findAndExecuteBestBtcTrade(targetSide: 'YES' | 'NO', zScore: numb
       const payload = {
         order: { ...orderValue, tokenId: orderValue.tokenId.toString(), amount: orderValue.amount.toString(), price: orderValue.price.toString() },
         signature,
-        orderType: 'GTC',
+        orderType: 'FAK',
       };
       const submitRes = await fetch(\`\${CONFIG.apiBaseUrl}/orders\`, {
         method: 'POST',
@@ -277,7 +277,7 @@ async function findAndExecuteBestBtcTrade(targetSide: 'YES' | 'NO', zScore: numb
         body: JSON.stringify(payload),
       });
       const resText = await submitRes.text();
-      console.log(\`✅ إرسال أمر GTC إلى محرك Limitless! الحالة: \${submitRes.status} | الرد: \${resText}\`);
+      console.log(\`✅ إرسال أمر FAK إلى محرك Limitless! الحالة: \${submitRes.status} | الرد: \${resText}\`);
     }
     tradedMarketSlugs.add(btc15mMarket.slug);
     console.log(\`🔒 [أمان] تم قفل العقد (\${btc15mMarket.title || btc15mMarket.slug}) رسمياً - لن يتم فتح أي صفقات مكررة عليه.\`);

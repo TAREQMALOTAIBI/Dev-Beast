@@ -1036,7 +1036,7 @@ export default function App() {
                   </div>
                   <p className="text-xs text-slate-300 mt-0.5">
                     {isBotRunning
-                      ? 'الروبوت يراقب بث أسعار بينانس ودفتر أوامر Limitless ويضع أمر GTC فورياً عند سعر 0.50$ (50 سنت بالضبط) فور تحقق شرط الزخم (Z ≥ +2.00 لشراء YES أو Z ≤ -2.00 لشراء NO).'
+                      ? 'الروبوت يراقب بث أسعار بينانس ودفتر أوامر Limitless ويُرسل أمر FAK فورياً للتنفيذ بسعر السوق المتاح فور تحقق إشارة الارتداد (Z ≥ +2.00 لشراء NO أو Z ≤ -2.00 لشراء YES).'
                       : 'تم تعليق التداول التلقائي وإرسال الأوامر. يمكنك استئناف التشغيل في أي وقت.'}
                   </p>
                 </div>
@@ -1242,10 +1242,10 @@ export default function App() {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20 font-medium font-mono">
-                    سعر الدخول: 0.50$ (50 سنت بالضبط)
+                    سعر الدخول: مفتوح (سعر السوق المتاح)
                   </span>
                   <span className="text-[11px] text-indigo-400 bg-indigo-500/10 px-2.5 py-1 rounded-lg border border-indigo-500/20 font-medium">
-                    إدارة المخاطر: Full Kelly (100% f*) • أمر GTC
+                    إدارة المخاطر: Full Kelly (100% f*) • أمر FAK فوري
                   </span>
                 </div>
               </div>
@@ -1487,7 +1487,7 @@ export default function App() {
                             <div className="flex items-center justify-between text-[10px] text-cyan-300 font-mono">
                               <span>التكلفة: ${log.totalCostUsdc} USDC</span>
                               <span>أقصى ربح: ${log.potentialPayoutUsdc} USDC ({log.asymmetricMultiplier})</span>
-                              <span className="text-emerald-400 font-sans">أمر GTC (50 سنت)</span>
+                              <span className="text-cyan-400 font-sans font-medium">أمر FAK (سعر السوق)</span>
                             </div>
                             {log.txHash && (
                               <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono pt-1">
@@ -1542,7 +1542,7 @@ export default function App() {
         </div>
         <div className="flex items-center gap-4 text-slate-400">
           <span>عقود بيتكوين 15 دقيقة (BTC 15 Min)</span>
-          <span>أوامر GTC محددة بسعر 0.50$</span>
+          <span>أوامر FAK فورية بسعر السوق المتاح</span>
         </div>
       </footer>
 

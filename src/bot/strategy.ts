@@ -4,7 +4,7 @@
  * متوافق بالكامل مع توثيق Trading & Orders:
  * - التحقق من سلامة السعر (0 < price < 1) والحجم
  * - فحص اعتماد عملة USDC لعقد venue.exchange
- * - تنفيذ أمر GTC المحدد بسعر 0.50$ واحتساب مطابقات makerMatches وحالة التسوية CONFIRMED.
+ * - تنفيذ أمر FAK الفوري بسعر السوق واحتساب مطابقات makerMatches وحالة التسوية CONFIRMED.
  */
 
 import { Side } from './types';
@@ -116,7 +116,7 @@ export async function executeAsymmetricMeanReversion(
   }
 
   // الخطوة 8: حساب عدد العقود وتكلفة الشراء
-  const executionPrice = 0.50; // الدخول عند سعر 50 سنت بالضبط بأمر GTC
+  const executionPrice = bestAsk ? bestAsk.price : 0.50; // التنفيذ بسعر السوق المتاح عبر أمر FAK
   const maxContractsByBudget = Number((config.tradeSizeUsdc / executionPrice).toFixed(2));
   const contractsToBuy = Math.max(1, maxContractsByBudget);
 
