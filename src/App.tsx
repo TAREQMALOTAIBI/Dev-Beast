@@ -143,13 +143,13 @@ export default function App() {
     } | null;
   }>({
     running: false,
-    waitReason: 'في انتظار إشارة Z-Score مؤهلة (±2.00) على عقد BTC 15m بسعر السوق المباشر',
+    waitReason: 'في انتظار إشارة Z-Score مؤهلة للانعكاس إلى المتوسط (±2.00) على عقد BTC 15m بسعر السوق المباشر',
     tradeSizeUsdc: 0.50,
     maxBankrollRiskPercent: 0.08,
     isCurrentMarketTraded: false,
     currentMarketTrade: null,
     tradedContractsCount: 0,
-    targetMarketFocus: 'BTC 15 Min Only (عقود بيتكوين 15 دقيقة حصراً)',
+    targetMarketFocus: 'BTC 15 Min Only (عقود بيتكوين 15 دقيقة حصراً • استراتيجية الانعكاس إلى المتوسط)',
     active5mMarket: null,
     active15mMarket: null,
   });
@@ -879,7 +879,7 @@ export default function App() {
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                خطة التداول بالـ Z-Score فقط (Lookback: 12 شمعة على فريم 1m • العتبة: &plusmn;2.00 • سقف الدخول: مفتوح بسعر السوق • إدارة المخاطر: Full Kelly 100%)
+                خطة التداول بالانعكاس إلى المتوسط (Mean Reversion) بالـ Z-Score (Lookback: 12 شمعة على فريم 1m • العتبة: &plusmn;2.00: Z&ge;+2 لشراء NO و Z&le;-2 لشراء YES • سقف الدخول: مفتوح بسعر السوق • إدارة المخاطر: Full Kelly 100%)
               </p>
             </div>
           </div>
@@ -899,9 +899,9 @@ export default function App() {
               <span
                 className={`font-mono font-bold text-xs ${
                   currentSignal.zScore >= 2.00
-                    ? 'text-emerald-400 animate-pulse font-extrabold'
-                    : currentSignal.zScore <= -2.00
                     ? 'text-rose-400 animate-pulse font-extrabold'
+                    : currentSignal.zScore <= -2.00
+                    ? 'text-emerald-400 animate-pulse font-extrabold'
                     : 'text-cyan-300'
                 }`}
               >
@@ -1033,7 +1033,7 @@ export default function App() {
                   </div>
                   <p className="text-xs text-slate-300 mt-0.5">
                     {isBotRunning
-                      ? 'الروبوت يراقب بث أسعار بينانس ودفتر أوامر Limitless CLOB ويقتنص الفرص فور تحقق الشرط (Z-Score ≥ ±2.00 بتنفيذ مباشر بسعر السوق).'
+                      ? 'الروبوت يراقب بث أسعار بينانس ودفتر أوامر Limitless CLOB ويقتنص فرص الانعكاس إلى المتوسط فور تحقق الشرط (Z ≥ +2.00 لشراء NO أو Z ≤ -2.00 لشراء YES بتنفيذ مباشر بسعر السوق).'
                       : 'تم تعليق التداول التلقائي وإرسال الأوامر. يمكنك استئناف التشغيل في أي وقت.'}
                   </p>
                 </div>
@@ -1351,9 +1351,9 @@ export default function App() {
                       }`}
                     >
                       {currentSignal.signal === 'OVERBOUGHT'
-                        ? 'إشارة هبوط (Z >= +2.00)'
+                        ? 'انعكاس هابط من القمة (Z >= +2.00) -> شراء NO'
                         : currentSignal.signal === 'OVERSOLD'
-                        ? 'إشارة صعود (Z <= -2.00)'
+                        ? 'انعكاس صاعد من القاع (Z <= -2.00) -> شراء YES'
                         : 'حياد (NEUTRAL)'}
                     </span>
                   </h3>
