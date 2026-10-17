@@ -18,26 +18,26 @@ export const defaultBotConfig: BotConfig = {
   marketDurationMinutes: 15,
   maxEntryPrice: 0.99, // بدون سقف سعر (تنفيذ مباشر بسعر السوق المتاح عبر FAK)
   zScore: {
-    period: 30,           // Lookback Window: آخر 30 شمعة على فريم الدقيقة (1m = 30 دقيقة)
-    upperThreshold: 2.00,  // عتبة الانعكاس الهابط (شراء NO): +2.00
-    lowerThreshold: -2.00, // عتبة الانعكاس الصاعد (شراء YES): -2.00
+    period: 10,           // Lookback Window: آخر 10 شمعات على فريم الدقيقة (1m = 10 دقائق)
+    upperThreshold: 1.50,  // عتبة الانعكاس الهابط (شراء NO): +1.50
+    lowerThreshold: -1.50, // عتبة الانعكاس الصاعد (شراء YES): -1.50
   },
   bollingerBands: {
-    period: 20,
-    stdDev: 2,
+    period: 10,
+    stdDev: 1.5,
   },
   rsi: {
-    period: 14,
+    period: 7,
     overboughtThreshold: 70, // تشبع شرائي
     oversoldThreshold: 30,  // تشبع بيعي
   },
   adx: {
-    period: 14,
-    maxThreshold: 28, // عتبة السوق العرضي (أقل من 28 تذبذب عرضي، أعلى من 28 ترند قوي)
+    period: 7,
+    maxThreshold: 20, // عتبة فلتر الاتجاه (أقل من أو يساوي 20 تذبذب عرضي، أعلى من 20 ترند قوي)
     enabled: true,
   },
   rsiDivergence: {
-    lookbackCandles: 30,
+    lookbackCandles: 10,
     requireStrictConfirmation: false,
     enabled: true,
   },

@@ -844,12 +844,12 @@ let lastServerEvalTime = 0;
 const candleCloses: number[] = [];
 let serverCandles: Candle[] = [];
 let lastCalculatedAdx: AdxInfo = {
-  adx: 22.0,
+  adx: 18.0,
   pdi: 20.0,
   mdi: 20.0,
   regime: 'RANGING',
   isFavorableForMeanReversion: true,
-  descriptionArabic: 'سوق تذبذب عرضي (ADX = 22.0 ≤ 28) • بيئة ملائمة للارتداد إلى المتوسط.',
+  descriptionArabic: 'سوق تذبذب عرضي (ADX = 18.0 ≤ 20) • بيئة ملائمة للارتداد إلى المتوسط.',
 };
 let lastCalculatedDivergence: RsiDivergenceInfo = {
   detected: false,
@@ -956,13 +956,13 @@ async function syncLimitlessUserHistory() {
 // خطة التداول بالـ Z-Score مع إدارة المخاطر Full Kelly (الارتداد إلى المتوسط - Mean Reversion)
 const ZSCORE_STRATEGY = {
   marketSlug: 'btc-price-15m-now',
-  lookbackPeriod: Number(process.env.LOOKBACK_PERIOD) || 30,         // نافذة الحساب: آخر 30 شمعة على فريم الدقيقة (1m = 30 دقيقة)
-  upperThreshold: Number(process.env.Z_SCORE_THRESHOLD) || 2.00,        // إشارة انعكاس هابط (ذروة شراء): شراء عقد NO (DOWN) عند Z-Score >= +2.00
-  lowerThreshold: -(Number(process.env.Z_SCORE_THRESHOLD) || 2.00),       // إشارة انعكاس صاعد (ذروة بيع): شراء عقد YES (UP) عند Z-Score <= -2.00
+  lookbackPeriod: Number(process.env.LOOKBACK_PERIOD) || 10,         // نافذة الحساب: آخر 10 شمعات على فريم الدقيقة (1m = 10 دقائق)
+  upperThreshold: Number(process.env.Z_SCORE_THRESHOLD) || 1.50,        // إشارة انعكاس هابط (ذروة شراء): شراء عقد NO (DOWN) عند Z-Score >= +1.50
+  lowerThreshold: -(Number(process.env.Z_SCORE_THRESHOLD) || 1.50),       // إشارة انعكاس صاعد (ذروة بيع): شراء عقد YES (UP) عند Z-Score <= -1.50
   maxEntryPrice: null as number | null, // تم إزالة سقف السعر نهائياً: شراء مباشر بأمر FAK بسعر السوق المتاح بدون سقف أعلى أو أدنى
   riskPercent: 1.0,           // نسبة المخاطرة للصفقة
   riskModel: (process.env.RISK_MODEL as 'FULL_KELLY' | 'HALF_KELLY' | 'FIXED') || 'FULL_KELLY', // استراتيجية كيلي الكاملة (Full Kelly 100%)
-  kellyWinRate: Number(process.env.KELLY_WIN_RATE) || 0.68, // نسبة النجاح المقدرة 68% لإشارة Z-Score ±2.00
+  kellyWinRate: Number(process.env.KELLY_WIN_RATE) || 0.68, // نسبة النجاح المقدرة 68% لإشارة Z-Score ±1.50
   kellyMultiplier: 1.0,       // Full Kelly = 100%
   maxBankrollRiskPercent: process.env.MAX_BANKROLL_RISK_PERCENT
     ? Number(process.env.MAX_BANKROLL_RISK_PERCENT)
@@ -970,7 +970,7 @@ const ZSCORE_STRATEGY = {
   tradeSizeUsdc: Number(process.env.TRADE_SIZE_USDC) || 0.50, // الحد الأدنى المرجعي للميزانية بالدولار
 };
 
-function calculateServerZScore(prices: number[], lookback: number = 30) {
+function calculateServerZScore(prices: number[], lookback: number = 10) {
   const window = prices.slice(-lookback);
   const current = window[window.length - 1];
   const sum = window.reduce((a, b) => a + b, 0);
@@ -1707,8 +1707,8 @@ async function startServerPriceFeed() {
         candleCloses.push(c.close);
       }
       lastBtcPrice = candleCloses[candleCloses.length - 1];
-      lastCalculatedAdx = calculateAdx(serverCandles, 14);
-      lastCalculatedDivergence = detectRsiDivergence(serverCandles, 14, ZSCORE_STRATEGY.lookbackPeriod);
+      lastCalculatedAdx = calculateAdx(serverCandles, 7);
+      lastCalculatedDivergence = detectRsiDivergence(serverCandles, 7, ZSCORE_STRATEGY.lookbackPeriod);
       console.log(`✅ [Server Bot] تم جلب ${initialCandles.length} شمعة (فريم 1 دقيقة) بنجاح! السعر: $${lastBtcPrice} | ADX = ${lastCalculatedAdx.adx} (${lastCalculatedAdx.regime}) | Divergence: ${lastCalculatedDivergence.type}`);
     }
 
@@ -1759,13 +1759,13 @@ async function startServerPriceFeed() {
           lastCalculatedMean = mean;
           lastCalculatedStdDev = stdDev;
 
-          // حساب مؤشر ADX (14) وانفراج RSI
-          lastCalculatedAdx = calculateAdx(liveCandles, 14);
-          lastCalculatedDivergence = detectRsiDivergence(liveCandles, 14, ZSCORE_STRATEGY.lookbackPeriod);
+          // حساب مؤشر ADX (فترة 7 مع عتبة 20) وانفراج RSI (فترة 7)
+          lastCalculatedAdx = calculateAdx(liveCandles, 7);
+          lastCalculatedDivergence = detectRsiDivergence(liveCandles, 7, ZSCORE_STRATEGY.lookbackPeriod);
 
           // إذا كان الروبوت متوقفاً، نوقف التداول تماماً ونحدث فقط شريط الانتظار
           if (!isServerBotRunning) {
-            currentWaitReason = `الروبوت متوقف مؤقتاً (PAUSED) | Z-Score (1m - 30c) = ${zScore > 0 ? '+' : ''}${zScore} | ADX = ${lastCalculatedAdx.adx} (${lastCalculatedAdx.regime === 'RANGING' ? 'عرضي' : 'ترند'})`;
+            currentWaitReason = `الروبوت متوقف مؤقتاً (PAUSED) | Z-Score (1m - 10c) = ${zScore > 0 ? '+' : ''}${zScore} | ADX = ${lastCalculatedAdx.adx} (${lastCalculatedAdx.regime === 'RANGING' ? 'عرضي' : 'ترند'})`;
             lastEvaluatedSignal = zScore >= ZSCORE_STRATEGY.upperThreshold ? 'OVERBOUGHT' : (zScore <= ZSCORE_STRATEGY.lowerThreshold ? 'OVERSOLD' : 'NEUTRAL');
             return;
           }
@@ -1787,38 +1787,38 @@ async function startServerPriceFeed() {
             return;
           }
 
-          // 1. إشارة ارتداد هابط (ذروة شراء متطرفة): Z-Score >= +2.00 -> شراء عقد NO (DOWN)
+          // 1. إشارة ارتداد هابط (ذروة شراء متطرفة): Z-Score >= +1.50 -> شراء عقد NO (DOWN)
           if (zScore >= ZSCORE_STRATEGY.upperThreshold) {
             lastEvaluatedSignal = 'OVERBOUGHT';
-            const isTrendHostile = lastCalculatedAdx.adx > 28;
+            const isTrendHostile = lastCalculatedAdx.adx > 20;
             const hasBearishDiv = lastCalculatedDivergence.detected && lastCalculatedDivergence.type === 'BEARISH';
 
-            // حماية فلتر الترند (ADX / RSI Divergence Guard):
+            // حماية فلتر الترند (ADX / RSI-7 Divergence Guard):
             if (isTrendHostile && !hasBearishDiv) {
-              currentWaitReason = `⚠️ ترند صاعد قوي (ADX = ${lastCalculatedAdx.adx} > 28) و Z = +${zScore} | بانتظار تأكيد دايفرجنس هابط (Bearish RSI Div) لتأكيد استنفاد الزخم وتفادي الانزلاق ضد الترند.`;
-              console.log(`🛡️ [ADX/Divergence Guard]: رصد Z = +${zScore} لكن ADX = ${lastCalculatedAdx.adx} (ترند صاعد حاد). تم تفعيل حماية الحساب حتى تشكل الدايفرجنس.`);
+              currentWaitReason = `⚠️ ترند صاعد قوي (ADX = ${lastCalculatedAdx.adx} > 20) و Z = +${zScore} | بانتظار تأكيد دايفرجنس هابط (Bearish RSI-7 Div) لتأكيد استنفاد الزخم وتفادي الانزلاق ضد الترند.`;
+              console.log(`🛡️ [ADX/Divergence Guard]: رصد Z = +${zScore} لكن ADX = ${lastCalculatedAdx.adx} (ترند صاعد حاد > 20). تم تفعيل حماية الحساب حتى تشكل الدايفرجنس.`);
             } else {
               const confirmMsg = hasBearishDiv
-                ? `مع تأكيد انفراج هابط حاد (Bearish RSI Divergence 🔥)`
-                : `في بيئة تذبذب عرضي مثالية (ADX = ${lastCalculatedAdx.adx} ≤ 28 ✅)`;
+                ? `مع تأكيد انفراج هابط حاد (Bearish RSI-7 Divergence 🔥)`
+                : `في بيئة تذبذب عرضي مثالية (ADX = ${lastCalculatedAdx.adx} ≤ 20 ✅)`;
               console.log(`🚨 [Server Bot]: إشارة ارتداد هابط (Z >= +${ZSCORE_STRATEGY.upperThreshold}) ${confirmMsg}! Z = +${zScore}. جاري شراء عقد DOWN (NO) بأمر FAK بسعر السوق...`);
               await executeLimitlessTrade('NO', lastBtcPrice, zScore);
             }
           }
-          // 2. إشارة ارتداد صاعد (ذروة بيع متطرفة): Z-Score <= -2.00 -> شراء عقد YES (UP)
+          // 2. إشارة ارتداد صاعد (ذروة بيع متطرفة): Z-Score <= -1.50 -> شراء عقد YES (UP)
           else if (zScore <= ZSCORE_STRATEGY.lowerThreshold) {
             lastEvaluatedSignal = 'OVERSOLD';
-            const isTrendHostile = lastCalculatedAdx.adx > 28;
+            const isTrendHostile = lastCalculatedAdx.adx > 20;
             const hasBullishDiv = lastCalculatedDivergence.detected && lastCalculatedDivergence.type === 'BULLISH';
 
-            // حماية فلتر الترند (ADX / RSI Divergence Guard):
+            // حماية فلتر الترند (ADX / RSI-7 Divergence Guard):
             if (isTrendHostile && !hasBullishDiv) {
-              currentWaitReason = `⚠️ ترند هابط حاد (ADX = ${lastCalculatedAdx.adx} > 28) و Z = ${zScore} | بانتظار تأكيد دايفرجنس صاعد (Bullish RSI Div) لتأكيد استنفاد البائعين وتفادي السقوط الحر.`;
-              console.log(`🛡️ [ADX/Divergence Guard]: رصد Z = ${zScore} لكن ADX = ${lastCalculatedAdx.adx} (ترند هابط حاد). تم تفعيل حماية الحساب حتى تشكل الدايفرجنس.`);
+              currentWaitReason = `⚠️ ترند هابط حاد (ADX = ${lastCalculatedAdx.adx} > 20) و Z = ${zScore} | بانتظار تأكيد دايفرجنس صاعد (Bullish RSI-7 Div) لتأكيد استنفاد البائعين وتفادي السقوط الحر.`;
+              console.log(`🛡️ [ADX/Divergence Guard]: رصد Z = ${zScore} لكن ADX = ${lastCalculatedAdx.adx} (ترند هابط حاد > 20). تم تفعيل حماية الحساب حتى تشكل الدايفرجنس.`);
             } else {
               const confirmMsg = hasBullishDiv
-                ? `مع تأكيد انفراج صاعد حاد (Bullish RSI Divergence 🔥)`
-                : `في بيئة تذبذب عرضي مثالية (ADX = ${lastCalculatedAdx.adx} ≤ 28 ✅)`;
+                ? `مع تأكيد انفراج صاعد حاد (Bullish RSI-7 Divergence 🔥)`
+                : `في بيئة تذبذب عرضي مثالية (ADX = ${lastCalculatedAdx.adx} ≤ 20 ✅)`;
               console.log(`🚨 [Server Bot]: إشارة ارتداد صاعد (Z <= ${ZSCORE_STRATEGY.lowerThreshold}) ${confirmMsg}! Z = ${zScore}. جاري شراء عقد UP (YES) بأمر FAK بسعر السوق...`);
               await executeLimitlessTrade('YES', lastBtcPrice, zScore);
             }
@@ -1826,11 +1826,11 @@ async function startServerPriceFeed() {
             lastEvaluatedSignal = 'NEUTRAL';
             let divLabel = '';
             if (lastCalculatedDivergence.detected) {
-              divLabel = lastCalculatedDivergence.type === 'BULLISH' ? ' | 🟢 دايفرجنس صاعد قيد التشكل' : ' | 🔴 دايفرجنس هابط قيد التشكل';
+              divLabel = lastCalculatedDivergence.type === 'BULLISH' ? ' | 🟢 دايفرجنس صاعد قيد التشكل (RSI-7)' : ' | 🔴 دايفرجنس هابط قيد التشكل (RSI-7)';
             }
             currentWaitReason = lastExecutionError
-              ? `⚠️ تنبيه من المحرك: ${lastExecutionError} | Z-Score (1m - 30c) = ${zScore > 0 ? '+' : ''}${zScore}`
-              : `سوق محايد: Z-Score = ${zScore > 0 ? '+' : ''}${zScore} (المطلوب: > +${ZSCORE_STRATEGY.upperThreshold} لشراء NO أو < ${ZSCORE_STRATEGY.lowerThreshold} لشراء YES) | ADX = ${lastCalculatedAdx.adx} (${lastCalculatedAdx.regime === 'RANGING' ? 'تذبذب عرضي ملائم ✅' : 'ترند اتجاهي ⚡'})${divLabel}`;
+              ? `⚠️ تنبيه من المحرك: ${lastExecutionError} | Z-Score (1m - 10c) = ${zScore > 0 ? '+' : ''}${zScore}`
+              : `سوق محايد: Z-Score = ${zScore > 0 ? '+' : ''}${zScore} (المطلوب: > +${ZSCORE_STRATEGY.upperThreshold} لشراء NO أو < ${ZSCORE_STRATEGY.lowerThreshold} لشراء YES) | ADX = ${lastCalculatedAdx.adx} (${lastCalculatedAdx.regime === 'RANGING' ? 'تذبذب عرضي ملائم ≤ 20 ✅' : 'ترند اتجاهي > 20 ⚡'})${divLabel}`;
           }
         }
       } catch (feedErr: any) {
@@ -2033,7 +2033,7 @@ app.post('/api/bot/toggle', (req, res) => {
     lastExecutionError = null;
   }
   currentWaitReason = isServerBotRunning
-    ? 'في انتظار إشارة Z-Score مؤهلة للارتداد إلى المتوسط (> +2.00 لشراء NO أو < -2.00 لشراء YES على فريم 1m لآخر 30 شمعة) بأمر FAK بسعر السوق'
+    ? 'في انتظار إشارة Z-Score مؤهلة للارتداد إلى المتوسط (> +1.50 لشراء NO أو < -1.50 لشراء YES على فريم 1m لآخر 10 شموع مع ADX ≤ 20 و RSI-7) بأمر FAK بسعر السوق'
     : 'الروبوت متوقف مؤقتاً (PAUSED) - اضغط تشغيل لتفعيل التداول الآلي';
   console.log(`🎛️ [Server Bot] تم تغيير حالة تشغيل الروبوت على السيرفر إلى: ${isServerBotRunning ? 'تشغيل (RUNNING)' : 'إيقاف (STOPPED)'}`);
   res.json({ running: isServerBotRunning, waitReason: currentWaitReason, lastExecutionError });

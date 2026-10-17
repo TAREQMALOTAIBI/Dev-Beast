@@ -27,7 +27,7 @@ import type {
  */
 export function calculateZScore(
   closePrices: number[],
-  lookback: number = 30
+  lookback: number = 10
 ): {
   zScore: number;
   mean: number;
@@ -44,7 +44,7 @@ export function calculateZScore(
     };
   }
 
-  // أخذ آخر N شمعة (Lookback Window = 30 شمعة على فريم دقيقة واحدة 1m)
+  // أخذ آخر N شمعة (Lookback Window = 10 شمعات على فريم دقيقة واحدة 1m)
   const windowPrices = closePrices.slice(-lookback);
   const currentPrice = windowPrices[windowPrices.length - 1];
 
@@ -69,12 +69,12 @@ export function calculateZScore(
 
 /**
  * حساب مؤشر متوسط الحركة الاتجاهية ADX (Average Directional Index)
- * لقياس هل السوق في وضع تذبذب عرضي محصور (Mean-Reverting) أم في اتجاه كاسح (Trending)
+ * فترة سريعة 7 شمعات مع عتبة 20 لفلترة الاتجاه
  */
-export function calculateAdx(candles: Candle[], period: number = 14): AdxInfo {
-  if (!candles || candles.length < period + 5) {
+export function calculateAdx(candles: Candle[], period: number = 7): AdxInfo {
+  if (!candles || candles.length < period + 3) {
     return {
-      adx: 20.0,
+      adx: 18.0,
       pdi: 20.0,
       mdi: 20.0,
       regime: 'RANGING',
@@ -97,12 +97,12 @@ export function calculateAdx(candles: Candle[], period: number = 14): AdxInfo {
       const pdiVal = Number(latest.pdi.toFixed(1));
       const mdiVal = Number(latest.mdi.toFixed(1));
 
-      // عتبة 28: إذا كان ADX <= 28 فالسوق في حركة عرضية تذبذبية ملائمة تماماً للارتداد إلى المتوسط
-      const isFavorable = adxVal <= 28;
+      // عتبة 20: إذا كان ADX <= 20 فالسوق في حركة عرضية تذبذبية ملائمة تماماً للارتداد إلى المتوسط
+      const isFavorable = adxVal <= 20;
       const regime = isFavorable ? 'RANGING' : 'TRENDING';
       const descriptionArabic = isFavorable
-        ? `سوق تذبذب عرضي (ADX = ${adxVal} ≤ 28): بيئة ملائمة ومثالية لاستراتيجية الارتداد إلى المتوسط (Mean Reversion Regime).`
-        : `سوق في اتجاه كاسح (ADX = ${adxVal} > 28): ترند اتجاهي قوي، يُشترط تأكيد دايفرجنس لتفادي الارتداد الوهمي.`;
+        ? `سوق تذبذب عرضي (ADX = ${adxVal} ≤ 20): بيئة ملائمة ومثالية لاستراتيجية الارتداد إلى المتوسط (Mean Reversion Regime).`
+        : `سوق في اتجاه كاسح (ADX = ${adxVal} > 20): ترند اتجاهي قوي، يُشترط تأكيد دايفرجنس لتفادي الارتداد الوهمي.`;
 
       return {
         adx: adxVal,
@@ -118,12 +118,12 @@ export function calculateAdx(candles: Candle[], period: number = 14): AdxInfo {
   }
 
   return {
-    adx: 22.0,
+    adx: 18.0,
     pdi: 20.0,
     mdi: 20.0,
     regime: 'RANGING',
     isFavorableForMeanReversion: true,
-    descriptionArabic: 'حالة ADX عرضية افتراضية (22.0).',
+    descriptionArabic: 'حالة ADX عرضية افتراضية (18.0).',
   };
 }
 
@@ -133,10 +133,10 @@ export function calculateAdx(candles: Candle[], period: number = 14): AdxInfo {
  */
 export function detectRsiDivergence(
   candles: Candle[],
-  rsiPeriod: number = 14,
-  windowLookback: number = 30
+  rsiPeriod: number = 7,
+  windowLookback: number = 10
 ): RsiDivergenceInfo {
-  if (!candles || candles.length < rsiPeriod + 10) {
+  if (!candles || candles.length < rsiPeriod + 5) {
     return {
       detected: false,
       type: 'NONE',
@@ -248,18 +248,18 @@ export function detectRsiDivergence(
 
 /**
  * وظيفة فحص وتقييم إشارة التداول الشاملة:
- * دمج Z-Score (نافذة 30 شمعة / عتبة ±2.00) مع فلتر ADX وانفراج RSI
+ * دمج Z-Score (نافذة 10 شمعات / عتبة ±1.50) مع فلتر ADX وانفراج RSI
  */
 export function checkMeanReversionSignal(
   candles: Candle[],
   config: BotConfig
 ): SignalEvaluation {
-  const lookbackPeriod = config.zScore?.period || 30; // نافذة الـ 30 شمعة دقيقة (1m = 30 دقيقة)
-  const upperThreshold = config.zScore?.upperThreshold !== undefined ? config.zScore.upperThreshold : 2.00; // عتبة الهبوط +2.00
-  const lowerThreshold = config.zScore?.lowerThreshold !== undefined ? config.zScore.lowerThreshold : -2.00; // عتبة الصعود -2.00
+  const lookbackPeriod = config.zScore?.period || 10; // نافذة الـ 10 شمعات دقيقة (1m = 10 دقائق)
+  const upperThreshold = config.zScore?.upperThreshold !== undefined ? config.zScore.upperThreshold : 1.50; // عتبة الهبوط +1.50
+  const lowerThreshold = config.zScore?.lowerThreshold !== undefined ? config.zScore.lowerThreshold : -1.50; // عتبة الصعود -1.50
 
   // التحقق من كفاية بيانات الشموع
-  if (!candles || candles.length < Math.min(lookbackPeriod, 20)) {
+  if (!candles || candles.length < Math.min(lookbackPeriod, 10)) {
     const fallbackPrice = candles && candles.length > 0 ? candles[candles.length - 1].close : 0;
     return {
       signal: 'NEUTRAL',
@@ -271,8 +271,8 @@ export function checkMeanReversionSignal(
       bollingerBands: { upper: fallbackPrice, middle: fallbackPrice, lower: fallbackPrice },
       isOverbought: false,
       isOversold: false,
-      explanationArabic: `في انتظار اكتمال 30 شمعة دقيقة لحساب الـ Z-Score ومؤشرات التأكيد (المتوفر حالياً: ${candles ? candles.length : 0} شمعة).`,
-      explanationEnglish: `Waiting for 30 one-minute candles for Z-Score & confirmation analysis (Available: ${candles?.length || 0}).`,
+      explanationArabic: `في انتظار اكتمال 10 شمعات دقيقة لحساب الـ Z-Score ومؤشرات التأكيد (المتوفر حالياً: ${candles ? candles.length : 0} شمعة).`,
+      explanationEnglish: `Waiting for 10 one-minute candles for Z-Score & confirmation analysis (Available: ${candles?.length || 0}).`,
       evaluatedAt: Date.now(),
     };
   }
@@ -281,7 +281,7 @@ export function checkMeanReversionSignal(
   const closePrices: number[] = candles.map((c) => c.close);
   const currentPrice = closePrices[closePrices.length - 1];
 
-  // 1. حساب Z-Score بدقة إحصائية على نافذة الـ 30 شمعة
+  // 1. حساب Z-Score بدقة إحصائية على نافذة الـ 10 شمعات
   const { zScore, mean, stdDev } = calculateZScore(closePrices, lookbackPeriod);
 
   // 2. حساب Bollinger Bands و RSI للعرض في الواجهة الرسومية
@@ -293,24 +293,24 @@ export function checkMeanReversionSignal(
   let rsiValue = 50;
 
   try {
-    const rsiCalc = RSI.calculate({ period: config.rsi?.period || 14, values: closePrices });
+    const rsiCalc = RSI.calculate({ period: config.rsi?.period || 7, values: closePrices });
     if (rsiCalc.length > 0) rsiValue = Number(rsiCalc[rsiCalc.length - 1].toFixed(1));
   } catch {}
 
-  // 3. حساب مؤشر ADX (14)
-  const adxInfo = calculateAdx(candles, config.adx?.period || 14);
+  // 3. حساب مؤشر ADX (7)
+  const adxInfo = calculateAdx(candles, config.adx?.period || 7);
 
-  // 4. فحص انفراج مؤشر القوة النسبية (RSI Divergence)
-  const divergenceInfo = detectRsiDivergence(candles, config.rsi?.period || 14, lookbackPeriod);
+  // 4. فحص انفراج مؤشر القوة النسبية (RSI-7 Divergence)
+  const divergenceInfo = detectRsiDivergence(candles, config.rsi?.period || 7, lookbackPeriod);
 
   // ==========================================
   // شروط الدخول بالـ Z-Score المقترنة بـ ADX والـ RSI Divergence
   // ==========================================
 
-  // إشارة ارتداد هابط: Z-Score >= +2.00
+  // إشارة ارتداد هابط: Z-Score >= +1.50
   const isOverbought = zScore >= upperThreshold;
 
-  // إشارة ارتداد صاعد: Z-Score <= -2.00
+  // إشارة ارتداد صاعد: Z-Score <= -1.50
   const isOversold = zScore <= lowerThreshold;
 
   if (isOverbought) {
@@ -319,9 +319,9 @@ export function checkMeanReversionSignal(
       explanationArabic += `🔥 [تأكيد مضاعف - دايفرجنس هابط رائع]: السعر متضخم مع ضعف واضح في عزم المشترين. `;
     }
     if (adxInfo.isFavorableForMeanReversion) {
-      explanationArabic += `✅ ADX = ${adxInfo.adx} (سوق عرضي ممتاز للارتداد). `;
+      explanationArabic += `✅ ADX = ${adxInfo.adx} (سوق عرضي ممتاز للارتداد ≤ 20). `;
     } else {
-      explanationArabic += `⚠️ ADX = ${adxInfo.adx} (ترند قوي - يتم الاعتماد على الدايفرجنس لتأكيد الانعكاس). `;
+      explanationArabic += `⚠️ ADX = ${adxInfo.adx} (ترند قوي > 20 - يتم الاعتماد على الدايفرجنس لتأكيد الانعكاس). `;
     }
     explanationArabic += `الهدف: شراء عقد DOWN (NO) بأمر FAK بسعر السوق المباشر.`;
 

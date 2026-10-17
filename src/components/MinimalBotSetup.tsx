@@ -65,12 +65,12 @@ const CREDENTIALS = {
 
 // 2. إعدادات خطة الـ Z-Score المحدثة
 const CONFIG = {
-  lookback: 12,         // نافذة الحساب: آخر 12 شمعة على فريم الـ 5 دقائق (5m)
-  upperZScore: 2.00,    // إشارة صعود (شراء UP): Z-Score >= +2.00
-  lowerZScore: -2.00,   // إشارة هبوط (شراء DOWN): Z-Score <= -2.00
+  lookback: 10,         // نافذة الحساب: آخر 10 شمعات على فريم الدقيقة (1m)
+  upperZScore: 1.50,    // إشارة انعكاس هابط (شراء NO): Z-Score >= +1.50
+  lowerZScore: -1.50,   // إشارة انعكاس صاعد (شراء YES): Z-Score <= -1.50
   maxEntryPrice: ${config.maxEntryPrice >= 0.95 ? 'null /* بدون سقف - سعر السوق المباشر */' : config.maxEntryPrice},
   riskModel: 'FULL_KELLY', // إدارة المخاطر: Full Kelly (100% f*)
-  kellyWinRate: 0.68,   // نسبة الفوز المقدرة لإشارة Z-Score ±2.00
+  kellyWinRate: 0.68,   // نسبة الفوز المقدرة لإشارة Z-Score ±1.50
   kellyMultiplier: 1.0, // Full Kelly = 100%
   tradeSizeUsdc: ${config.tradeSizeUsdc},  // ميزانية الصفقة بالدولار (احتياطياً)
   apiBaseUrl: '${config.apiBaseUrl || 'https://api.limitless.exchange'}',

@@ -52,7 +52,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'terminal' | 'portfolio' | 'setup'>('terminal');
   const [activeMarketSlug, setActiveMarketSlug] = useState<string>('btc-price-15m-now');
 
-  // إعدادات البوت والبارامترات - استراتيجية الارتداد إلى المتوسط (Z = ±2.00, Lookback: 30 candles on 1m, أمر FAK بسعر السوق بدون سقف, سقف أمان الصفقة 1%)
+  // إعدادات البوت والبارامترات - استراتيجية الارتداد إلى المتوسط (Z = ±1.50, Lookback: 10 candles on 1m, ADX <= 20, RSI-7, أمر FAK بسعر السوق بدون سقف, سقف أمان الصفقة 1%)
   const [config, setConfig] = useState<BotConfig>(() => {
     try {
       const saved = localStorage.getItem('limitless_bot_config');
@@ -65,9 +65,19 @@ export default function App() {
           zScore: {
             ...defaultBotConfig.zScore,
             ...(parsed.zScore || {}),
-            upperThreshold: 2.00, // عتبة الانعكاس الهابط (شراء NO): +2.00
-            lowerThreshold: -2.00, // عتبة الانعكاس الصاعد (شراء YES): -2.00
-            period: 30, // نافذة الحساب: 30 شمعة على فريم دقيقة واحدة (30 دقيقة كاملة)
+            upperThreshold: 1.50, // عتبة الانعكاس الهابط (شراء NO): +1.50
+            lowerThreshold: -1.50, // عتبة الانعكاس الصاعد (شراء YES): -1.50
+            period: 10, // نافذة الحساب: 10 شمعات على فريم دقيقة واحدة (10 دقائق)
+          },
+          rsi: {
+            ...defaultBotConfig.rsi,
+            period: 7,
+          },
+          adx: {
+            ...defaultBotConfig.adx,
+            period: 7,
+            maxThreshold: 20,
+            enabled: true,
           },
           maxEntryPrice: parsed.maxEntryPrice !== undefined ? parsed.maxEntryPrice : 0.99, // بدون سقف سعر (تنفيذ فوري بسعر السوق عبر أمر FAK)
         };
@@ -81,19 +91,32 @@ export default function App() {
       maxEntryPrice: 0.99,
       zScore: {
         ...defaultBotConfig.zScore,
-        upperThreshold: 2.00,
-        lowerThreshold: -2.00,
-        period: 30,
+        upperThreshold: 1.50,
+        lowerThreshold: -1.50,
+        period: 10,
+      },
+      rsi: {
+        ...defaultBotConfig.rsi,
+        period: 7,
+      },
+      adx: {
+        ...defaultBotConfig.adx,
+        period: 7,
+        maxThreshold: 20,
+        enabled: true,
       },
     };
   });
 
-  // مزامنة وتحديث فوري لعتبات Z-Score وسقف أمان الصفقة 1% وإلغاء سقف السعر (أمر FAK بسعر السوق المتاح على نافذة 30 شمعة / فريم 1m)
+  // مزامنة وتحديث فوري لعتبات Z-Score (1.50) ونافذة 10 شمعات وسقف أمان الصفقة 1% وإلغاء سقف السعر (أمر FAK بسعر السوق المتاح)
   useEffect(() => {
     if (
-      config.zScore.upperThreshold !== 2.00 ||
-      config.zScore.lowerThreshold !== -2.00 ||
-      config.zScore.period !== 30 ||
+      config.zScore.upperThreshold !== 1.50 ||
+      config.zScore.lowerThreshold !== -1.50 ||
+      config.zScore.period !== 10 ||
+      config.rsi.period !== 7 ||
+      config.adx?.period !== 7 ||
+      config.adx?.maxThreshold !== 20 ||
       config.maxEntryPrice < 0.95 ||
       config.maxBankrollRiskPercent !== 0.01
     ) {
@@ -103,13 +126,23 @@ export default function App() {
         maxBankrollRiskPercent: 0.01, // سقف أمان الصفقة: 1% من المحفظة
         zScore: {
           ...prev.zScore,
-          upperThreshold: 2.00,
-          lowerThreshold: -2.00,
-          period: 30,
+          upperThreshold: 1.50,
+          lowerThreshold: -1.50,
+          period: 10,
+        },
+        rsi: {
+          ...prev.rsi,
+          period: 7,
+        },
+        adx: {
+          ...(prev.adx || defaultBotConfig.adx!),
+          period: 7,
+          maxThreshold: 20,
+          enabled: true,
         },
       }));
     }
-  }, [config.zScore.upperThreshold, config.zScore.lowerThreshold, config.zScore.period, config.maxEntryPrice, config.maxBankrollRiskPercent]);
+  }, [config.zScore.upperThreshold, config.zScore.lowerThreshold, config.zScore.period, config.rsi?.period, config.adx?.period, config.adx?.maxThreshold, config.maxEntryPrice, config.maxBankrollRiskPercent]);
 
   // حالة ربط المحفظة الحقيقية (Web3 Wallet)
   const [connectedWallet, setConnectedWallet] = useState<string | null>(() => {
@@ -145,7 +178,7 @@ export default function App() {
     } | null;
   }>({
     running: false,
-    waitReason: 'في انتظار إشارة Z-Score مؤهلة للارتداد إلى المتوسط (±2.00) على عقد BTC 15m مع تأكيد ADX و RSI Divergence',
+    waitReason: 'في انتظار إشارة Z-Score مؤهلة للارتداد إلى المتوسط (±1.50) على عقد BTC 15m مع تأكيد ADX ≤ 20 و RSI-7',
     tradeSizeUsdc: 0.50,
     maxBankrollRiskPercent: 0.01,
     isCurrentMarketTraded: false,
@@ -480,10 +513,10 @@ export default function App() {
       return;
     }
 
-    const serverReason = serverStatus.waitReason || 'الروبوت يراقب السوق المباشر وينتظر تحقق شروط Z-Score (±2.00 للانعكاس)...';
+    const serverReason = serverStatus.waitReason || 'الروبوت يراقب السوق المباشر وينتظر تحقق شروط Z-Score (±1.50 للانعكاس)...';
     const isExceedingPrice = serverReason.includes('أعلى من سقف') || serverReason.includes('أعلى من قيد');
 
-    // إذا تحققت إشارة Z-Score مؤهلة (> +2.00 لشراء NO أو < -2.00 لشراء YES)
+    // إذا تحققت إشارة Z-Score مؤهلة (> +1.50 لشراء NO أو < -1.50 لشراء YES)
     if (targetToken && (currentSig.signal === 'OVERBOUGHT' || currentSig.signal === 'OVERSOLD')) {
       const now = Date.now();
       const tokenPrices = active15mInfo?.prices;
@@ -850,7 +883,7 @@ export default function App() {
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                خطة التداول بالارتداد إلى المتوسط (Mean Reversion) بأمر FAK بسعر السوق (Lookback: 30 شمعة على فريم 1m • العتبة: &plusmn;2.00: Z&ge;+2 لشراء NO و Z&le;-2 لشراء YES • نوع الأمر: FAK بدون سقف أعلى أو أدنى • سقف أمان الصفقة: 1%)
+                خطة التداول بالارتداد إلى المتوسط (Mean Reversion) بأمر FAK بسعر السوق (Lookback: 10 شمعات على فريم 1m • العتبة: &plusmn;1.50: Z&ge;+1.5 لشراء NO و Z&le;-1.5 لشراء YES • مؤشر ADX &le; 20 و RSI-7 • نوع الأمر: FAK بدون سقف أعلى أو أدنى • سقف أمان الصفقة: 1%)
               </p>
             </div>
           </div>
@@ -864,14 +897,14 @@ export default function App() {
               </span>
             </div>
 
-            {/* مؤشر Z-Score السريع (التركيز على 2.00) */}
+            {/* مؤشر Z-Score السريع (التركيز على 1.50) */}
             <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800">
-              <span className="text-slate-400 text-[10px]">Z-Score (1m • 12c):</span>
+              <span className="text-slate-400 text-[10px]">Z-Score (1m • 10c):</span>
               <span
                 className={`font-mono font-bold text-xs ${
-                  currentSignal.zScore >= 2.00
+                  currentSignal.zScore >= 1.50
                     ? 'text-emerald-400 animate-pulse font-extrabold'
-                    : currentSignal.zScore <= -2.00
+                    : currentSignal.zScore <= -1.50
                     ? 'text-rose-400 animate-pulse font-extrabold'
                     : 'text-cyan-300'
                 }`}
@@ -883,18 +916,18 @@ export default function App() {
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800">
               <span
                 className={`w-2 h-2 rounded-full ${
-                  currentSignal.zScore >= 2.00
+                  currentSignal.zScore >= 1.50
                     ? 'bg-emerald-500 animate-ping'
-                    : currentSignal.zScore <= -2.00
+                    : currentSignal.zScore <= -1.50
                     ? 'bg-rose-500 animate-ping'
                     : 'bg-cyan-500'
                 }`}
               />
               <span className="font-semibold text-slate-300">
-                {currentSignal.zScore >= 2.00
-                  ? 'إشارة صعود: شراء UP (Z >= +2.00)'
-                  : currentSignal.zScore <= -2.00
-                  ? 'إشارة هبوط: شراء DOWN (Z <= -2.00)'
+                {currentSignal.zScore >= 1.50
+                  ? 'إشارة ذروة شراء: شراء NO (Z >= +1.50)'
+                  : currentSignal.zScore <= -1.50
+                  ? 'إشارة ذروة بيع: شراء YES (Z <= -1.50)'
                   : 'سوق محايد (Neutral)'}
               </span>
             </div>
@@ -1252,7 +1285,7 @@ export default function App() {
                     </span>
                   </div>
                   <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                    يتم احتساب حجم الصفقة ديناميكياً من رصيد المحفظة وفق المعادلة: <span className="font-mono text-indigo-300 font-bold">f* = (p - c) / (1 - c)</span>، حيث نسبة الفوز المقدرة <span className="font-mono text-emerald-400 font-bold">p = 68%</span> لإشارات Z-Score (&plusmn;2.00). يتم حظر الصفقات ذات الميزة السالبة (Negative Edge) تلقائياً.
+                    يتم احتساب حجم الصفقة ديناميكياً من رصيد المحفظة وفق المعادلة: <span className="font-mono text-indigo-300 font-bold">f* = (p - c) / (1 - c)</span>، حيث نسبة الفوز المقدرة <span className="font-mono text-emerald-400 font-bold">p = 68%</span> لإشارات Z-Score (&plusmn;1.50). يتم حظر الصفقات ذات الميزة السالبة (Negative Edge) تلقائياً.
                   </p>
                 </div>
               </div>
@@ -1426,7 +1459,7 @@ export default function App() {
                 <div className="mt-3 space-y-2 max-h-72 overflow-y-auto pl-1">
                   {executionLogs.length === 0 ? (
                     <div className="text-center py-10 text-slate-500 text-xs">
-                      الروبوت في وضع الاستعداد الحقيقي... بانتظار إشارة Z-Score مؤهلة للارتداد إلى المتوسط (&ge; +2.00 لشراء NO أو &le; -2.00 لشراء YES) لتنفيذ أمر FAK بسعر السوق المتاح على عقد BTC 15m.
+                      الروبوت في وضع الاستعداد الحقيقي... بانتظار إشارة Z-Score مؤهلة للارتداد إلى المتوسط (&ge; +1.50 لشراء NO أو &le; -1.50 لشراء YES على فريم 1m لآخر 10 شموع) لتنفيذ أمر FAK بسعر السوق المتاح على عقد BTC 15m.
                     </div>
                   ) : (
                     executionLogs.map((log, index) => (
