@@ -292,13 +292,21 @@ export default function App() {
   const [manualTradeFeedback, setManualTradeFeedback] = useState<string | null>(null);
 
   const handleManualExecuteTrade = async (tokenType: 'YES' | 'NO') => {
+    if (serverStatus.isCurrentMarketTraded) {
+      const prev = serverStatus.currentMarketTrade;
+      const prevText = prev ? `(صفقة سابقة لعقد ${prev.tokenType} بسعر $${prev.price})` : '';
+      setManualTradeFeedback(`🛡️ تم حظر الطلب: هذا العقد تم تنفيذ صفقة عليه مسبقاً ${prevText}! تلتزم المنظومة بقاعدة العقد الواحد الصارمة.`);
+      setTimeout(() => setManualTradeFeedback(null), 8000);
+      return;
+    }
+
     setIsExecutingManualTrade(true);
     setManualTradeFeedback(`جاري إرسال أمر فوري لشراء عقد ${tokenType} إلى منصة Limitless...`);
     try {
       const res = await fetch('/api/bot/execute-trade', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tokenType, force: true }),
+        body: JSON.stringify({ tokenType }),
       });
       const data = await res.json();
       if (data.success) {
@@ -500,73 +508,33 @@ export default function App() {
 
       const simulatedSig = `0x${Date.now().toString(16).padStart(64, 'a')}${Date.now().toString(16).padStart(64, 'b')}1c`;
 
-      // 2. إرسال أمر الشراء فوراً إلى خادم التداول إن لم تكن هناك عملية جارية وضمن فترة التبريد (30 ثانية)
-      if (!isExecutingRef.current && now - lastClientExecutionTimeRef.current > 30000) {
-        lastClientExecutionTimeRef.current = now;
-        isExecutingRef.current = true;
-        console.log(`🚨 [Client Bot] تم رصد إشارة Z-Score حاسمة (${currentSig.zScore})! جاري إرسال أمر شراء عقد ${targetToken} فورياً...`);
+      // 2. العرض والتوثيق اللحظي لإشارة الـ Z-Score وحمولة EIP-712 المباشرة
+      // ملاحظة حاسمة: خادم الباك إند (server.ts في PM2) هو المحرك الوحيد الصارم لتنفيذ الصفقات
+      // تم إلغاء أي إرسال صفقات تلقائية من المتصفح لضمان الالتزام بقاعدة العقد الواحد الصارمة وعدم ازدواجية الصفقات
+      const isMarketLocked = Boolean(serverStatus.isCurrentMarketTraded);
+      const prevTrade = serverStatus.currentMarketTrade;
 
-        try {
-          const res = await fetch('/api/bot/execute-trade', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ tokenType: targetToken, force: true }),
-          });
-          const data = await res.json();
-          const statusRes = await fetch('/api/bot/status');
-          let st = null;
-          if (statusRes.ok) {
-            st = await statusRes.json();
-            setServerStatus(st);
-          }
-
-          if (data.success && st?.recentTrades?.[0]) {
-            const lastTrade = st.recentTrades[0];
-            setLatestReport({
-              timestamp: lastTrade.timestamp || Date.now(),
-              signal: currentSig,
-              targetedToken: targetToken,
-              executed: true,
-              status: 'EXECUTED',
-              orderPayload: builtPayload,
-              signature: lastTrade.txHash || simulatedSig,
-              executionPrice: lastTrade.price || orderPrice,
-              contractsFilled: lastTrade.amount || 1,
-              totalCostUsdc: Number(((lastTrade.amount || 1) * (lastTrade.price || orderPrice)).toFixed(2)),
-              potentialPayoutUsdc: Number((lastTrade.amount || 1).toFixed(2)),
-              asymmetricMultiplier: `${(1.0 / Math.max(0.01, lastTrade.price || orderPrice)).toFixed(1)}x`,
-              messageArabic: `✅ تم تنفيذ الصفقة بنجاح على منصة Limitless! شراء ${lastTrade.amount || 1} عقد ${targetToken} بسعر $${lastTrade.price || orderPrice}`,
-              messageEnglish: `Real trade executed: ${targetToken} at $${lastTrade.price || orderPrice}.`,
-            });
-            return;
-          } else {
-            setLatestReport({
-              timestamp: Date.now(),
-              signal: currentSig,
-              targetedToken: targetToken,
-              executed: false,
-              status: 'WAITING_FOR_MARKET',
-              messageArabic: data.error || data.waitReason || serverReason,
-              messageEnglish: data.error || serverReason,
-            });
-            return;
-          }
-        } catch (e: any) {
-          console.error('فشل إرسال الصفقة من الواجهة:', e.message);
-          setLatestReport({
-            timestamp: Date.now(),
-            signal: currentSig,
-            targetedToken: targetToken,
-            executed: false,
-            status: 'WAITING_FOR_MARKET',
-            messageArabic: `⚠️ تعذر إرسال الأمر: ${e.message}`,
-            messageEnglish: e.message,
-          });
-          return;
-        } finally {
-          isExecutingRef.current = false;
-        }
-      }
+      setLatestReport({
+        timestamp: now,
+        signal: currentSig,
+        targetedToken: targetToken,
+        executed: isMarketLocked,
+        status: isMarketLocked ? 'WAITING_FOR_MARKET' : 'WAITING_FOR_MARKET',
+        orderPayload: builtPayload,
+        signature: simulatedSig,
+        executionPrice: orderPrice,
+        contractsFilled: 1,
+        totalCostUsdc: orderPrice,
+        potentialPayoutUsdc: 1,
+        asymmetricMultiplier: `${(1.0 / Math.max(0.01, orderPrice)).toFixed(1)}x`,
+        messageArabic: isMarketLocked
+          ? `🛡️ قاعدة العقد الواحد الصارمة نشطة: تم تنفيذ صفقة لهذا العقد مسبقاً (${prevTrade?.tokenType || 'صفقة مسجلة'} بسعر $${prevTrade?.price || '0.00'}). في انتظار انتهاء فترة العقد الحالي وبدء عقد جديد.`
+          : `⚡ إشارة Z-Score مؤهلة لعقد ${targetToken} (${currentSig.zScore}) • التداول الآلي الصارم يدار بالكامل وبشكل موحد عبر خادم السيرفر (VM).`,
+        messageEnglish: isMarketLocked
+          ? 'Contract locked under strict 1-trade rule. Waiting for next 15m window.'
+          : `Signal ready for ${targetToken}. Server engine executes single authoritative trade.`,
+      });
+      return;
 
       setLatestReport({
         timestamp: Date.now(),
@@ -1231,6 +1199,25 @@ export default function App() {
                   )}
                 </div>
               </div>
+
+              {/* تنبيه قاعدة العقد الواحد الصارمة عند قفل العقد */}
+              {serverStatus.isCurrentMarketTraded && (
+                <div className="mt-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex flex-wrap items-center justify-between gap-3 text-xs shadow-inner">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span className="text-amber-200 font-bold">
+                      قاعدة العقد الواحد الصارمة (Strict 1-Trade Rule):
+                    </span>
+                    <span className="text-slate-300">
+                      تم تنفيذ صفقة لهذا العقد مسبقاً {serverStatus.currentMarketTrade ? `(عقد ${serverStatus.currentMarketTrade.tokenType} بسعر $${serverStatus.currentMarketTrade.price})` : ''}. العقد مغلق تماماً ومحمي ضد أي صفقات إضافية حتى انتهاء الـ 15 دقيقة الحالية.
+                    </span>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 font-mono text-[11px] font-bold flex items-center gap-1.5 border border-amber-500/30">
+                    <span className="w-2 h-2 rounded-full bg-amber-400" />
+                    🔒 العقد مغلق للتداول
+                  </span>
+                </div>
+              )}
 
               {/* شريط تشخيص السيرفر وسبب الانتظار */}
               <div className="mt-3 pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs">

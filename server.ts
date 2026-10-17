@@ -697,6 +697,12 @@ interface TradedContractInfo {
 
 const TRADED_CONTRACTS_FILE = path.resolve(process.cwd(), '.traded_contracts.json');
 
+function extractSlugNumericId(slug?: string): string | null {
+  if (!slug) return null;
+  const match = slug.match(/\d{9,13}/);
+  return match ? match[0] : null;
+}
+
 function loadTradedContracts(): Map<string, TradedContractInfo> {
   const map = new Map<string, TradedContractInfo>();
   try {
@@ -705,8 +711,8 @@ function loadTradedContracts(): Map<string, TradedContractInfo> {
       if (Array.isArray(data)) {
         const now = Date.now();
         for (const item of data) {
-          // نحتفظ بالعقود المتداولة خلال آخر 6 ساعات لتغطية فترات التداول والانتهاء
-          if (item && item.slug && (now - (item.timestamp || 0) < 6 * 3600 * 1000)) {
+          // نحتفظ بالعقود المتداولة لمدة 24 ساعة كاملة لضمان عدم إعادة تداول أي عقد سابق بعد إعادة تشغيل السيرفر أو PM2
+          if (item && item.slug && (now - (item.timestamp || 0) < 24 * 3600 * 1000)) {
             map.set(item.slug.toLowerCase().trim(), item);
           }
         }
@@ -720,7 +726,7 @@ function loadTradedContracts(): Map<string, TradedContractInfo> {
 
 function saveTradedContracts(map: Map<string, TradedContractInfo>) {
   try {
-    const list = Array.from(map.values()).slice(-50);
+    const list = Array.from(map.values()).slice(-100);
     fs.writeFileSync(TRADED_CONTRACTS_FILE, JSON.stringify(list, null, 2), 'utf8');
   } catch (err: any) {
     console.warn('⚠️ فشل حفظ ملف العقود المتداولة:', err.message);
@@ -729,46 +735,59 @@ function saveTradedContracts(map: Map<string, TradedContractInfo>) {
 
 let tradedContractsMap = loadTradedContracts();
 
-// قفل التزامن الفوري (Immediate Mutex Lock) لمنع تنفيذ تكات متزامنة في نفس اللحظة
+// قفل التزامن الفوري الصارم (Strict Immediate Mutex Lock) لمنع تنفيذ تكات متزامنة نهائياً
 let isServerTradeExecuting = false;
 const pendingExecutionSlugs = new Set<string>();
 
-function isContractAlreadyTraded(slug: string, expirationTimestamp?: number): boolean {
-  if (!slug) return false;
-  const cleanSlug = slug.toLowerCase().trim();
+/**
+ * فحص صارم لا يقبل التجاوز لقاعدة العقد الواحد (Strict 1-Trade per 15-Minute Contract)
+ * يفحص:
+ * 1. التطابق المباشر لـ slug
+ * 2. المعرف الزمني الرقمي للعقد المستخرج من الـ slug (مثل 1792228500)
+ * 3. وقت انتهاء الصلاحية expirationTimestamp (ضمن نافذة ±2 دقيقة)
+ * 4. نافذة الـ 15 دقيقة الزمنية للعقد في سجل الصفقات وخريطة العقود المنفذة
+ * 5. قائمة العمليات قيد التنفيذ اللحظي
+ */
+function isContractAlreadyTraded(slug?: string, expirationTimestamp?: number): boolean {
+  if (!slug && !expirationTimestamp) return false;
+  const cleanSlug = (slug || '').toLowerCase().trim();
+  const slugNumId = extractSlugNumericId(cleanSlug);
 
-  // 1. الفحص في خريطة العقود المنفذة المباشرة
-  if (tradedContractsMap.has(cleanSlug)) return true;
+  // 1. الفحص في قائمة العقود قيد التنفيذ اللحظي (حظر التزامن)
+  if (cleanSlug && pendingExecutionSlugs.has(cleanSlug)) return true;
+  if (slugNumId) {
+    for (const pending of pendingExecutionSlugs) {
+      if (pending.includes(slugNumId)) return true;
+    }
+  }
 
-  // 2. الفحص في قائمة العقود قيد التنفيذ اللحظي (حظر التزامن)
-  if (pendingExecutionSlugs.has(cleanSlug)) return true;
-
-  // 3. فحص إضافي في سجل الصفقات المنفذة عبر slug العقد
-  for (const trade of executedTradesLog) {
-    const mSlug = (trade as any).marketSlug;
-    if (mSlug && mSlug.toLowerCase().trim() === cleanSlug) {
+  // 2. الفحص في خريطة العقود المنفذة المباشرة (tradedContractsMap)
+  if (cleanSlug && tradedContractsMap.has(cleanSlug)) return true;
+  for (const [key, info] of tradedContractsMap) {
+    if (cleanSlug && key === cleanSlug) return true;
+    const infoNumId = extractSlugNumericId(info.slug);
+    if (slugNumId && infoNumId && slugNumId === infoNumId) return true;
+    if (expirationTimestamp && info.expirationTimestamp && Math.abs(info.expirationTimestamp - expirationTimestamp) < 120000) {
       return true;
     }
   }
 
-  // 4. قاعدة الأمان الصارمة عبر النافذة الزمنية (15 دقيقة):
-  // أي صفقة تم تنفيذها داخل نافذة الـ 15 دقيقة الخاصة بهذا العقد تعني أنه تم الدخول فيه مسبقاً!
-  // نافذة العقد تبدأ قبل انتهاء الصلاحية بـ 15 دقيقة وتنتهي عند expirationTimestamp
-  if (expirationTimestamp && expirationTimestamp > 0) {
-    const windowStart = expirationTimestamp - 15 * 60 * 1000;
-    const windowEnd = expirationTimestamp;
-    for (const trade of executedTradesLog) {
-      if (trade.timestamp && trade.timestamp >= windowStart && trade.timestamp <= windowEnd) {
-        return true;
-      }
+  // 3. فحص إضافي في سجل الصفقات المنفذة المحفوظة (executedTradesLog)
+  for (const trade of executedTradesLog) {
+    const mSlug = (trade as any).marketSlug;
+    if (mSlug) {
+      const cleanMSlug = mSlug.toLowerCase().trim();
+      if (cleanSlug && cleanMSlug === cleanSlug) return true;
+      const tradeNumId = extractSlugNumericId(cleanMSlug);
+      if (slugNumId && tradeNumId && slugNumId === tradeNumId) return true;
     }
 
-    // فحص أيضاً في خريطة العقود المتداولة المسجلة
-    for (const [, info] of tradedContractsMap) {
-      if (info.timestamp && info.timestamp >= windowStart && info.timestamp <= windowEnd) {
-        return true;
-      }
-      if (info.expirationTimestamp && Math.abs(info.expirationTimestamp - expirationTimestamp) < 60000) {
+    // 4. قاعدة الأمان الصارمة عبر النافذة الزمنية (15 دقيقة):
+    // أي صفقة تم تنفيذها داخل نافذة الـ 15 دقيقة الخاصة بهذا العقد تعني أنه تم الدخول فيه مسبقاً!
+    if (expirationTimestamp && expirationTimestamp > 0) {
+      const windowStart = expirationTimestamp - 15 * 60 * 1000;
+      const windowEnd = expirationTimestamp;
+      if (trade.timestamp && trade.timestamp >= windowStart - 10000 && trade.timestamp <= windowEnd + 10000) {
         return true;
       }
     }
@@ -777,23 +796,35 @@ function isContractAlreadyTraded(slug: string, expirationTimestamp?: number): bo
   return false;
 }
 
-function findTradeForMarket(slug: string, expirationTimestamp?: number) {
-  if (!slug) return null;
-  const cleanSlug = slug.toLowerCase().trim();
-  const direct = tradedContractsMap.get(cleanSlug);
+function findTradeForMarket(slug?: string, expirationTimestamp?: number) {
+  if (!slug && !expirationTimestamp) return null;
+  const cleanSlug = (slug || '').toLowerCase().trim();
+  const slugNumId = extractSlugNumericId(cleanSlug);
+
+  const direct = cleanSlug ? tradedContractsMap.get(cleanSlug) : null;
   if (direct) return direct;
 
-  for (const trade of executedTradesLog) {
-    const mSlug = (trade as any).marketSlug;
-    if (mSlug && mSlug.toLowerCase().trim() === cleanSlug) {
-      return trade;
+  for (const [, info] of tradedContractsMap) {
+    const infoNumId = extractSlugNumericId(info.slug);
+    if (slugNumId && infoNumId && slugNumId === infoNumId) return info;
+    if (expirationTimestamp && info.expirationTimestamp && Math.abs(info.expirationTimestamp - expirationTimestamp) < 120000) {
+      return info;
     }
   }
 
-  if (expirationTimestamp && expirationTimestamp > 0) {
-    const windowStart = expirationTimestamp - 15 * 60 * 1000;
-    for (const trade of executedTradesLog) {
-      if (trade.timestamp && trade.timestamp >= windowStart && trade.timestamp <= expirationTimestamp) {
+  for (const trade of executedTradesLog) {
+    const mSlug = (trade as any).marketSlug;
+    if (mSlug) {
+      const cleanMSlug = mSlug.toLowerCase().trim();
+      if (cleanSlug && cleanMSlug === cleanSlug) return trade;
+      const tradeNumId = extractSlugNumericId(cleanMSlug);
+      if (slugNumId && tradeNumId && slugNumId === tradeNumId) return trade;
+    }
+
+    if (expirationTimestamp && expirationTimestamp > 0) {
+      const windowStart = expirationTimestamp - 15 * 60 * 1000;
+      const windowEnd = expirationTimestamp;
+      if (trade.timestamp && trade.timestamp >= windowStart - 10000 && trade.timestamp <= windowEnd + 10000) {
         return trade;
       }
     }
@@ -862,6 +893,7 @@ for (const trade of executedTradesLog) {
     }
   }
 }
+saveTradedContracts(tradedContractsMap);
 
 async function syncLimitlessUserHistory() {
   if (!serverWallet) return;
@@ -894,11 +926,27 @@ async function syncLimitlessUserHistory() {
         if (t.txHash) {
           existingMap.set(t.txHash, t);
         }
+        // مزامنة فورية لقفل العقد في خريطة العقود المنفذة
+        if (t.marketSlug) {
+          const cSlug = t.marketSlug.toLowerCase().trim();
+          if (!tradedContractsMap.has(cSlug)) {
+            tradedContractsMap.set(cSlug, {
+              slug: t.marketSlug,
+              title: t.marketTitle || t.marketSlug,
+              tokenType: t.tokenType,
+              price: t.price,
+              amount: t.amount,
+              timestamp: t.timestamp,
+              txHash: t.txHash,
+            });
+          }
+        }
       }
 
       executedTradesLog = Array.from(existingMap.values());
       executedTradesLog.sort((a, b) => b.timestamp - a.timestamp);
       savePersistedTrades(executedTradesLog);
+      saveTradedContracts(tradedContractsMap);
     }
   } catch (err: any) {
     console.warn('⚠️ فشل مزامنة سجل الصفقات من Limitless:', err.message);
@@ -1239,36 +1287,39 @@ async function executeLimitlessTrade(
   currentZScore: number,
   isManualOrForced: boolean = false
 ) {
-  // 1. فحص التزامن الفوري: منع أي تنفيذ متزامن في نفس اللحظة
-  if (isServerTradeExecuting && !isManualOrForced) {
-    console.log('⏳ [Server Bot] هناك صفقة قيد المعالجة والتنفيذ حالياً - تم حظر أي أمر متزامن.');
+  // 1. قفل التزامن الفوري الصارم: منع أي تنفيذ متزامن في نفس اللحظة نهائياً
+  if (isServerTradeExecuting) {
+    console.log('⏳ [Server Bot] هناك صفقة قيد المعالجة والتوقيع حالياً - تم حظر أي أمر متزامن.');
     return;
   }
 
-  if (!serverWallet) {
-    serverWallet = initializeServerWallet();
-  }
-
-  if (!serverWallet) {
-    console.log('ℹ️ [Server Bot] تم رصد إشارة ولكن لم يتم تعيين مفتاح المحفظة في .env لتنفيذ التوقيع.');
-    lastExecutionError = 'المحفظة غير مهيأة: يرجى التأكد من إدخال PRIVATE_KEY صالح في ملف .env بالخادم';
-    currentWaitReason = `تم رصد إشارة مؤهلة لعقد ${targetToken} (Z-Score: ${currentZScore})! بانتظار إدخال المفتاح الخاص للمحفظة في الإعدادات للتنفيذ الحقيقي.`;
-    return;
-  }
-
-  // فحص أمان صارم: إذا كان الروبوت متوقفاً يُمنع التنفيذ التلقائي فوراً
-  if (!isServerBotRunning && !isManualOrForced) {
-    console.log('⛔ [Server Bot] التداول متوقف مؤقتاً (PAUSED) - تم حظر فتح أي صفقة.');
-    currentWaitReason = 'الروبوت متوقف مؤقتاً (PAUSED) - اضغط زر تشغيل الروبوت لتفعيل التداول الآلي.';
-    return;
-  }
-
-  // فترة تبريد (Cooldown) لمنع تكرار الصفقات على نفس الإشارة
-  if (!isManualOrForced && Date.now() - lastExecutedTradeTime < 60000) {
-    return;
-  }
+  // تفعيل قفل التزامن الفوري قبل أي عملية async
+  isServerTradeExecuting = true;
 
   try {
+    if (!serverWallet) {
+      serverWallet = initializeServerWallet();
+    }
+
+    if (!serverWallet) {
+      console.log('ℹ️ [Server Bot] تم رصد إشارة ولكن لم يتم تعيين مفتاح المحفظة في .env لتنفيذ التوقيع.');
+      lastExecutionError = 'المحفظة غير مهيأة: يرجى التأكد من إدخال PRIVATE_KEY صالح في ملف .env بالخادم';
+      currentWaitReason = `تم رصد إشارة مؤهلة لعقد ${targetToken} (Z-Score: ${currentZScore})! بانتظار إدخال المفتاح الخاص للمحفظة في الإعدادات للتنفيذ الحقيقي.`;
+      return;
+    }
+
+    // فحص أمان صارم: إذا كان الروبوت متوقفاً يُمنع التنفيذ التلقائي فوراً
+    if (!isServerBotRunning && !isManualOrForced) {
+      console.log('⛔ [Server Bot] التداول متوقف مؤقتاً (PAUSED) - تم حظر فتح أي صفقة.');
+      currentWaitReason = 'الروبوت متوقف مؤقتاً (PAUSED) - اضغط زر تشغيل الروبوت لتفعيل التداول الآلي.';
+      return;
+    }
+
+    // فترة تبريد (Cooldown) لمنع تكرار الصفقات على نفس الإشارة
+    if (!isManualOrForced && Date.now() - lastExecutedTradeTime < 60000) {
+      return;
+    }
+
     console.log(`🤖 [Server Bot] فحص عقد BTC 15 دقيقة الحصري لشراء عقد ${targetToken} (Z-Score: ${currentZScore})...`);
     
     const activeMarket = await getServerActiveBtcMarket();
@@ -1300,21 +1351,21 @@ async function executeLimitlessTrade(
       return;
     }
 
-    // 🛡️ فحص أمان صارم: منع تكرار فتح صفقات على نفس العقد (صفقة واحدة فقط لكل عقد 15 دقيقة)
+    // 🛡️ فحص قاعدة العقد الواحد الصارمة (Strict 1-Trade per 15m Contract Rule):
+    // لا يقبل التجاوز تحت أي ظرف - صفقة واحدة فقط لكل عقد 15 دقيقة
     const marketSlug = (activeMarket.slug || '').trim();
     const expTime = activeMarket.expirationTimestamp ? Number(activeMarket.expirationTimestamp) : 0;
-    if (!isManualOrForced && isContractAlreadyTraded(marketSlug, expTime)) {
+    if (isContractAlreadyTraded(marketSlug, expTime)) {
       const prevTrade = findTradeForMarket(marketSlug, expTime);
       const sideText = prevTrade ? `(شراء سابق لعقد ${prevTrade.tokenType} بسعر $${prevTrade.price})` : '';
       const timeLeft = expTime > Date.now() ? `${Math.ceil((expTime - Date.now()) / 60000)} دقيقة متبقية` : 'قريب من الانتهاء';
       
-      console.log(`🛡️ [Server Bot - قاعدة الأمان الصارمة]: تم فتح صفقة لهذا العقد (${activeMarket.title || marketSlug}) مسبقاً ${sideText}! تم حظر فتح صفقة مكررة.`);
-      currentWaitReason = `🛡️ تم تنفيذ صفقة مسبقاً لهذا العقد (${activeMarket.title || marketSlug}) ${sideText}. الروبوت يلتزم بصفقة واحدة فقط لكل عقد. في انتظار انتهاء العقد الحالي (${timeLeft}) وتوفر عقد جديد.`;
+      console.log(`🛡️ [Server Bot - قاعدة العقد الواحد الصارمة]: تم فتح صفقة لهذا العقد (${activeMarket.title || marketSlug}) مسبقاً ${sideText}! تم حظر فتح صفقة مكررة.`);
+      currentWaitReason = `🛡️ [قاعدة العقد الواحد الصارمة]: تم تنفيذ صفقة لهذا العقد مسبقاً ${sideText}. الروبوت يلتزم بصفقة واحدة فقط لكل عقد 15 دقيقة. في انتظار انتهاء العقد الحالي (${timeLeft}) وتوفر عقد جديد.`;
       return;
     }
 
-    // 🔒 تفعيل قفل التزامن الفوري على المحرك وعلى العقد لمنع أي تكة أخرى من الدخول أثناء التوقيع والإرسال
-    isServerTradeExecuting = true;
+    // 🔒 تفعيل قفل العقد اللحظي في قائمة التنفيذ لمنع أي عملية متزامنة أخرى أثناء التوقيع والإرسال
     pendingExecutionSlugs.add(marketSlug.toLowerCase().trim());
 
     // ⚡ قراءة دفتر الأوامر اللحظي مباشرة من ذاكرة البث المباشر أو جلب فوري من REST إذا لزم الأمر
@@ -1544,7 +1595,9 @@ async function executeLimitlessTrade(
     }
 
     if (orderSuccess) {
-      // قفل العقد رسمياً لمنع تكرار أي صفقات أخرى عليه نهائياً
+      lastExecutedTradeTime = Date.now();
+      pendingExecutionSlugs.delete(marketSlug.toLowerCase().trim());
+      // قفل العقد رسمياً ودائماً لمنع تكرار أي صفقات أخرى عليه نهائياً
       recordContractTraded({
         slug: activeMarket.slug,
         title: activeMarket.title,
@@ -1566,7 +1619,7 @@ async function executeLimitlessTrade(
         marketTitle: activeMarket.title,
       });
       savePersistedTrades(executedTradesLog);
-      console.log(`🔒 [Server Bot] تم قفل العقد (${activeMarket.title || activeMarket.slug}) رسمياً - لن يتم فتح أي صفقة أخرى عليه.`);
+      console.log(`🔒 [Server Bot - قاعدة العقد الواحد الصارمة]: تم قفل العقد (${activeMarket.title || activeMarket.slug}) رسمياً ودائماً - لن يتم فتح أي صفقة أخرى عليه.`);
       setTimeout(syncLimitlessUserHistory, 3000);
     } else {
       // إذا لم ينجح الطلب، فك الحظر المؤقت
@@ -1714,6 +1767,23 @@ async function startServerPriceFeed() {
           if (!isServerBotRunning) {
             currentWaitReason = `الروبوت متوقف مؤقتاً (PAUSED) | Z-Score (1m - 30c) = ${zScore > 0 ? '+' : ''}${zScore} | ADX = ${lastCalculatedAdx.adx} (${lastCalculatedAdx.regime === 'RANGING' ? 'عرضي' : 'ترند'})`;
             lastEvaluatedSignal = zScore >= ZSCORE_STRATEGY.upperThreshold ? 'OVERBOUGHT' : (zScore <= ZSCORE_STRATEGY.lowerThreshold ? 'OVERSOLD' : 'NEUTRAL');
+            return;
+          }
+
+          // 🛡️ فحص قاعدة العقد الواحد الصارمة (Strict 1-Trade Per 15m Contract Rule):
+          // إذا كان عقد الـ 15 دقيقة النشط حالياً قد تم تنفيذ صفقة عليه مسبقاً، يُمنع فتح أي صفقة جديدة نهائياً حتى انتهاء صلاحيته وبدء عقد جديد!
+          const activeCheckMarket = cachedActive15mMarket;
+          const isCurrentMarketLocked = activeCheckMarket
+            ? isContractAlreadyTraded(activeCheckMarket.slug, Number(activeCheckMarket.expirationTimestamp))
+            : false;
+
+          if (isCurrentMarketLocked && activeCheckMarket) {
+            const prev = findTradeForMarket(activeCheckMarket.slug, Number(activeCheckMarket.expirationTimestamp));
+            const expTime = Number(activeCheckMarket.expirationTimestamp) || 0;
+            const minsLeft = expTime > Date.now() ? Math.ceil((expTime - Date.now()) / 60000) : 0;
+            const sideInfo = prev ? `(صفقة شراء ${prev.tokenType} بسعر $${prev.price})` : '';
+            currentWaitReason = `🛡️ [قاعدة العقد الواحد الصارمة]: تم تنفيذ صفقة هذا العقد بنجاح ${sideInfo}. العقد مغلق ومحمي ضد التكرار | متبقي ${minsLeft} دقيقة حتى انتهاء الـ 15 دقيقة وتوفر العقد التالي.`;
+            lastEvaluatedSignal = 'NEUTRAL';
             return;
           }
 
@@ -2014,6 +2084,17 @@ app.post('/api/bot/execute-trade', async (req, res) => {
 
   if (!serverWallet) {
     return res.status(400).json({ success: false, error: 'المحفظة غير مهيأة على السيرفر' });
+  }
+
+  // 🛡️ فحص قاعدة العقد الواحد الصارمة قبل التنفيذ
+  if (cachedActive15mMarket && isContractAlreadyTraded(cachedActive15mMarket.slug, Number(cachedActive15mMarket.expirationTimestamp))) {
+    const prev = findTradeForMarket(cachedActive15mMarket.slug, Number(cachedActive15mMarket.expirationTimestamp));
+    const sideInfo = prev ? `(صفقة شراء سابقة لـ ${prev.tokenType} بسعر $${prev.price})` : '';
+    return res.status(400).json({
+      success: false,
+      error: `تم تنفيذ صفقة لهذا العقد مسبقاً ${sideInfo}! تلتزم الاستراتيجية بقاعدة العقد الواحد الصارمة (Strict 1-Trade per 15m Contract).`,
+      waitReason: currentWaitReason,
+    });
   }
 
   try {
