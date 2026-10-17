@@ -8,3 +8,4 @@ coverage/
 !.env.example
 .bot_state.json
 .trades_history.json
+.traded_contracts.json
