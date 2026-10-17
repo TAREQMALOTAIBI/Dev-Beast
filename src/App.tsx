@@ -1374,10 +1374,10 @@ export default function App() {
                       }`}
                     >
                       {currentSignal.signal === 'OVERBOUGHT'
-                        ? 'زخم صاعد قوي (Z >= +2.00) -> شراء YES'
+                        ? 'ذروة شراء (Z >= +1.50) -> شراء NO'
                         : currentSignal.signal === 'OVERSOLD'
-                        ? 'زخم هابط قوي (Z <= -2.00) -> شراء NO'
-                        : 'حياد (NEUTRAL)'}
+                        ? 'ذروة بيع (Z <= -1.50) -> شراء YES'
+                        : 'سوق محايد (NEUTRAL)'}
                     </span>
                   </h3>
                   <p className="text-xs text-slate-300 mt-1 leading-relaxed">

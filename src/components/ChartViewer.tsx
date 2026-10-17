@@ -281,11 +281,13 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
             <div className="flex items-center gap-3 text-[11px] text-slate-400">
               <span className="flex items-center gap-1">
                 <span className="w-2 h-2 rounded-full bg-rose-500" />
-                إشارة هبوط (شراء NO): &ge; +1.50
+                <span>إشارة هبوط (شراء NO):</span>
+                <span dir="ltr" className="font-mono text-rose-300 font-bold">Z &ge; +1.50</span>
               </span>
               <span className="flex items-center gap-1">
                 <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                إشارة صعود (شراء YES): &le; -1.50
+                <span>إشارة صعود (شراء YES):</span>
+                <span dir="ltr" className="font-mono text-emerald-300 font-bold">Z &le; -1.50</span>
               </span>
             </div>
           </div>
