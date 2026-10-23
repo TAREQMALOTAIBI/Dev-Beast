@@ -172,6 +172,9 @@ class LimitlessTradingBot {
     // ==========================================
     // 4. البث الحي (Binance WebSocket)
     // ==========================================
+    private lastExecutedCandleTime: number = 0;
+    private isExecutingTrade: boolean = false;
+
     private startBinanceWS() {
         const binanceWs = new WebSocket(CONFIG.BINANCE_WS_URL);
 
@@ -179,10 +182,12 @@ class LimitlessTradingBot {
             const message = JSON.parse(data.toString());
             const kline = message.k;
 
-            // تحديث السعر وتقييم الاستراتيجية حصرياً عند إغلاق الشمعة
-            if (kline && kline.x) {
-                const closePrice = parseFloat(kline.c);
-                this.updatePrices(closePrice);
+            // تنفيذ فوري في نفس الشمعة مع كل حركة سعر بمجرد تحقق إشارة الانعكاس
+            if (kline) {
+                const currentPrice = parseFloat(kline.c);
+                const isClosed = Boolean(kline.x);
+                const candleTime = Number(kline.t);
+                this.onTick(currentPrice, isClosed, candleTime);
             }
         });
 
@@ -190,47 +195,57 @@ class LimitlessTradingBot {
         binanceWs.on('error', (err) => console.warn('Binance WS notice:', err.message));
     }
 
-    private updatePrices(newPrice: number) {
-        this.closePrices.shift();
-        this.closePrices.push(newPrice);
-        this.evaluateStrategy();
+    private onTick(newPrice: number, isClosed: boolean, candleTime: number) {
+        // حساب Z-Score اللحظي في نفس الشمعة فورياً
+        const livePrices = [...this.closePrices.slice(1), newPrice];
+        this.evaluateStrategy(livePrices, candleTime);
+
+        // عند إغلاق الشمعة النهائي، تثبيت السعر للانتقال للشمعة القادمة
+        if (isClosed) {
+            this.closePrices = livePrices;
+        }
     }
 
     // ==========================================
     // 5. الحسابات الرياضية (Z-Score)
     // ==========================================
-    private calculateZScore(): number {
-        const n = this.closePrices.length;
-        const mean = this.closePrices.reduce((a, b) => a + b, 0) / n;
-        const variance = this.closePrices.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / n;
+    private calculateZScore(prices: number[] = this.closePrices): number {
+        const n = prices.length;
+        const mean = prices.reduce((a, b) => a + b, 0) / n;
+        const variance = prices.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / n;
         const stdDev = Math.sqrt(variance);
         
-        const currentPrice = this.closePrices[n - 1];
+        const currentPrice = prices[n - 1];
         return stdDev > 0 ? (currentPrice - mean) / stdDev : 0;
     }
 
     // ==========================================
-    // 6. منطق الاستراتيجية
+    // 6. منطق الاستراتيجية (تنفيذ فوري في نفس الشمعة)
     // ==========================================
-    private evaluateStrategy() {
-        if (this.closePrices.length < CONFIG.PERIODS) return;
+    private evaluateStrategy(prices: number[] = this.closePrices, candleTime?: number) {
+        if (prices.length < CONFIG.PERIODS) return;
 
-        const currentZScore = this.calculateZScore();
-        console.log(\`📈 Current Z-Score: \${currentZScore.toFixed(2)}σ\`);
+        const currentZScore = this.calculateZScore(prices);
 
-        // الشرط الأول: تجاوز العتبة 2.0 (التأهب)
+        // الشرط الأول: تجاوز العتبة 2.0 (التأهب الفوري في نفس الشمعة)
         if (currentZScore > CONFIG.Z_SCORE_UPPER) {
             if (!this.crossedUpperThreshold) {
-                console.log(\`⚠️ Z-Score crossed above \${CONFIG.Z_SCORE_UPPER}σ! Bot is ARMED.\`);
+                console.log(\`⚠️ Z-Score crossed above \${CONFIG.Z_SCORE_UPPER}σ (\${currentZScore.toFixed(2)}σ)! Bot is ARMED in current candle.\`);
                 this.crossedUpperThreshold = true;
             }
         }
 
-        // الشرط الثاني: الارتداد تحت 1.90 (إشارة الدخول الحية)
+        // الشرط الثاني: الارتداد تحت 1.90 (تنفيذ فوري في نفس الشمعة دون انتظار الإغلاق)
         if (this.crossedUpperThreshold && currentZScore < CONFIG.Z_SCORE_ENTRY) {
-            console.log(\`🎯 LIVE ENTRY SIGNAL! Z-Score reverted below \${CONFIG.Z_SCORE_ENTRY}σ.\`);
-            this.executeTrade();
+            if (this.isExecutingTrade) return;
+            if (candleTime && this.lastExecutedCandleTime === candleTime) return;
+
+            console.log(\`🎯 LIVE ENTRY SIGNAL IN SAME CANDLE! Z-Score reverted below \${CONFIG.Z_SCORE_ENTRY}σ (\${currentZScore.toFixed(2)}σ). Executing immediately!\`);
             this.crossedUpperThreshold = false;
+            if (candleTime) {
+                this.lastExecutedCandleTime = candleTime;
+            }
+            this.executeTrade();
         }
     }
 

@@ -123,8 +123,8 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
         <div className="mt-2.5 pt-2.5 border-t border-slate-800/80 flex items-center justify-between gap-2 text-[11px]">
           <span className="text-slate-400 text-[10px] truncate">
             {isAr
-              ? (botActive ? 'يتم فحص شمعة 15m وتنفيذ الصفقات تلقائياً' : 'لن يتم فتح صفقات تلقائية حتى تضغط تشغيل')
-              : (botActive ? 'Monitoring 15m candles & auto-placing orders' : 'Auto execution paused')}
+              ? (botActive ? '⚡ تنفيذ فوري في نفس الشمعة بمجرد تحقق الإشارة' : 'لن يتم فتح صفقات تلقائية حتى تضغط تشغيل')
+              : (botActive ? '⚡ Instant same-candle execution on trigger' : 'Auto execution paused')}
           </span>
 
           {onTriggerManualTrade && (
@@ -190,7 +190,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             {phase === 'ENTRY_TRIGGERED' && <Zap className="w-3.5 h-3.5 text-amber-400" />}
           </div>
           <div className="text-[11px] text-slate-400">
-            {isAr ? 'تنفيذ 4 أجزاء متتالية' : '4-chunk order execution'}
+            {isAr ? 'تنفيذ فوري في نفس الشمعة (4 أجزاء)' : 'Instant same-candle 4 chunks'}
           </div>
         </div>
       </div>

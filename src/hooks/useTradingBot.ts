@@ -95,6 +95,8 @@ export function useTradingBot() {
   const botActiveRef = useRef<boolean>(true);
   const configRef = useRef<BotConfig>(config);
   const currentBalanceRef = useRef<number>(currentBalance);
+  const isExecutingRef = useRef<boolean>(false);
+  const lastExecutedCandleTimeRef = useRef<number>(0);
 
   configRef.current = config;
   botActiveRef.current = botActive;
@@ -199,6 +201,7 @@ export function useTradingBot() {
       return;
     }
 
+    isExecutingRef.current = true;
     setIsExecuting(true);
     setIsEntrySignal(true);
     setLastSignalTime(Date.now());
@@ -253,35 +256,42 @@ export function useTradingBot() {
       console.error('[LIVE ORDER ERROR] Failed to transmit chunks:', err);
       setActiveTrade((prev) => (prev ? { ...prev, status: 'REJECTED' } : null));
     } finally {
+      isExecutingRef.current = false;
       setIsExecuting(false);
       setTimeout(() => setIsEntrySignal(false), 4000);
     }
   }, []);
 
-  // Real Market Strategy Evaluation
+  // Real Market Strategy Evaluation (Evaluates on every tick for immediate same-candle entry)
   const evaluateLiveStrategy = useCallback(
-    (prices: number[]) => {
+    (prices: number[], candleTime?: number) => {
       const cfg = configRef.current;
       if (!botActiveRef.current || prices.length < cfg.periods) return;
 
       const { zScore } = calculateZScore(prices, cfg.zScoreUpper, cfg.zScoreEntry);
       setCurrentZScore(zScore);
 
-      // Condition 1: Crossed above upper threshold
+      // Condition 1: Crossed above upper threshold (Armed)
       if (zScore > cfg.zScoreUpper) {
         if (!crossedUpperThresholdRef.current) {
           crossedUpperThresholdRef.current = true;
           setCrossedUpperThreshold(true);
           soundController.playAlert();
-          console.log(`⚠️ Live Z-Score crossed above ${cfg.zScoreUpper} (${zScore.toFixed(2)}σ). Bot is ARMED.`);
+          console.log(`⚠️ Live Z-Score crossed above ${cfg.zScoreUpper} (${zScore.toFixed(2)}σ). Bot is ARMED in current candle.`);
         }
       }
 
-      // Condition 2: Mean reversion - price pulls back below entry threshold
+      // Condition 2: Mean reversion - price pulls back below entry threshold in the SAME candle!
       if (crossedUpperThresholdRef.current && zScore < cfg.zScoreEntry) {
-        console.log(`🎯 LIVE ENTRY SIGNAL! Z-Score reverted below ${cfg.zScoreEntry} (${zScore.toFixed(2)}σ).`);
+        if (isExecutingRef.current) return;
+        if (candleTime && lastExecutedCandleTimeRef.current === candleTime) return;
+
+        console.log(`🎯 INSTANT LIVE ENTRY SIGNAL! Z-Score reverted below ${cfg.zScoreEntry} (${zScore.toFixed(2)}σ) in the SAME candle. Executing immediately!`);
         crossedUpperThresholdRef.current = false;
         setCrossedUpperThreshold(false);
+        if (candleTime) {
+          lastExecutedCandleTimeRef.current = candleTime;
+        }
         executeLiveTrade(zScore);
       }
     },
@@ -359,16 +369,13 @@ export function useTradingBot() {
               next = [...prev, tickCandle];
             }
 
-            // In accordance with the bot script: update and evaluate strictly on candle close
+            // Immediate real-time execution in the SAME candle on every price tick
+            const liveCloses = [...closePricesRef.current.slice(1), tickCandle.close];
+            evaluateLiveStrategy(liveCloses, tickCandle.time);
+
+            // Finalize candle close in history buffer
             if (isClosed) {
-              const updatedCloses = [...closePricesRef.current.slice(1), tickCandle.close];
-              closePricesRef.current = updatedCloses;
-              evaluateLiveStrategy(updatedCloses);
-            } else {
-              // Real-time calculation on current live open candle tick
-              const liveCloses = [...closePricesRef.current.slice(1), tickCandle.close];
-              const { zScore } = calculateZScore(liveCloses, configRef.current.zScoreUpper, configRef.current.zScoreEntry);
-              setCurrentZScore(zScore);
+              closePricesRef.current = liveCloses;
             }
 
             rebuildMetrics(next, configRef.current);
