@@ -452,8 +452,18 @@ export function useTradingBot() {
   }, [refreshLiveBalance]);
 
   const toggleBot = () => {
-    setBotActive((prev) => !prev);
+    setBotActive((prev) => {
+      const next = !prev;
+      if (next) {
+        soundController.playAlert();
+      }
+      return next;
+    });
   };
+
+  const triggerManualTrade = useCallback(() => {
+    executeLiveTrade(currentZScore || 1.85);
+  }, [executeLiveTrade, currentZScore]);
 
   const kelly = calculateKellySizing(currentBalance, {
     maxPriceCents: config.maxPriceCents,
@@ -477,6 +487,7 @@ export function useTradingBot() {
     refreshLiveBalance,
     botActive,
     toggleBot,
+    triggerManualTrade,
     binanceStatus,
     limitlessStatus,
     wsLogs,

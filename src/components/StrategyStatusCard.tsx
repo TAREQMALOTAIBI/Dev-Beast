@@ -1,6 +1,6 @@
 import React from 'react';
 import { BotConfig } from '../types/bot';
-import { ShieldAlert, Zap, Radio, Volume2, VolumeX, Pause, Play, AlertCircle } from 'lucide-react';
+import { ShieldAlert, Zap, Radio, Volume2, VolumeX, Pause, Play, AlertCircle, Power, PlayCircle, PauseCircle } from 'lucide-react';
 import { soundController } from '../utils/audio';
 
 interface StrategyStatusCardProps {
@@ -9,6 +9,8 @@ interface StrategyStatusCardProps {
   isEntrySignal: boolean;
   botActive: boolean;
   onToggleBot: () => void;
+  onTriggerManualTrade?: () => void;
+  isExecuting?: boolean;
   soundEnabled: boolean;
   onToggleSound: () => void;
   config: BotConfig;
@@ -21,6 +23,8 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
   isEntrySignal,
   botActive,
   onToggleBot,
+  onTriggerManualTrade,
+  isExecuting = false,
   soundEnabled,
   onToggleSound,
   config,
@@ -40,7 +44,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
   const normalizedZPct = Math.min(100, Math.max(0, ((currentZScore + 3) / 6) * 100));
 
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/90 backdrop-blur-sm p-4 flex flex-col gap-3">
+    <div className="rounded-xl border border-slate-800 bg-slate-900/90 backdrop-blur-sm p-4 flex flex-col gap-3.5 shadow-lg">
       {/* Top Header */}
       <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
         <div className="flex items-center gap-2">
@@ -62,27 +66,80 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
           >
             {soundEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
           </button>
+        </div>
+      </div>
 
-          <button
-            onClick={onToggleBot}
-            className={`flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg border transition-all ${
-              botActive
-                ? 'bg-emerald-950/60 text-emerald-300 border-emerald-800/80 hover:bg-emerald-900/50'
-                : 'bg-rose-950/60 text-rose-300 border-rose-800/80 hover:bg-rose-900/50'
-            }`}
-          >
-            {botActive ? (
-              <>
-                <Play className="w-3 h-3 fill-current" />
-                <span>{isAr ? 'الروبوت نشط' : 'Active'}</span>
-              </>
-            ) : (
-              <>
-                <Pause className="w-3 h-3 fill-current" />
-                <span>{isAr ? 'متوقف مؤقتاً' : 'Paused'}</span>
-              </>
+      {/* Primary Prominent Robot Control Box */}
+      <div className={`p-3 rounded-xl border transition-all ${
+        botActive
+          ? 'bg-emerald-950/40 border-emerald-600/60 shadow-sm shadow-emerald-950/50'
+          : 'bg-rose-950/30 border-rose-700/50'
+      }`}>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className={`p-2 rounded-lg ${botActive ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+              <Power className={`w-5 h-5 ${botActive ? 'animate-pulse' : ''}`} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-sm text-slate-100">
+                  {isAr ? 'حالة تشغيل الروبوت:' : 'Trading Bot Power:'}
+                </span>
+                <span className={`px-2 py-0.5 rounded-full text-[11px] font-extrabold tracking-wide ${
+                  botActive
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                    : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                }`}>
+                  {isAr ? (botActive ? '● نشط ويعمل' : '○ متوقف حالياً') : (botActive ? '● RUNNING' : '○ PAUSED')}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                {isAr
+                  ? (botActive
+                      ? 'الروبوت يراقب السوق وسينفذ الصفقات تلقائياً عند تحقق الشروط'
+                      : 'الروبوت متوقف. لن يقوم بتنفيذ أي صفقات تلقائية حتى تضغط تشغيل')
+                  : (botActive
+                      ? 'Bot is monitoring market and will auto-execute when conditions are met'
+                      : 'Bot is paused. No trades will be auto-placed until activated')}
+              </p>
+            </div>
+          </div>
+
+          {/* Big Action Buttons */}
+          <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+            {onTriggerManualTrade && (
+              <button
+                onClick={onTriggerManualTrade}
+                disabled={isExecuting}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-300 border border-sky-800/60 hover:border-sky-600 transition-colors disabled:opacity-50 cursor-pointer shadow-xs whitespace-nowrap"
+                title={isAr ? 'تجربة إرسال أمر فحص فوري إلى Limitless' : 'Execute an immediate test order via Limitless'}
+              >
+                <Zap className="w-3.5 h-3.5 text-sky-400" />
+                <span>{isAr ? 'أمر فحص يدوي' : 'Test Order'}</span>
+              </button>
             )}
-          </button>
+
+            <button
+              onClick={onToggleBot}
+              className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg transition-all shadow-md cursor-pointer whitespace-nowrap select-none ${
+                botActive
+                  ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-950/60 ring-2 ring-rose-500/30'
+                  : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950/60 ring-2 ring-emerald-400/50'
+              }`}
+            >
+              {botActive ? (
+                <>
+                  <PauseCircle className="w-4 h-4 fill-white/20" />
+                  <span>{isAr ? 'إيقاف الروبوت' : 'Pause Bot'}</span>
+                </>
+              ) : (
+                <>
+                  <PlayCircle className="w-4 h-4 fill-white/20" />
+                  <span>{isAr ? 'تشغيل الروبوت الآن' : 'Start Bot Now'}</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </div>
 

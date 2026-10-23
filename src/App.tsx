@@ -19,6 +19,7 @@ import {
   RefreshCw,
   Wallet,
   ExternalLink,
+  Power,
 } from 'lucide-react';
 
 export default function App() {
@@ -42,6 +43,7 @@ export default function App() {
     refreshLiveBalance,
     botActive,
     toggleBot,
+    triggerManualTrade,
     binanceStatus,
     limitlessStatus,
     wsLogs,
@@ -113,10 +115,37 @@ export default function App() {
 
           {/* Zone 3: Primary Actions */}
           <div className="flex items-center gap-3 shrink-0">
+            {/* Primary Robot Start/Stop Button */}
+            <button
+              onClick={toggleBot}
+              className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-bold rounded-lg border transition-all shadow-md cursor-pointer select-none whitespace-nowrap ${
+                botActive
+                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400 shadow-emerald-950/80 ring-2 ring-emerald-400/40'
+                  : 'bg-rose-700 hover:bg-rose-600 text-white border-rose-500 shadow-rose-950/80 ring-2 ring-rose-400/40'
+              }`}
+              title={
+                isAr
+                  ? (botActive ? 'الروبوت يعمل حالياً - اضغط لإيقافه مؤقتاً' : 'الروبوت متوقف - اضغط لتشغيل الروبوت الآن')
+                  : (botActive ? 'Bot is Running - Click to Pause' : 'Bot is Paused - Click to Start')
+              }
+            >
+              <Power className={`w-3.5 h-3.5 ${botActive ? 'text-white animate-pulse' : 'text-rose-100'}`} />
+              <span>
+                {isAr
+                  ? (botActive ? 'الروبوت يعمل (إيقاف)' : 'تشغيل الروبوت الآن')
+                  : (botActive ? 'Bot Active (Pause)' : 'Start Bot Now')}
+              </span>
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  botActive ? 'bg-emerald-200 animate-ping' : 'bg-rose-300'
+                }`}
+              />
+            </button>
+
             {/* Language Switcher */}
             <button
               onClick={() => setLang(isAr ? 'en' : 'ar')}
-              className="flex items-center gap-1 px-2.5 py-1 text-xs text-slate-400 hover:text-slate-100 bg-slate-900 border border-slate-800 rounded-lg transition-colors whitespace-nowrap shrink-0"
+              className="flex items-center gap-1 px-2.5 py-1 text-xs text-slate-400 hover:text-slate-100 bg-slate-900 border border-slate-800 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
               title="Toggle Language / تبديل اللغة"
             >
               <Globe className="w-3.5 h-3.5" />
@@ -126,7 +155,7 @@ export default function App() {
             {/* Config Trigger */}
             <button
               onClick={() => setIsConfigOpen(true)}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 border border-emerald-700/60 rounded-lg transition-colors whitespace-nowrap shrink-0 shadow-sm"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 border border-emerald-700/60 rounded-lg transition-colors whitespace-nowrap shrink-0 shadow-sm cursor-pointer"
             >
               <SlidersHorizontal className="w-3.5 h-3.5 text-emerald-400" />
               <span>{isAr ? 'إعدادات ومفاتيح التداول الحي' : 'Live Credentials & Config'}</span>
@@ -307,6 +336,8 @@ export default function App() {
                   isEntrySignal={isEntrySignal}
                   botActive={botActive}
                   onToggleBot={toggleBot}
+                  onTriggerManualTrade={triggerManualTrade}
+                  isExecuting={isExecuting}
                   soundEnabled={soundEnabled}
                   onToggleSound={toggleSound}
                   config={config}
