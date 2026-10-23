@@ -26,6 +26,86 @@ app.get('/api/binance/*', async (req, res) => {
   }
 });
 
+// Cache for active BTC prediction market
+let cachedActiveBtc = null;
+let lastBtcFetchTime = 0;
+
+// Discover active BTC 15-minute prediction market on Limitless
+app.get('/api/limitless/active-btc', async (_req, res) => {
+  try {
+    const now = Date.now();
+    if (cachedActiveBtc && now - lastBtcFetchTime < 15000) {
+      return res.json({ success: true, ...cachedActiveBtc });
+    }
+
+    const response = await fetch('https://api.limitless.exchange/markets/active');
+    const json = await response.json();
+    const markets = json?.data || [];
+
+    // Match 15-min BTC prediction market, fallback to 5-min or any active BTC market
+    const btcMarket =
+      markets.find((m) => m.slug?.toLowerCase().includes('btc') && m.slug?.includes('15-min')) ||
+      markets.find((m) => m.slug?.toLowerCase().includes('btc') && m.slug?.includes('5-min')) ||
+      markets.find((m) => m.slug?.toLowerCase().includes('btc'));
+
+    if (btcMarket) {
+      cachedActiveBtc = {
+        slug: btcMarket.slug,
+        title: btcMarket.title,
+        status: btcMarket.status,
+        prices: btcMarket.prices,
+        address: btcMarket.address,
+      };
+      lastBtcFetchTime = now;
+      return res.json({ success: true, ...cachedActiveBtc });
+    }
+
+    res.json({ success: false, message: 'No active BTC prediction market found' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: String(err) });
+  }
+});
+
+// Orderbook endpoint for specific market slug
+app.get('/api/limitless/orderbook', async (req, res) => {
+  try {
+    const slug = req.query.slug || 'btc-up-or-down-15-min';
+    const targetUrl = `https://api.limitless.exchange/markets/${encodeURIComponent(slug)}/orderbook`;
+    const response = await fetch(targetUrl);
+    if (!response.ok) {
+      return res.status(response.status).json({ error: `Limitless API returned status ${response.status}` });
+    }
+    const data = await response.json();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// General Limitless API proxy to avoid CORS and browser restrictions
+app.all('/api/limitless/*', async (req, res) => {
+  try {
+    const targetPath = req.originalUrl.replace(/^\/api\/limitless/, '');
+    const targetUrl = `https://api.limitless.exchange${targetPath}`;
+    const headers = { 'Content-Type': 'application/json' };
+    if (process.env.LIMITLESS_API_KEY) {
+      headers['X-API-Key'] = process.env.LIMITLESS_API_KEY;
+    }
+    const fetchOptions = {
+      method: req.method,
+      headers,
+    };
+    if (req.method !== 'GET' && req.method !== 'HEAD' && req.body && Object.keys(req.body).length > 0) {
+      fetchOptions.body = JSON.stringify(req.body);
+    }
+    const response = await fetch(targetUrl, fetchOptions);
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 async function fetchLiveWalletAndBalance() {
   let address = '';
   const pk = process.env.PRIVATE_KEY?.trim();

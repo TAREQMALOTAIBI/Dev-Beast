@@ -469,6 +469,29 @@ export function useTradingBot() {
         // Fallback to define
       });
 
+    // Auto-discover active Limitless BTC prediction market
+    fetch('/api/limitless/active-btc')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && data.success && data.slug) {
+          setConfig((prev) => {
+            if (!prev.limitlessMarketSlug || prev.limitlessMarketSlug === 'btc-100k-weekly') {
+              const updated = { ...prev, limitlessMarketSlug: data.slug };
+              try {
+                localStorage.setItem('limitless_live_bot_config', JSON.stringify(updated));
+              } catch {
+                // Ignore
+              }
+              return updated;
+            }
+            return prev;
+          });
+        }
+      })
+      .catch(() => {
+        // Silent fallback
+      });
+
     // Fetch initial balance once on load; subsequent updates only happen when the user clicks refresh
     refreshLiveBalance();
   }, [refreshLiveBalance]);

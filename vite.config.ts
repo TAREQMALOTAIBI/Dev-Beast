@@ -160,6 +160,11 @@ export default defineConfig(() => {
           changeOrigin: true,
           rewrite: (p) => p.replace(/^\/api\/binance/, ''),
         },
+        '/api/limitless': {
+          target: 'https://api.limitless.exchange',
+          changeOrigin: true,
+          rewrite: (p) => p.replace(/^\/api\/limitless/, ''),
+        },
       },
     },
     preview: {

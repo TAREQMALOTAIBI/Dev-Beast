@@ -1,3 +1,4 @@
+import { io, Socket } from 'socket.io-client';
 import {
   ExecutedChunk,
   WsMessageLog,
@@ -12,7 +13,7 @@ import { soundController } from '../utils/audio';
 export type LimitlessStatus = 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED' | 'AUTHENTICATED' | 'ERROR';
 
 export class LimitlessService {
-  private client: unknown = null;
+  private socket: Socket | null = null;
   private status: LimitlessStatus = 'DISCONNECTED';
   private listeners: ((status: LimitlessStatus) => void)[] = [];
   private logListeners: ((log: WsMessageLog) => void)[] = [];
@@ -26,7 +27,9 @@ export class LimitlessService {
   private currentOracle: OraclePriceData | null = null;
   private currentPositions: PositionItem[] = [];
   private isExplicitlyClosed = false;
-  private reconnectTimer: number | null = null;
+  private activeMarketSlug = 'btc-100k-weekly';
+  private pollingTimer: number | null = null;
+  private credentials?: { apiKey?: string; tokenId?: string; secret?: string };
 
   public subscribeStatus(listener: (status: LimitlessStatus) => void) {
     this.listeners.push(listener);
@@ -82,8 +85,10 @@ export class LimitlessService {
   }
 
   private setStatus(status: LimitlessStatus) {
-    this.status = status;
-    this.listeners.forEach((l) => l(status));
+    if (this.status !== status) {
+      this.status = status;
+      this.listeners.forEach((l) => l(status));
+    }
   }
 
   private log(direction: 'INCOMING' | 'OUTGOING' | 'SYSTEM', data: Record<string, unknown> | string) {
@@ -98,72 +103,81 @@ export class LimitlessService {
   }
 
   /**
-   * Connect to Limitless WebSocket server according to official documentation
-   * Endpoint: wss://ws.limitless.exchange
+   * Normalizes the WebSocket / Socket.IO URL to the official Limitless endpoint
    */
-  public async connect(
+  private normalizeSocketUrl(rawUrl: string): string {
+    let clean = (rawUrl || 'https://ws.limitless.exchange').trim();
+    if (!clean.endsWith('/markets')) {
+      clean = clean.replace(/\/+$/, '') + '/markets';
+    }
+    if (clean.startsWith('ws://')) {
+      clean = 'http://' + clean.slice(5);
+    } else if (clean.startsWith('wss://')) {
+      clean = 'https://' + clean.slice(6);
+    }
+    return clean;
+  }
+
+  /**
+   * Connect to Limitless Exchange Socket.IO gateway
+   * Endpoint: https://ws.limitless.exchange/markets
+   */
+  public connect(
     url: string = 'wss://ws.limitless.exchange',
     marketSlug: string = 'btc-100k-weekly',
     credentials?: { apiKey?: string; tokenId?: string; secret?: string }
   ) {
     this.disconnect();
+    this.isExplicitlyClosed = false;
     this.setStatus('CONNECTING');
-    this.log('SYSTEM', `[LIMITLESS SDK] Connecting to Limitless Streaming Server: ${url}`);
+    this.credentials = credentials;
+    this.activeMarketSlug = marketSlug || 'btc-100k-weekly';
+
+    const targetEndpoint = this.normalizeSocketUrl(url);
+    this.log('SYSTEM', `[LIMITLESS STREAM] Initializing connection to: ${targetEndpoint}`);
 
     try {
-      // Dynamically import official @limitless-exchange/sdk
-      const { WebSocketClient } = await import('@limitless-exchange/sdk');
-
-      const clientConfig: Record<string, unknown> = {
-        url: url || 'wss://ws.limitless.exchange',
-        autoReconnect: true,
+      const socket = io(targetEndpoint, {
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 8000,
         timeout: 10000,
-      };
+      });
 
-      const hasHmac = Boolean(credentials?.tokenId && credentials?.secret);
-      const hasApiKey = Boolean(credentials?.apiKey);
+      this.socket = socket;
 
-      if (hasHmac) {
-        clientConfig.hmacCredentials = {
-          tokenId: credentials!.tokenId,
-          secret: credentials!.secret,
-        };
-      } else if (hasApiKey) {
-        clientConfig.apiKey = credentials!.apiKey;
-      }
+      socket.on('connect', () => {
+        const hasAuth = Boolean(this.credentials?.tokenId || this.credentials?.apiKey);
+        this.setStatus(hasAuth ? 'AUTHENTICATED' : 'CONNECTED');
+        this.stopOrderbookPolling();
+        this.log(
+          'SYSTEM',
+          `[LIMITLESS STREAM] Connected successfully (Socket ID: ${socket.id}). Mode: ${
+            hasAuth ? 'AUTHENTICATED' : 'PUBLIC STREAM'
+          }`
+        );
 
-      const ws = new WebSocketClient(clientConfig);
-      this.client = ws;
+        // 1. Subscribe to configured market
+        this.subscribeMarket(this.activeMarketSlug);
 
-      await ws.connect();
-      this.setStatus(hasHmac || hasApiKey ? 'AUTHENTICATED' : 'CONNECTED');
-      this.log('SYSTEM', `[LIMITLESS SDK] Connected successfully. Mode: ${hasHmac || hasApiKey ? 'AUTHENTICATED' : 'PUBLIC STREAM'}`);
+        // 2. Discover and subscribe to active BTC 15m prediction market
+        this.discoverAndSubscribeActiveBtcMarket();
 
-      // 1. Subscribe to public market prices
-      const targetSlug = marketSlug || 'btc-100k-weekly';
-      try {
-        await ws.subscribe('subscribe_market_prices', {
-          marketSlugs: [targetSlug],
-        });
-        this.log('OUTGOING', { action: 'subscribe_market_prices', marketSlugs: [targetSlug] });
-      } catch (err) {
-        this.log('SYSTEM', `[LIMITLESS] Market price subscription: ${err instanceof Error ? err.message : String(err)}`);
-      }
-
-      // 2. Subscribe to authenticated channels if credentials present
-      if (hasHmac || hasApiKey) {
-        try {
-          await ws.subscribe('subscribe_positions', { marketSlugs: [targetSlug] });
-          await ws.subscribe('subscribe_order_events');
-          await ws.subscribe('subscribe_transactions');
-          this.log('OUTGOING', { action: 'subscribe_authenticated', channels: ['positions', 'order_events', 'tx'] });
-        } catch (err) {
-          this.log('SYSTEM', `[LIMITLESS] Auth subscription: ${err instanceof Error ? err.message : String(err)}`);
+        // 3. Authenticated subscriptions if credentials provided
+        if (hasAuth) {
+          this.log('OUTGOING', {
+            action: 'subscribe_authenticated',
+            channels: ['positions', 'order_events', 'transactions'],
+          });
+          socket.emit('subscribe_positions', { marketSlugs: [this.activeMarketSlug] });
+          socket.emit('subscribe_order_events');
+          socket.emit('subscribe_transactions');
         }
-      }
+      });
 
-      // Event Listeners from official docs
-      ws.on('orderbookUpdate', (data: OrderbookUpdate) => {
+      // Streamed Orderbook updates
+      socket.on('orderbookUpdate', (data: OrderbookUpdate) => {
         this.currentOrderbook = data;
         this.orderbookListeners.forEach((l) => l(data));
         this.log('INCOMING', {
@@ -171,11 +185,12 @@ export class LimitlessService {
           marketSlug: data.marketSlug,
           bids: data.orderbook?.bids?.length || 0,
           asks: data.orderbook?.asks?.length || 0,
-          midpoint: data.orderbook?.adjustedMidpoint,
+          midpoint: data.orderbook?.adjustedMidpoint || data.orderbook?.midpoint,
         });
       });
 
-      ws.on('oraclePriceData', (data: OraclePriceData) => {
+      // Streamed Oracle price data
+      socket.on('oraclePriceData', (data: OraclePriceData) => {
         this.currentOracle = data;
         this.oracleListeners.forEach((l) => l(data));
         this.log('INCOMING', {
@@ -186,123 +201,173 @@ export class LimitlessService {
         });
       });
 
-      ws.on('positions', (data: unknown) => {
+      // Positions
+      socket.on('positions', (data: unknown) => {
         this.log('INCOMING', { event: 'positions', data });
-        if (data && typeof data === 'object' && 'positions' in data && Array.isArray((data as { positions: PositionItem[] }).positions)) {
+        if (
+          data &&
+          typeof data === 'object' &&
+          'positions' in data &&
+          Array.isArray((data as { positions: PositionItem[] }).positions)
+        ) {
           this.currentPositions = (data as { positions: PositionItem[] }).positions;
           this.positionListeners.forEach((l) => l(this.currentPositions));
         }
       });
 
-      ws.on('orderEvent', (event: OrderEvent) => {
+      // Order lifecycle events
+      socket.on('orderEvent', (event: OrderEvent) => {
         this.log('INCOMING', { event: 'orderEvent', source: event.source, type: event.type, orderId: event.orderId });
         this.orderEventListeners.forEach((l) => l(event));
       });
 
-      ws.on('tx', (data: TransactionEvent) => {
+      // Transaction events
+      socket.on('tx', (data: TransactionEvent) => {
         this.log('INCOMING', { event: 'tx', txHash: data.txHash, status: data.status });
       });
 
-      // AMM prices event as documented in official streaming spec
-      ws.on('newPriceData', (data: unknown) => {
+      // AMM prices
+      socket.on('newPriceData', (data: unknown) => {
         this.log('INCOMING', { event: 'newPriceData', data });
       });
 
-      // Server-side system messages
-      ws.on('system', (data: unknown) => {
-        this.log('SYSTEM', data as Record<string, unknown> | string);
-      });
-
-      ws.on('disconnect', (reason: string) => {
-        this.setStatus('DISCONNECTED');
-        this.log('SYSTEM', `[LIMITLESS SDK] Disconnected: ${reason}`);
-
-        // Official doc guideline: on SDK 1.1.0 automatic reconnect does not restore subscriptions,
-        // and replayed signatures trigger 'Invalid HMAC authentication'.
-        // We gracefully re-issue connect() with a fresh handshake signature when dropped.
+      // Disconnect handling
+      socket.on('disconnect', (reason: string) => {
+        this.log('SYSTEM', `[LIMITLESS STREAM] Disconnected: ${reason}`);
         if (!this.isExplicitlyClosed) {
-          if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-          this.reconnectTimer = window.setTimeout(async () => {
-            if (!this.isExplicitlyClosed) {
-              this.log('SYSTEM', '[LIMITLESS SDK] Re-initiating fresh connection with signed handshake...');
-              try {
-                await this.connect(url, marketSlug, credentials);
-              } catch (err) {
-                this.log('SYSTEM', `[LIMITLESS SDK RECONNECT ERROR] ${err instanceof Error ? err.message : String(err)}`);
-              }
-            }
-          }, 3000);
+          this.setStatus('CONNECTING');
+          this.startOrderbookPolling(this.activeMarketSlug);
+        } else {
+          this.setStatus('DISCONNECTED');
         }
       });
 
-      ws.on('error', (err: unknown) => {
-        this.setStatus('ERROR');
-        this.log('SYSTEM', `[LIMITLESS SDK ERROR] ${err instanceof Error ? err.message : String(err)}`);
+      // Error handling
+      socket.on('connect_error', (err: Error) => {
+        this.log('SYSTEM', `[LIMITLESS STREAM ERROR] Connection notice: ${err.message}. Activating orderbook polling fallback.`);
+        this.startOrderbookPolling(this.activeMarketSlug);
       });
-
-    } catch (err: unknown) {
+    } catch (err) {
       this.setStatus('ERROR');
       const msg = err instanceof Error ? err.message : String(err);
-      this.log('SYSTEM', `[LIMITLESS CONNECTION FAILED] ${msg}. Using direct WebSocket fallback.`);
-      this.fallbackRawWebSocket(url, credentials?.apiKey);
+      this.log('SYSTEM', `[LIMITLESS CONNECTION FAILED] ${msg}. Using REST polling fallback.`);
+      this.startOrderbookPolling(this.activeMarketSlug);
+    }
+
+    // Immediately fetch initial snapshot so orderbook is populated with zero delay
+    this.fetchInitialOrderbook(this.activeMarketSlug);
+  }
+
+  /**
+   * Subscribe to specific market prices
+   */
+  public subscribeMarket(slug: string) {
+    if (!slug) return;
+    this.activeMarketSlug = slug;
+    if (this.socket && this.socket.connected) {
+      this.socket.emit('subscribe_market_prices', { marketSlugs: [slug] });
+      this.log('OUTGOING', { action: 'subscribe_market_prices', marketSlugs: [slug] });
+    }
+    this.fetchInitialOrderbook(slug);
+  }
+
+  /**
+   * Automatically discovers the active 15m BTC prediction market from Limitless
+   */
+  private async discoverAndSubscribeActiveBtcMarket() {
+    try {
+      let res = await fetch('/api/limitless/active-btc').catch(() => null);
+      if (!res || !res.ok) {
+        res = await fetch('https://api.limitless.exchange/markets/active').catch(() => null);
+      }
+      if (res && res.ok) {
+        const json = await res.json();
+        let discoveredSlug: string | undefined = json?.slug;
+        if (!discoveredSlug && Array.isArray(json?.data)) {
+          const match =
+            json.data.find(
+              (m: { slug?: string }) => m.slug?.toLowerCase().includes('btc') && m.slug?.includes('15-min')
+            ) || json.data.find((m: { slug?: string }) => m.slug?.toLowerCase().includes('btc'));
+          discoveredSlug = match?.slug;
+        }
+
+        if (discoveredSlug && discoveredSlug !== this.activeMarketSlug) {
+          this.log('SYSTEM', `[LIMITLESS DISCOVERY] Active BTC prediction market found: ${discoveredSlug}`);
+          this.subscribeMarket(discoveredSlug);
+        }
+      }
+    } catch {
+      // Non-critical auto-discovery
     }
   }
 
   /**
-   * Fallback to direct raw WebSocket if SDK fails to load in specific runtime
+   * Fetches initial orderbook snapshot from Limitless REST API
    */
-  private fallbackRawWebSocket(url: string, apiKey?: string) {
+  private async fetchInitialOrderbook(slug: string) {
+    if (!slug) return;
     try {
-      const ws = new WebSocket(url || 'wss://ws.limitless.exchange');
-      this.client = ws;
-
-      ws.onopen = () => {
-        this.setStatus('CONNECTED');
-        this.log('SYSTEM', '[LIMITLESS RAW WS] Connected. Sending AUTH packet...');
-        if (apiKey) {
-          ws.send(JSON.stringify({ type: 'AUTH', apiKey }));
-          this.setStatus('AUTHENTICATED');
-        }
-      };
-
-      ws.onmessage = (evt) => {
-        try {
-          const parsed = JSON.parse(evt.data.toString());
-          this.log('INCOMING', parsed);
-          if (parsed.type === 'BALANCE_UPDATE' && typeof parsed.balance === 'number') {
-            this.balanceListeners.forEach((l) => l(parsed.balance));
+      let res = await fetch(`/api/limitless/orderbook?slug=${encodeURIComponent(slug)}`).catch(() => null);
+      if (!res || !res.ok) {
+        res = await fetch(`https://api.limitless.exchange/markets/${encodeURIComponent(slug)}/orderbook`).catch(() => null);
+      }
+      if (res && res.ok) {
+        const ob = await res.json();
+        if (ob && (ob.bids || ob.asks)) {
+          const update: OrderbookUpdate = {
+            marketSlug: slug,
+            orderbook: {
+              bids: ob.bids || [],
+              asks: ob.asks || [],
+              midpoint: ob.midpoint,
+              adjustedMidpoint: ob.adjustedMidpoint || ob.midpoint,
+              maxSpread: ob.maxSpread,
+              minSize: ob.minSize,
+            },
+          };
+          this.currentOrderbook = update;
+          this.orderbookListeners.forEach((l) => l(update));
+          if (this.status === 'CONNECTING' || this.status === 'DISCONNECTED') {
+            this.setStatus('CONNECTED');
           }
-        } catch {
-          this.log('INCOMING', evt.data);
         }
-      };
-
-      ws.onclose = () => {
-        this.setStatus('DISCONNECTED');
-      };
+      }
     } catch {
-      this.setStatus('ERROR');
+      // Fail silently
+    }
+  }
+
+  /**
+   * Starts periodic REST polling if WebSocket is disconnected or recovering
+   */
+  private startOrderbookPolling(slug: string) {
+    if (this.pollingTimer) return;
+    this.pollingTimer = window.setInterval(() => {
+      if (this.socket && this.socket.connected) {
+        this.stopOrderbookPolling();
+        return;
+      }
+      this.fetchInitialOrderbook(slug);
+    }, 3000);
+  }
+
+  private stopOrderbookPolling() {
+    if (this.pollingTimer) {
+      clearInterval(this.pollingTimer);
+      this.pollingTimer = null;
     }
   }
 
   public disconnect() {
     this.isExplicitlyClosed = true;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-    if (this.client) {
+    this.stopOrderbookPolling();
+    if (this.socket) {
       try {
-        const c = this.client as { disconnect?: () => Promise<void> | void; close?: () => void };
-        if (typeof c.disconnect === 'function') {
-          c.disconnect();
-        } else if (typeof c.close === 'function') {
-          c.close();
-        }
+        this.socket.disconnect();
       } catch {
-        // Safe close
+        // Safe disconnect
       }
-      this.client = null;
+      this.socket = null;
     }
     this.setStatus('DISCONNECTED');
   }
@@ -337,9 +402,9 @@ export class LimitlessService {
       const chunkId = i + 1;
       const orderPayload = {
         action: 'PLACE_ORDER',
-        market: 'BTC_15M_PREDICTION',
+        market: this.activeMarketSlug || 'BTC_15M_PREDICTION',
         side: 'BUY',
-        type: orderType, // GTC
+        type: orderType, // FAK or GTC
         price: priceCents,
         size: contractsToBuy,
         chunkId,
@@ -368,20 +433,28 @@ export class LimitlessService {
 
       this.log('OUTGOING', orderPayload);
 
-      // Transmit to exchange
+      // Transmit to exchange via socket or server proxy
       try {
-        if (this.client && 'socket' in (this.client as Record<string, unknown>)) {
-          const c = this.client as { socket?: { emit: (ev: string, data: unknown) => void } };
-          c.socket?.emit('order', orderPayload);
-        } else if (this.client && 'send' in (this.client as Record<string, unknown>)) {
-          (this.client as WebSocket).send(JSON.stringify(orderPayload));
+        if (this.socket && this.socket.connected) {
+          this.socket.emit('order', orderPayload);
         }
+
+        // Also notify backend execution route
+        fetch('/api/limitless/order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(orderPayload),
+        }).catch(() => {
+          // Socket transmission is primary
+        });
 
         chunkState.status = 'SENT';
         chunkState.timestamp = Date.now();
         onChunkUpdate({ ...chunkState });
         soundController.playChunkExecuted(i);
-        console.log(`🚀 Live Chunk ${chunkId}/${chunksCount} transmitted to Limitless: ${contractsToBuy} contracts @ $${priceCents}`);
+        console.log(
+          `🚀 Live Order Chunk ${chunkId}/${chunksCount} transmitted to Limitless: ${contractsToBuy} contracts @ $${priceCents} (${orderType})`
+        );
       } catch (err) {
         chunkState.status = 'FAILED';
         onChunkUpdate({ ...chunkState });
