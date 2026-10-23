@@ -295,8 +295,7 @@ export function useTradingBot() {
       setWsLogs((prev) => [...prev.slice(-80), log]);
     });
     const unsubBalance = limitlessService.subscribeBalance((bal) => {
-      console.log(`[LIVE BALANCE UPDATE] Exchange reported balance: $${bal}`);
-      setCurrentBalance(bal);
+      console.log(`[EXCHANGE NOTICE] WebSocket balance notice: $${bal}`);
     });
     const unsubOrderbook = limitlessService.subscribeOrderbook((ob) => setOrderbook(ob));
     const unsubOracle = limitlessService.subscribeOracle((orc) => setOracle(orc));
@@ -448,9 +447,8 @@ export function useTradingBot() {
         // Fallback to define
       });
 
+    // Fetch initial balance once on load; subsequent updates only happen when the user clicks refresh
     refreshLiveBalance();
-    const interval = setInterval(refreshLiveBalance, 10000);
-    return () => clearInterval(interval);
   }, [refreshLiveBalance]);
 
   const toggleBot = () => {

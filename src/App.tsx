@@ -171,12 +171,11 @@ export default function App() {
               <button
                 onClick={() => refreshLiveBalance()}
                 disabled={isFetchingBalance}
-                className={`p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors ${
-                  isFetchingBalance ? 'animate-spin text-emerald-400' : ''
-                }`}
-                title={isAr ? 'تحديث الرصيد الحي من البلوكشين' : 'Refresh live on-chain balance'}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs text-slate-200 hover:text-white bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 transition-colors cursor-pointer select-none shadow-xs disabled:opacity-70"
+                title={isAr ? 'اضغط هنا لتحديث الرصيد الحي يدوياً من البلوكشين' : 'Click to refresh balance manually from blockchain'}
               >
-                <RefreshCw className="w-3.5 h-3.5" />
+                <RefreshCw className={`w-3.5 h-3.5 ${isFetchingBalance ? 'animate-spin text-emerald-400' : 'text-slate-300'}`} />
+                <span className="text-[11px] font-semibold">{isAr ? 'تحديث الرصيد' : 'Refresh'}</span>
               </button>
             </div>
             {liveWallet?.address && (
