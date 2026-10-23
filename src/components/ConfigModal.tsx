@@ -31,12 +31,15 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
       symbol: 'BTCUSDT',
       timeframe: '15m',
       periods: 14,
+      strategyDirection: 'BOTH',
       zScoreUpper: 2.0,
       zScoreEntry: 1.9,
+      zScoreLower: -2.0,
+      zScoreLowerEntry: -1.9,
       maxPriceCents: 0.2,
       maxRiskPercent: 0.05,
       orderType: 'FAK',
-      fractionChunks: 4,
+      fractionChunks: 1,
       chunkDelayMs: 500,
       winProbability: 0.55,
       initialBalance: 1000,
@@ -227,41 +230,111 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
             </div>
           </div>
 
-          {/* Section 3: Z-Score Conditions */}
-          <div className="border-t border-slate-800 pt-4">
-            <h3 className="font-semibold text-slate-100 uppercase tracking-wider text-[11px] mb-3 text-sky-400">
-              {isAr ? 'عتبات استراتيجية Z-Score' : 'Z-Score Thresholds'}
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-slate-400 mb-1">
-                  Upper Threshold (Z_SCORE_UPPER)
+          {/* Section 3: Bidirectional Z-Score Conditions */}
+          <div className="border-t border-slate-800 pt-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-slate-100 uppercase tracking-wider text-[11px] text-sky-400">
+                {isAr ? 'عتبات واستراتيجية Z-Score ثنائية الاتجاه' : 'Bidirectional Z-Score Strategy Settings'}
+              </h3>
+              <span className="text-[10px] text-emerald-400 font-bold bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/40">
+                {isAr ? '⚡ ربح في الصعود والهبوط' : '⚡ Long & Short Reversion'}
+              </span>
+            </div>
+
+            {/* Strategy Direction Mode Selector */}
+            <div>
+              <label className="block text-slate-300 mb-1 font-semibold">
+                {isAr ? 'نمط التداول والاتجاهات المسموحة:' : 'Strategy Trading Direction Mode:'}
+              </label>
+              <select
+                value={draft.strategyDirection || 'BOTH'}
+                onChange={(e) => setDraft({ ...draft, strategyDirection: e.target.value as any })}
+                className="w-full bg-slate-950 border border-emerald-600/70 rounded-lg px-3 py-2 text-emerald-300 font-semibold"
+              >
+                <option value="BOTH">
+                  {isAr ? '⚡ كلا الاتجاهين: صعود وهبوط (موصى به للربح المزدوج)' : '⚡ Both Directions (Long & Short - Recommended)'}
+                </option>
+                <option value="SHORT_ONLY">
+                  {isAr ? '▼ هبوط فقط: ارتداد من القمة (Short / Buy DOWN)' : '▼ Short Only (Bearish Pullback from Peak)'}
+                </option>
+                <option value="LONG_ONLY">
+                  {isAr ? '▲ صعود فقط: ارتداد من القاع (Long / Buy UP)' : '▲ Long Only (Bullish Rebound from Trough)'}
+                </option>
+              </select>
+              <span className="text-[10px] text-slate-400 mt-1 block">
+                {isAr
+                  ? 'عند اختيار كلا الاتجاهين، يفتح الروبوت صفقات هبوط (DOWN) عند تراجع السعر من ذروة الشراء، وصفقات صعود (UP) عند ارتداد السعر من ذروة البيع.'
+                  : 'In BOTH mode, the bot trades Bearish Reversions (DOWN) from overbought peaks, and Bullish Reversions (UP) from oversold troughs.'}
+              </span>
+            </div>
+
+            {/* Thresholds Grid: Upper & Lower */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              {/* Upper Arm */}
+              <div className="p-2.5 rounded-lg bg-slate-950/60 border border-rose-900/40">
+                <label className="block text-rose-300 mb-1 font-semibold">
+                  {isAr ? 'عتبة التأهب للقمة (Upper Arm):' : 'Upper Arm (Z_SCORE_UPPER):'}
                 </label>
                 <input
                   type="number"
                   step="0.05"
                   value={draft.zScoreUpper}
                   onChange={(e) => setDraft({ ...draft, zScoreUpper: parseFloat(e.target.value) || 2.0 })}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
                 />
                 <span className="text-[10px] text-slate-500 mt-1 block">
-                  {isAr ? 'يؤهل الروبوت للدخول عند تجاوز السعر لهذا الانحراف' : 'Arms bot when price diverges above upper standard deviation'}
+                  {isAr ? 'التأهب لصفقة هبوط عند تجاوز +2.0σ' : 'Arms Short when Z crosses above upper bound'}
                 </span>
               </div>
 
-              <div>
-                <label className="block text-slate-400 mb-1">
-                  Entry Trigger (Z_SCORE_ENTRY)
+              {/* Upper Trigger */}
+              <div className="p-2.5 rounded-lg bg-slate-950/60 border border-amber-900/40">
+                <label className="block text-amber-300 mb-1 font-semibold">
+                  {isAr ? 'عتبة دخول الهبوط (Short Trigger):' : 'Short Trigger (Z_SCORE_ENTRY):'}
                 </label>
                 <input
                   type="number"
                   step="0.05"
                   value={draft.zScoreEntry}
                   onChange={(e) => setDraft({ ...draft, zScoreEntry: parseFloat(e.target.value) || 1.9 })}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
                 />
                 <span className="text-[10px] text-slate-500 mt-1 block">
-                  {isAr ? 'يرسل أمر الشراء الحي فور ارتداد السعر دون هذه العتبة' : 'Fires live BUY order when price begins reverting back'}
+                  {isAr ? 'تنفيذ صفقة DOWN فور ارتداد السعر دون +1.9σ' : 'Fires Short / DOWN order when price pulls back below entry'}
+                </span>
+              </div>
+
+              {/* Lower Arm */}
+              <div className="p-2.5 rounded-lg bg-slate-950/60 border border-emerald-900/40">
+                <label className="block text-emerald-300 mb-1 font-semibold">
+                  {isAr ? 'عتبة التأهب للقاع (Lower Arm):' : 'Lower Arm (Z_SCORE_LOWER):'}
+                </label>
+                <input
+                  type="number"
+                  step="0.05"
+                  value={draft.zScoreLower ?? -2.0}
+                  onChange={(e) => setDraft({ ...draft, zScoreLower: parseFloat(e.target.value) || -2.0 })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
+                />
+                <span className="text-[10px] text-slate-500 mt-1 block">
+                  {isAr ? 'التأهب لصفقة صعود عند انخفاض السعر دون -2.0σ' : 'Arms Long when Z drops below lower oversold bound'}
+                </span>
+              </div>
+
+              {/* Lower Trigger */}
+              <div className="p-2.5 rounded-lg bg-slate-950/60 border border-teal-900/40">
+                <label className="block text-teal-300 mb-1 font-semibold">
+                  {isAr ? 'عتبة دخول الصعود (Long Trigger):' : 'Long Trigger (Z_SCORE_LOWER_ENTRY):'}
+                </label>
+                <input
+                  type="number"
+                  step="0.05"
+                  value={draft.zScoreLowerEntry ?? -1.9}
+                  onChange={(e) => setDraft({ ...draft, zScoreLowerEntry: parseFloat(e.target.value) || -1.9 })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
+                />
+                <span className="text-[10px] text-slate-500 mt-1 block">
+                  {isAr ? 'تنفيذ صفقة UP فور ارتداد السعر للأعلى فوق -1.9σ' : 'Fires Long / UP order when price bounces back above entry'}
                 </span>
               </div>
             </div>

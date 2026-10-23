@@ -36,6 +36,9 @@ export default function App() {
     latestMetric,
     currentZScore,
     crossedUpperThreshold,
+    crossedLowerThreshold,
+    lastTradeDirection,
+    activeSignal,
     isEntrySignal,
     currentBalance,
     isLiveBalance,
@@ -334,6 +337,8 @@ export default function App() {
                   periods={config.periods}
                   upperThreshold={config.zScoreUpper}
                   entryThreshold={config.zScoreEntry}
+                  lowerThreshold={config.zScoreLower ?? -config.zScoreUpper}
+                  lowerEntryThreshold={config.zScoreLowerEntry ?? -config.zScoreEntry}
                 />
               </div>
 
@@ -342,6 +347,9 @@ export default function App() {
                 <StrategyStatusCard
                   currentZScore={currentZScore}
                   crossedUpperThreshold={crossedUpperThreshold}
+                  crossedLowerThreshold={crossedLowerThreshold}
+                  lastTradeDirection={lastTradeDirection}
+                  activeSignal={activeSignal}
                   isEntrySignal={isEntrySignal}
                   botActive={botActive}
                   onToggleBot={toggleBot}

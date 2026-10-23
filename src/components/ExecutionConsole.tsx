@@ -231,11 +231,24 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
                         }`}
                       >
                         <div className="flex items-center justify-between text-xs mb-2">
-                          <span className="font-bold text-slate-300">
-                            {effectiveChunks === 1
-                              ? (isAr ? 'الأمر الفوري المباشر (FAK)' : 'Direct Instant Order (FAK)')
-                              : (isAr ? `الجزء ${chunkIndex} من ${effectiveChunks}` : `Chunk ${chunkIndex} of ${effectiveChunks}`)}
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-slate-300">
+                              {effectiveChunks === 1
+                                ? (isAr ? 'الأمر الفوري المباشر (FAK)' : 'Direct Instant Order (FAK)')
+                                : (isAr ? `الجزء ${chunkIndex} من ${effectiveChunks}` : `Chunk ${chunkIndex} of ${effectiveChunks}`)}
+                            </span>
+                            {chunk?.direction && (
+                              <span
+                                className={`text-[10px] font-bold px-1.5 py-0.2 rounded font-sans ${
+                                  chunk.direction === 'LONG'
+                                    ? 'bg-emerald-950 text-emerald-300 border border-emerald-700/60'
+                                    : 'bg-rose-950 text-rose-300 border border-rose-700/60'
+                                }`}
+                              >
+                                {chunk.direction === 'LONG' ? '▲ UP' : '▼ DOWN'}
+                              </span>
+                            )}
+                          </div>
                           <span
                             className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
                               isSent
@@ -258,6 +271,12 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
                       <span>{isAr ? 'الكمية:' : 'Size:'}</span>
                       <span className="text-slate-200 font-bold">
                         {chunk ? `${chunk.contracts} contracts` : '—'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-slate-400">
+                      <span>{isAr ? 'الاتجاه:' : 'Direction:'}</span>
+                      <span className={`font-bold ${chunk?.direction === 'LONG' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {chunk?.direction ? (chunk.direction === 'LONG' ? (isAr ? '▲ شراء عقد صعود (UP)' : '▲ Long (UP)') : (isAr ? '▼ شراء عقد هبوط (DOWN)' : '▼ Short (DOWN)')) : '—'}
                       </span>
                     </div>
                     <div className="flex justify-between text-slate-400">
@@ -478,6 +497,7 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
               <tr>
                 <th className="px-4 py-2.5">Time</th>
                 <th className="px-4 py-2.5">Market</th>
+                <th className="px-4 py-2.5">Direction</th>
                 <th className="px-4 py-2.5">Trigger Z</th>
                 <th className="px-4 py-2.5 text-right">Contracts</th>
                 <th className="px-4 py-2.5 text-right">Price</th>
@@ -488,10 +508,10 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
             <tbody className="divide-y divide-slate-800/60">
               {tradeHistory.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
+                  <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
                     {isAr
-                      ? 'لا توجد أوامر منفذة حتى الآن. سينفذ الروبوت الأوامر الحية تلقائياً عند تجاوز Z-Score لـ 2.0σ ثم هبوطه دون 1.90σ.'
-                      : 'No live orders executed in this session yet. Bot will place orders automatically upon Z-Score mean reversion.'}
+                      ? 'لا توجد أوامر منفذة حتى الآن. سينفذ الروبوت الأوامر الحية تلقائياً في كلا الاتجاهين: صفقات DOWN عند الارتداد من القمة، وصفقات UP عند الارتداد من القاع.'
+                      : 'No live orders executed in this session yet. Bot places orders automatically in both directions (DOWN on overbought pullback, UP on oversold rebound).'}
                   </td>
                 </tr>
               ) : (
@@ -501,6 +521,17 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
                       {new Date(trade.timestamp).toLocaleTimeString()}
                     </td>
                     <td className="px-4 py-2 text-slate-200 font-semibold">{trade.market}</td>
+                    <td className="px-4 py-2">
+                      <span
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${
+                          trade.direction === 'LONG'
+                            ? 'bg-emerald-950 text-emerald-300 border border-emerald-700/60'
+                            : 'bg-rose-950 text-rose-300 border border-rose-700/60'
+                        }`}
+                      >
+                        {trade.direction === 'LONG' ? '▲ LONG / UP' : '▼ SHORT / DOWN'}
+                      </span>
+                    </td>
                     <td className="px-4 py-2 text-sky-400">{trade.triggerZScore.toFixed(2)}σ</td>
                     <td className="px-4 py-2 text-right text-slate-100">{trade.totalContracts}</td>
                     <td className="px-4 py-2 text-right text-slate-300">
@@ -510,7 +541,7 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
                       {formatUsd(trade.totalInvestmentUsd)}
                     </td>
                     <td className="px-4 py-2 text-right">
-                      <span className="text-emerald-400 font-semibold">GTC TRANSMITTED</span>
+                      <span className="text-emerald-400 font-semibold">{trade.status || 'TRANSMITTED'}</span>
                     </td>
                   </tr>
                 ))

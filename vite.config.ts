@@ -84,7 +84,65 @@ async function fetchLiveWalletAndBalance() {
   };
 }
 
+let cachedActiveBtc: any = null;
+let lastBtcFetchTime = 0;
+
 function setupApiMiddlewares(middlewares: any) {
+  middlewares.use('/api/limitless/active-btc', async (_req: any, res: any) => {
+    res.setHeader('Content-Type', 'application/json');
+    try {
+      const now = Date.now();
+      if (cachedActiveBtc && now - lastBtcFetchTime < 15000) {
+        return res.end(JSON.stringify({ success: true, ...cachedActiveBtc }));
+      }
+
+      const response = await fetch('https://api.limitless.exchange/markets/active');
+      const json = await response.json();
+      const markets = json?.data || [];
+
+      const btcMarket =
+        markets.find((m: any) => m.slug?.toLowerCase().includes('btc') && m.slug?.includes('15-min')) ||
+        markets.find((m: any) => m.slug?.toLowerCase().includes('btc') && m.slug?.includes('5-min')) ||
+        markets.find((m: any) => m.slug?.toLowerCase().includes('btc'));
+
+      if (btcMarket) {
+        cachedActiveBtc = {
+          slug: btcMarket.slug,
+          title: btcMarket.title,
+          status: btcMarket.status,
+          prices: btcMarket.prices,
+          address: btcMarket.address,
+        };
+        lastBtcFetchTime = now;
+        return res.end(JSON.stringify({ success: true, ...cachedActiveBtc }));
+      }
+
+      res.end(JSON.stringify({ success: false, message: 'No active BTC prediction market found' }));
+    } catch (err) {
+      res.statusCode = 500;
+      res.end(JSON.stringify({ success: false, error: String(err) }));
+    }
+  });
+
+  middlewares.use('/api/limitless/orderbook', async (req: any, res: any) => {
+    res.setHeader('Content-Type', 'application/json');
+    try {
+      const url = new URL(req.url, 'http://localhost');
+      const slug = url.searchParams.get('slug') || 'btc-up-or-down-15-min';
+      const targetUrl = `https://api.limitless.exchange/markets/${encodeURIComponent(slug)}/orderbook`;
+      const response = await fetch(targetUrl);
+      if (!response.ok) {
+        res.statusCode = response.status;
+        return res.end(JSON.stringify({ error: `Limitless API returned status ${response.status}` }));
+      }
+      const data = await response.json();
+      res.end(JSON.stringify(data));
+    } catch (err) {
+      res.statusCode = 500;
+      res.end(JSON.stringify({ error: String(err) }));
+    }
+  });
+
   middlewares.use('/api/balance', async (_req: any, res: any) => {
     res.setHeader('Content-Type', 'application/json');
     try {

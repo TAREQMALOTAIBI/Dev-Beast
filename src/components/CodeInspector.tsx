@@ -23,8 +23,11 @@ const CONFIG = {
     SYMBOL: '${config.symbol}',
     TIMEFRAME: '${config.timeframe}',
     PERIODS: ${config.periods},
+    STRATEGY_DIRECTION: '${config.strategyDirection || 'BOTH'}', // 'BOTH' | 'LONG_ONLY' | 'SHORT_ONLY'
     Z_SCORE_UPPER: ${config.zScoreUpper.toFixed(2)},
     Z_SCORE_ENTRY: ${config.zScoreEntry.toFixed(2)},
+    Z_SCORE_LOWER: ${(config.zScoreLower ?? -2.0).toFixed(2)},
+    Z_SCORE_LOWER_ENTRY: ${(config.zScoreLowerEntry ?? -1.9).toFixed(2)},
     MAX_PRICE_CENTS: ${config.maxPriceCents.toFixed(2)}, // أقصى سعر للدخول (${Math.round(config.maxPriceCents * 100)} سنت)
     MAX_RISK_PERCENT: ${config.maxRiskPercent.toFixed(2)}, // الحد الأقصى للمخاطرة ${(config.maxRiskPercent * 100).toFixed(0)}%
     ORDER_TYPE: '${config.orderType}',
@@ -51,6 +54,7 @@ const CONFIG = {
 class LimitlessTradingBot {
     private closePrices: number[] = [];
     private crossedUpperThreshold: boolean = false;
+    private crossedLowerThreshold: boolean = false;
     private limitlessWs: WebSocketClient;
     private currentBalance: number = ${config.initialBalance};
     private winProbability: number = ${config.winProbability.toFixed(2)};
@@ -227,25 +231,42 @@ class LimitlessTradingBot {
 
         const currentZScore = this.calculateZScore(prices);
 
-        // الشرط الأول: تجاوز العتبة 2.0 (التأهب الفوري في نفس الشمعة)
-        if (currentZScore > CONFIG.Z_SCORE_UPPER) {
-            if (!this.crossedUpperThreshold) {
-                console.log(\`⚠️ Z-Score crossed above \${CONFIG.Z_SCORE_UPPER}σ (\${currentZScore.toFixed(2)}σ)! Bot is ARMED in current candle.\`);
-                this.crossedUpperThreshold = true;
+        // الاتجاه الأول: الارتداد من ذروة الشراء (SHORT / DOWN)
+        if (CONFIG.STRATEGY_DIRECTION === 'BOTH' || CONFIG.STRATEGY_DIRECTION === 'SHORT_ONLY') {
+            if (currentZScore > CONFIG.Z_SCORE_UPPER) {
+                if (!this.crossedUpperThreshold) {
+                    console.log(\`⚠️ Z-Score crossed above +\${CONFIG.Z_SCORE_UPPER}σ (\${currentZScore.toFixed(2)}σ)! ARMED for Short/DOWN.\`);
+                    this.crossedUpperThreshold = true;
+                }
+            }
+
+            if (this.crossedUpperThreshold && currentZScore < CONFIG.Z_SCORE_ENTRY) {
+                if (!this.isExecutingTrade && (!candleTime || this.lastExecutedCandleTime !== candleTime)) {
+                    console.log(\`🎯 LIVE SHORT ENTRY! Z-Score reverted below +\${CONFIG.Z_SCORE_ENTRY}σ (\${currentZScore.toFixed(2)}σ). Executing DOWN order!\`);
+                    this.crossedUpperThreshold = false;
+                    if (candleTime) this.lastExecutedCandleTime = candleTime;
+                    this.executeTrade('SHORT');
+                }
             }
         }
 
-        // الشرط الثاني: الارتداد تحت 1.90 (تنفيذ فوري في نفس الشمعة دون انتظار الإغلاق)
-        if (this.crossedUpperThreshold && currentZScore < CONFIG.Z_SCORE_ENTRY) {
-            if (this.isExecutingTrade) return;
-            if (candleTime && this.lastExecutedCandleTime === candleTime) return;
-
-            console.log(\`🎯 LIVE ENTRY SIGNAL IN SAME CANDLE! Z-Score reverted below \${CONFIG.Z_SCORE_ENTRY}σ (\${currentZScore.toFixed(2)}σ). Executing immediately!\`);
-            this.crossedUpperThreshold = false;
-            if (candleTime) {
-                this.lastExecutedCandleTime = candleTime;
+        // الاتجاه الثاني: الارتداد من ذروة البيع (LONG / UP)
+        if (CONFIG.STRATEGY_DIRECTION === 'BOTH' || CONFIG.STRATEGY_DIRECTION === 'LONG_ONLY') {
+            if (currentZScore < CONFIG.Z_SCORE_LOWER) {
+                if (!this.crossedLowerThreshold) {
+                    console.log(\`⚠️ Z-Score dropped below \${CONFIG.Z_SCORE_LOWER}σ (\${currentZScore.toFixed(2)}σ)! ARMED for Long/UP.\`);
+                    this.crossedLowerThreshold = true;
+                }
             }
-            this.executeTrade();
+
+            if (this.crossedLowerThreshold && currentZScore > CONFIG.Z_SCORE_LOWER_ENTRY) {
+                if (!this.isExecutingTrade && (!candleTime || this.lastExecutedCandleTime !== candleTime)) {
+                    console.log(\`🎯 LIVE LONG ENTRY! Z-Score bounced above \${CONFIG.Z_SCORE_LOWER_ENTRY}σ (\${currentZScore.toFixed(2)}σ). Executing UP order!\`);
+                    this.crossedLowerThreshold = false;
+                    if (candleTime) this.lastExecutedCandleTime = candleTime;
+                    this.executeTrade('LONG');
+                }
+            }
         }
     }
 
@@ -272,7 +293,7 @@ class LimitlessTradingBot {
     // ==========================================
     // 8. تنفيذ الأوامر وتجزئة العقود (Limitless SDK)
     // ==========================================
-    private executeTrade() {
+    private executeTrade(direction: 'SHORT' | 'LONG' = 'SHORT') {
         const totalInvestment = this.calculatePositionSize();
         const numberOfContracts = Math.floor(totalInvestment / CONFIG.MAX_PRICE_CENTS);
 
@@ -281,9 +302,9 @@ class LimitlessTradingBot {
             return;
         }
 
-        console.log(\`🛒 Preparing to buy \${numberOfContracts} contracts at max $\${CONFIG.MAX_PRICE_CENTS} GTC\`);
+        const outcome = direction === 'LONG' ? 'UP' : 'DOWN';
+        console.log(\`🛒 Preparing to buy \${numberOfContracts} contracts for \${outcome} (\${direction}) at max $\${CONFIG.MAX_PRICE_CENTS} \${CONFIG.ORDER_TYPE}\`);
 
-        // تجزئة العقد إلى 4 أجزاء متتالية مع فاصل زمني لتفادي قيود سرعة المنصة (Rate Limit)
         const chunkSize = Math.floor(numberOfContracts / CONFIG.FRACTION_CHUNKS);
         let remainingContracts = numberOfContracts;
 
@@ -295,6 +316,8 @@ class LimitlessTradingBot {
                 action: 'PLACE_ORDER',
                 market: CONFIG.LIMITLESS_MARKET_SLUG,
                 side: 'BUY',
+                direction,
+                outcome,
                 type: CONFIG.ORDER_TYPE,
                 price: CONFIG.MAX_PRICE_CENTS,
                 size: contractsToBuy,
@@ -302,7 +325,7 @@ class LimitlessTradingBot {
             };
 
             setTimeout(() => {
-                console.log(\`🚀 Chunk \${i + 1}/\${CONFIG.FRACTION_CHUNKS} dispatched: \${contractsToBuy} contracts @ $\${CONFIG.MAX_PRICE_CENTS}\`);
+                console.log(\`🚀 Chunk \${i + 1}/\${CONFIG.FRACTION_CHUNKS} [\${direction}] dispatched: \${contractsToBuy} contracts @ $\${CONFIG.MAX_PRICE_CENTS}\`);
                 // إرسال عبر مقبس Limitless الحي
                 if ((this.limitlessWs as any).socket) {
                     (this.limitlessWs as any).socket.emit('order', orderPayload);

@@ -11,7 +11,9 @@ import { BotConfig, KellyMath, ZScoreMetric } from '../types/bot';
 export function calculateZScore(
   closePrices: number[],
   upperThreshold = 2.0,
-  entryThreshold = 1.90
+  entryThreshold = 1.90,
+  lowerThreshold = -2.0,
+  lowerEntryThreshold = -1.90
 ): {
   mean: number;
   variance: number;
@@ -20,6 +22,7 @@ export function calculateZScore(
   currentPrice: number;
   upperBand: number;
   entryBand: number;
+  lowerEntryBand: number;
   lowerBand: number;
 } {
   const n = closePrices.length;
@@ -32,6 +35,7 @@ export function calculateZScore(
       currentPrice: 0,
       upperBand: 0,
       entryBand: 0,
+      lowerEntryBand: 0,
       lowerBand: 0,
     };
   }
@@ -51,7 +55,8 @@ export function calculateZScore(
     currentPrice,
     upperBand: mean + upperThreshold * stdDev,
     entryBand: mean + entryThreshold * stdDev,
-    lowerBand: mean - upperThreshold * stdDev,
+    lowerEntryBand: mean + lowerEntryThreshold * stdDev,
+    lowerBand: mean + lowerThreshold * stdDev,
   };
 }
 

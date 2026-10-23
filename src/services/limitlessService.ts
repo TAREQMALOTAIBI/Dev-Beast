@@ -185,7 +185,7 @@ export class LimitlessService {
           marketSlug: data.marketSlug,
           bids: data.orderbook?.bids?.length || 0,
           asks: data.orderbook?.asks?.length || 0,
-          midpoint: data.orderbook?.adjustedMidpoint || data.orderbook?.midpoint,
+          midpoint: data.orderbook?.adjustedMidpoint,
         });
       });
 
@@ -317,13 +317,14 @@ export class LimitlessService {
           const update: OrderbookUpdate = {
             marketSlug: slug,
             orderbook: {
+              tokenId: ob.tokenId || '',
               bids: ob.bids || [],
               asks: ob.asks || [],
-              midpoint: ob.midpoint,
-              adjustedMidpoint: ob.adjustedMidpoint || ob.midpoint,
-              maxSpread: ob.maxSpread,
-              minSize: ob.minSize,
+              adjustedMidpoint: ob.adjustedMidpoint ?? ob.midpoint ?? 0,
+              maxSpread: ob.maxSpread ?? 0,
+              minSize: ob.minSize ?? 0,
             },
+            timestamp: Date.now(),
           };
           this.currentOrderbook = update;
           this.orderbookListeners.forEach((l) => l(update));
@@ -381,7 +382,8 @@ export class LimitlessService {
     chunksCount: number,
     orderType: string,
     delayMs: number,
-    onChunkUpdate: (chunk: ExecutedChunk) => void
+    onChunkUpdate: (chunk: ExecutedChunk) => void,
+    direction: 'SHORT' | 'LONG' = 'SHORT'
   ): Promise<ExecutedChunk[]> {
     if (this.status !== 'CONNECTED' && this.status !== 'AUTHENTICATED') {
       const errorMsg = 'Cannot place live order: Limitless WebSocket is not connected.';
@@ -400,10 +402,13 @@ export class LimitlessService {
       if (contractsToBuy <= 0) continue;
 
       const chunkId = i + 1;
+      const outcome = direction === 'LONG' ? 'UP' : 'DOWN';
       const orderPayload = {
         action: 'PLACE_ORDER',
         market: this.activeMarketSlug || 'BTC_15M_PREDICTION',
         side: 'BUY',
+        direction,
+        outcome,
         type: orderType, // FAK or GTC
         price: priceCents,
         size: contractsToBuy,
@@ -415,6 +420,7 @@ export class LimitlessService {
         totalChunks: chunksCount,
         contracts: contractsToBuy,
         price: priceCents,
+        direction,
         status: 'QUEUED',
         delayMs: i * delayMs,
         timestamp: Date.now(),

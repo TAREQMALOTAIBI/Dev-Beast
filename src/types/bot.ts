@@ -2,8 +2,11 @@ export interface BotConfig {
   symbol: string;
   timeframe: string;
   periods: number;
-  zScoreUpper: number;
-  zScoreEntry: number;
+  strategyDirection: 'BOTH' | 'LONG_ONLY' | 'SHORT_ONLY'; // Bidirectional or Directional
+  zScoreUpper: number; // Upper armed threshold (e.g. +2.0)
+  zScoreEntry: number; // Upper entry threshold for Short/Down (e.g. +1.9)
+  zScoreLower: number; // Lower armed threshold for Long/Up (e.g. -2.0)
+  zScoreLowerEntry: number; // Lower entry threshold for Long/Up (e.g. -1.9)
   maxPriceCents: number;
   maxRiskPercent: number;
   orderType: 'FAK' | 'IOC' | 'GTC' | 'FOK';
@@ -52,11 +55,14 @@ export interface ZScoreMetric {
   zScore: number;
   upperBand: number;
   entryBand: number;
+  lowerEntryBand: number;
   lowerBand: number;
   upperThreshold: number;
   entryThreshold: number;
   lowerThreshold: number;
-  signal?: 'ARMED' | 'ENTRY' | null;
+  lowerEntryThreshold: number;
+  signal?: 'ARMED_UPPER' | 'ARMED_LOWER' | 'ENTRY_SHORT' | 'ENTRY_LONG' | 'ARMED' | 'ENTRY' | null;
+  direction?: 'SHORT' | 'LONG' | null;
 }
 
 export interface KellyMath {
@@ -76,6 +82,7 @@ export interface ExecutedChunk {
   totalChunks: number;
   contracts: number;
   price: number;
+  direction?: 'SHORT' | 'LONG';
   status: 'QUEUED' | 'SENDING' | 'SENT' | 'FILLED' | 'FAILED';
   delayMs: number;
   timestamp: number;
@@ -83,6 +90,8 @@ export interface ExecutedChunk {
     action: string;
     market: string;
     side: string;
+    direction?: 'SHORT' | 'LONG';
+    outcome?: string;
     type: string;
     price: number;
     size: number;
@@ -95,6 +104,7 @@ export interface TradeOrder {
   timestamp: number;
   symbol: string;
   market: string;
+  direction: 'SHORT' | 'LONG'; // SHORT: overbought pullback / LONG: oversold rebound
   triggerZScore: number;
   contractPrice: number;
   totalContracts: number;
@@ -103,6 +113,7 @@ export interface TradeOrder {
   chunks: ExecutedChunk[];
   status: 'PENDING_WS' | 'TRANSMITTED' | 'ACTIVE_GTC' | 'EXECUTED_FAK' | 'CONFIRMED_FILLED' | 'REJECTED';
   exchangeOrderId?: string;
+  outcome?: string;
 }
 
 export interface WsMessageLog {

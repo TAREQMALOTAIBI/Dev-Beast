@@ -17,8 +17,11 @@ const DEFAULT_CONFIG: BotConfig = {
   symbol: 'BTCUSDT',
   timeframe: '15m',
   periods: 14,
+  strategyDirection: 'BOTH', // 'BOTH' | 'LONG_ONLY' | 'SHORT_ONLY'
   zScoreUpper: 2.0,
   zScoreEntry: 1.9,
+  zScoreLower: -2.0,
+  zScoreLowerEntry: -1.9,
   maxPriceCents: 0.2, // 20 cents and below
   maxRiskPercent: 0.05,
   orderType: 'FAK', // Fill-And-Kill
@@ -50,6 +53,15 @@ export function useTradingBot() {
         }
         if (parsed.limitlessWsUrl && parsed.limitlessWsUrl.includes('api.limitless.exchange')) {
           parsed.limitlessWsUrl = DEFAULT_CONFIG.limitlessWsUrl;
+        }
+        if (!parsed.strategyDirection) {
+          parsed.strategyDirection = 'BOTH';
+        }
+        if (parsed.zScoreLower === undefined) {
+          parsed.zScoreLower = -2.0;
+        }
+        if (parsed.zScoreLowerEntry === undefined) {
+          parsed.zScoreLowerEntry = -1.9;
         }
         // Migrate orderType to FAK and fractionChunks to 1
         if (!parsed.orderType || parsed.orderType === 'GTC') {
@@ -83,6 +95,9 @@ export function useTradingBot() {
   const [metrics, setMetrics] = useState<ZScoreMetric[]>([]);
   const [currentZScore, setCurrentZScore] = useState<number>(0);
   const [crossedUpperThreshold, setCrossedUpperThreshold] = useState<boolean>(false);
+  const [crossedLowerThreshold, setCrossedLowerThreshold] = useState<boolean>(false);
+  const [lastTradeDirection, setLastTradeDirection] = useState<'SHORT' | 'LONG' | null>(null);
+  const [activeSignal, setActiveSignal] = useState<'ENTRY_SHORT' | 'ENTRY_LONG' | null>(null);
   const [isEntrySignal, setIsEntrySignal] = useState<boolean>(false);
   const [currentBalance, setCurrentBalance] = useState<number>(config.initialBalance);
   const [orderbook, setOrderbook] = useState<import('../types/bot').OrderbookUpdate | null>(null);
@@ -102,6 +117,7 @@ export function useTradingBot() {
   // References for live closures
   const closePricesRef = useRef<number[]>([]);
   const crossedUpperThresholdRef = useRef<boolean>(false);
+  const crossedLowerThresholdRef = useRef<boolean>(false);
   const botActiveRef = useRef<boolean>(true);
   const configRef = useRef<BotConfig>(config);
   const currentBalanceRef = useRef<number>(currentBalance);
@@ -112,6 +128,7 @@ export function useTradingBot() {
   botActiveRef.current = botActive;
   currentBalanceRef.current = currentBalance;
   crossedUpperThresholdRef.current = crossedUpperThreshold;
+  crossedLowerThresholdRef.current = crossedLowerThreshold;
 
   const toggleSound = () => {
     const next = !soundEnabled;
@@ -136,7 +153,11 @@ export function useTradingBot() {
   const rebuildMetrics = useCallback((candleList: CandleData[], cfg: BotConfig) => {
     const result: ZScoreMetric[] = [];
     const closes = candleList.map((c) => c.close);
-    let hadArmed = false;
+    let hadArmedUpper = false;
+    let hadArmedLower = false;
+
+    const lowerThresh = cfg.zScoreLower !== undefined ? cfg.zScoreLower : -cfg.zScoreUpper;
+    const lowerEntryThresh = cfg.zScoreLowerEntry !== undefined ? cfg.zScoreLowerEntry : -cfg.zScoreEntry;
 
     for (let i = 0; i < candleList.length; i++) {
       if (i < cfg.periods - 1) {
@@ -149,25 +170,48 @@ export function useTradingBot() {
           zScore: 0,
           upperBand: candleList[i].close,
           entryBand: candleList[i].close,
+          lowerEntryBand: candleList[i].close,
           lowerBand: candleList[i].close,
           upperThreshold: cfg.zScoreUpper,
           entryThreshold: cfg.zScoreEntry,
-          lowerThreshold: -cfg.zScoreUpper,
+          lowerThreshold: lowerThresh,
+          lowerEntryThreshold: lowerEntryThresh,
           signal: null,
+          direction: null,
         });
         continue;
       }
 
       const windowSlice = closes.slice(i - cfg.periods + 1, i + 1);
-      const stats = calculateZScore(windowSlice, cfg.zScoreUpper, cfg.zScoreEntry);
+      const stats = calculateZScore(windowSlice, cfg.zScoreUpper, cfg.zScoreEntry, lowerThresh, lowerEntryThresh);
 
-      let signal: 'ARMED' | 'ENTRY' | null = null;
-      if (stats.zScore > cfg.zScoreUpper) {
-        hadArmed = true;
-        signal = 'ARMED';
-      } else if (hadArmed && stats.zScore < cfg.zScoreEntry) {
-        hadArmed = false;
-        signal = 'ENTRY';
+      let signal: 'ARMED_UPPER' | 'ARMED_LOWER' | 'ENTRY_SHORT' | 'ENTRY_LONG' | 'ARMED' | 'ENTRY' | null = null;
+      let dir: 'SHORT' | 'LONG' | null = null;
+
+      // Direction 1: Upper (Short / Down)
+      if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'SHORT_ONLY') {
+        if (stats.zScore > cfg.zScoreUpper) {
+          hadArmedUpper = true;
+          signal = 'ARMED_UPPER';
+          dir = 'SHORT';
+        } else if (hadArmedUpper && stats.zScore < cfg.zScoreEntry) {
+          hadArmedUpper = false;
+          signal = 'ENTRY_SHORT';
+          dir = 'SHORT';
+        }
+      }
+
+      // Direction 2: Lower (Long / Up)
+      if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'LONG_ONLY') {
+        if (stats.zScore < lowerThresh) {
+          hadArmedLower = true;
+          signal = 'ARMED_LOWER';
+          dir = 'LONG';
+        } else if (hadArmedLower && stats.zScore > lowerEntryThresh) {
+          hadArmedLower = false;
+          signal = 'ENTRY_LONG';
+          dir = 'LONG';
+        }
       }
 
       result.push({
@@ -179,11 +223,14 @@ export function useTradingBot() {
         zScore: stats.zScore,
         upperBand: stats.upperBand,
         entryBand: stats.entryBand,
+        lowerEntryBand: stats.lowerEntryBand,
         lowerBand: stats.lowerBand,
         upperThreshold: cfg.zScoreUpper,
         entryThreshold: cfg.zScoreEntry,
-        lowerThreshold: -cfg.zScoreUpper,
+        lowerThreshold: lowerThresh,
+        lowerEntryThreshold: lowerEntryThresh,
         signal,
+        direction: dir,
       });
     }
 
@@ -195,7 +242,7 @@ export function useTradingBot() {
   }, []);
 
   // Execute LIVE Trade strictly across Limitless WebSocket
-  const executeLiveTrade = useCallback(async (triggerZ: number) => {
+  const executeLiveTrade = useCallback(async (triggerZ: number, direction: 'SHORT' | 'LONG' = 'SHORT') => {
     const cfg = configRef.current;
     const balance = currentBalanceRef.current;
 
@@ -214,15 +261,20 @@ export function useTradingBot() {
     isExecutingRef.current = true;
     setIsExecuting(true);
     setIsEntrySignal(true);
+    setActiveSignal(direction === 'LONG' ? 'ENTRY_LONG' : 'ENTRY_SHORT');
+    setLastTradeDirection(direction);
     setLastSignalTime(Date.now());
     soundController.playEntrySignal();
 
+    const outcome = direction === 'LONG' ? 'UP' : 'DOWN';
     const tradeId = `live_trd_${Date.now()}`;
     const initialTrade: TradeOrder = {
       id: tradeId,
       timestamp: Date.now(),
       symbol: cfg.symbol,
       market: `${cfg.symbol.replace('USDT', '')}_${cfg.timeframe.toUpperCase()}_PREDICTION`,
+      direction,
+      outcome,
       triggerZScore: triggerZ,
       contractPrice: cfg.maxPriceCents,
       totalContracts: kelly.numberOfContracts,
@@ -235,7 +287,7 @@ export function useTradingBot() {
     setActiveTrade(initialTrade);
 
     try {
-      console.log(`[LIVE EXECUTION] Sending ${kelly.numberOfContracts} contracts in ${cfg.fractionChunks} chunks to Limitless...`);
+      console.log(`[LIVE EXECUTION - ${direction}] Sending ${kelly.numberOfContracts} contracts in ${cfg.fractionChunks} chunks to Limitless (${outcome} / ${direction === 'LONG' ? 'BUY UP/YES' : 'BUY DOWN/NO'})...`);
       
       const executed = await limitlessService.executeChunkedOrder(
         kelly.numberOfContracts,
@@ -248,7 +300,8 @@ export function useTradingBot() {
             const filtered = prev.filter((c) => c.chunkId !== updatedChunk.chunkId);
             return [...filtered, updatedChunk].sort((a, b) => a.chunkId - b.chunkId);
           });
-        }
+        },
+        direction
       );
 
       const completedTrade: TradeOrder = {
@@ -268,7 +321,10 @@ export function useTradingBot() {
     } finally {
       isExecutingRef.current = false;
       setIsExecuting(false);
-      setTimeout(() => setIsEntrySignal(false), 4000);
+      setTimeout(() => {
+        setIsEntrySignal(false);
+        setActiveSignal(null);
+      }, 4000);
     }
   }, []);
 
@@ -278,31 +334,62 @@ export function useTradingBot() {
       const cfg = configRef.current;
       if (!botActiveRef.current || prices.length < cfg.periods) return;
 
-      const { zScore } = calculateZScore(prices, cfg.zScoreUpper, cfg.zScoreEntry);
+      const lowerThresh = cfg.zScoreLower !== undefined ? cfg.zScoreLower : -cfg.zScoreUpper;
+      const lowerEntryThresh = cfg.zScoreLowerEntry !== undefined ? cfg.zScoreLowerEntry : -cfg.zScoreEntry;
+
+      const { zScore } = calculateZScore(prices, cfg.zScoreUpper, cfg.zScoreEntry, lowerThresh, lowerEntryThresh);
       setCurrentZScore(zScore);
 
-      // Condition 1: Crossed above upper threshold (Armed)
-      if (zScore > cfg.zScoreUpper) {
-        if (!crossedUpperThresholdRef.current) {
-          crossedUpperThresholdRef.current = true;
-          setCrossedUpperThreshold(true);
-          soundController.playAlert();
-          console.log(`⚠️ Live Z-Score crossed above ${cfg.zScoreUpper} (${zScore.toFixed(2)}σ). Bot is ARMED in current candle.`);
+      // ================= DIRECTION 1: OVERBOUGHT (Short / Down) =================
+      if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'SHORT_ONLY') {
+        // Arm Upper: Price diverges above upper threshold
+        if (zScore > cfg.zScoreUpper) {
+          if (!crossedUpperThresholdRef.current) {
+            crossedUpperThresholdRef.current = true;
+            setCrossedUpperThreshold(true);
+            soundController.playAlert();
+            console.log(`⚠️ Live Z-Score crossed above +${cfg.zScoreUpper}σ (${zScore.toFixed(2)}σ). Bot is ARMED for BEARISH REVERSION (SHORT/DOWN).`);
+          }
+        }
+
+        // Trigger Short: Reversion back below entry threshold in the same candle
+        if (crossedUpperThresholdRef.current && zScore < cfg.zScoreEntry) {
+          if (!isExecutingRef.current && (!candleTime || lastExecutedCandleTimeRef.current !== candleTime)) {
+            console.log(`🎯 INSTANT LIVE SHORT ENTRY! Z-Score reverted below +${cfg.zScoreEntry}σ (${zScore.toFixed(2)}σ) in the SAME candle. Executing BEARISH REVERSION order!`);
+            crossedUpperThresholdRef.current = false;
+            setCrossedUpperThreshold(false);
+            if (candleTime) {
+              lastExecutedCandleTimeRef.current = candleTime;
+            }
+            executeLiveTrade(zScore, 'SHORT');
+          }
         }
       }
 
-      // Condition 2: Mean reversion - price pulls back below entry threshold in the SAME candle!
-      if (crossedUpperThresholdRef.current && zScore < cfg.zScoreEntry) {
-        if (isExecutingRef.current) return;
-        if (candleTime && lastExecutedCandleTimeRef.current === candleTime) return;
-
-        console.log(`🎯 INSTANT LIVE ENTRY SIGNAL! Z-Score reverted below ${cfg.zScoreEntry} (${zScore.toFixed(2)}σ) in the SAME candle. Executing immediately!`);
-        crossedUpperThresholdRef.current = false;
-        setCrossedUpperThreshold(false);
-        if (candleTime) {
-          lastExecutedCandleTimeRef.current = candleTime;
+      // ================= DIRECTION 2: OVERSOLD (Long / Up) =================
+      if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'LONG_ONLY') {
+        // Arm Lower: Price plunges below lower threshold
+        if (zScore < lowerThresh) {
+          if (!crossedLowerThresholdRef.current) {
+            crossedLowerThresholdRef.current = true;
+            setCrossedLowerThreshold(true);
+            soundController.playAlert();
+            console.log(`⚠️ Live Z-Score dropped below ${lowerThresh}σ (${zScore.toFixed(2)}σ). Bot is ARMED for BULLISH REVERSION (LONG/UP).`);
+          }
         }
-        executeLiveTrade(zScore);
+
+        // Trigger Long: Rebound back above lower entry threshold in the same candle
+        if (crossedLowerThresholdRef.current && zScore > lowerEntryThresh) {
+          if (!isExecutingRef.current && (!candleTime || lastExecutedCandleTimeRef.current !== candleTime)) {
+            console.log(`🎯 INSTANT LIVE LONG ENTRY! Z-Score bounced above ${lowerEntryThresh}σ (${zScore.toFixed(2)}σ) in the SAME candle. Executing BULLISH REVERSION order!`);
+            crossedLowerThresholdRef.current = false;
+            setCrossedLowerThreshold(false);
+            if (candleTime) {
+              lastExecutedCandleTimeRef.current = candleTime;
+            }
+            executeLiveTrade(zScore, 'LONG');
+          }
+        }
       }
     },
     [executeLiveTrade]
@@ -506,9 +593,13 @@ export function useTradingBot() {
     });
   };
 
-  const triggerManualTrade = useCallback(() => {
-    executeLiveTrade(currentZScore || 1.85);
-  }, [executeLiveTrade, currentZScore]);
+  const triggerManualTrade = useCallback(
+    (direction: 'SHORT' | 'LONG' = 'SHORT') => {
+      const defaultZ = direction === 'SHORT' ? 1.95 : -1.95;
+      executeLiveTrade(currentZScore || defaultZ, direction);
+    },
+    [executeLiveTrade, currentZScore]
+  );
 
   const kelly = calculateKellySizing(currentBalance, {
     maxPriceCents: config.maxPriceCents,
@@ -525,6 +616,9 @@ export function useTradingBot() {
     latestMetric: metrics.length > 0 ? metrics[metrics.length - 1] : null,
     currentZScore,
     crossedUpperThreshold,
+    crossedLowerThreshold,
+    lastTradeDirection,
+    activeSignal,
     isEntrySignal,
     currentBalance,
     isLiveBalance,

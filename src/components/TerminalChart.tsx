@@ -10,6 +10,8 @@ interface TerminalChartProps {
   periods: number;
   upperThreshold: number;
   entryThreshold: number;
+  lowerThreshold?: number;
+  lowerEntryThreshold?: number;
 }
 
 export const TerminalChart: React.FC<TerminalChartProps> = ({
@@ -20,6 +22,8 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
   periods,
   upperThreshold,
   entryThreshold,
+  lowerThreshold = -2.0,
+  lowerEntryThreshold = -1.9,
 }) => {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
@@ -73,7 +77,7 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
     return zScoreHeight - 20 - ((clamped - zMin) / (zMax - zMin)) * (zScoreHeight - 35);
   };
 
-  // SVG Paths for Mean, Upper Band, Entry Band, and Lower Band
+  // SVG Paths for Mean, Upper Band, Entry Band, Lower Entry Band, and Lower Band
   const meanPath = useMemo(() => {
     return visibleMetrics
       .map((m, i) => {
@@ -99,6 +103,26 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
       .map((m, i) => {
         const x = candleX(i);
         const y = candleY(m.entryBand);
+        return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
+      })
+      .join(' ');
+  }, [visibleMetrics, candleX, candleY]);
+
+  const lowerEntryBandPath = useMemo(() => {
+    return visibleMetrics
+      .map((m, i) => {
+        const x = candleX(i);
+        const y = candleY(m.lowerEntryBand ?? (m.mean + lowerEntryThreshold * m.stdDev));
+        return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
+      })
+      .join(' ');
+  }, [visibleMetrics, candleX, candleY, lowerEntryThreshold]);
+
+  const lowerBandPath = useMemo(() => {
+    return visibleMetrics
+      .map((m, i) => {
+        const x = candleX(i);
+        const y = candleY(m.lowerBand);
         return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
       })
       .join(' ');
@@ -197,12 +221,16 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
             );
           })}
 
-          {/* Upper Threshold Band (Red/Orange dashed line) */}
+          {/* Upper Threshold Band (Red dashed line) */}
           <path d={upperBandPath} fill="none" stroke="#f43f5e" strokeWidth="1.2" strokeDasharray="4 3" opacity="0.8" />
-          {/* Entry Threshold Band (Amber line) */}
+          {/* Upper Entry Band (Amber dashed line) */}
           <path d={entryBandPath} fill="none" stroke="#f59e0b" strokeWidth="1" strokeDasharray="2 2" opacity="0.85" />
           {/* Mean Line (Sky blue line) */}
           <path d={meanPath} fill="none" stroke="#38bdf8" strokeWidth="1.5" opacity="0.9" />
+          {/* Lower Entry Band (Teal dashed line) */}
+          <path d={lowerEntryBandPath} fill="none" stroke="#2dd4bf" strokeWidth="1" strokeDasharray="2 2" opacity="0.85" />
+          {/* Lower Threshold Band (Emerald dashed line) */}
+          <path d={lowerBandPath} fill="none" stroke="#10b981" strokeWidth="1.2" strokeDasharray="4 3" opacity="0.8" />
 
           {/* Candlesticks */}
           {visibleCandles.map((c, i) => {
@@ -219,8 +247,10 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
             const bodyWidth = Math.max(step * 0.65, 3);
 
             const metric = visibleMetrics[i];
-            const isEntrySignal = metric?.signal === 'ENTRY';
-            const isArmed = metric?.signal === 'ARMED';
+            const isShortEntry = metric?.signal === 'ENTRY_SHORT' || (metric?.signal === 'ENTRY' && metric?.direction !== 'LONG');
+            const isLongEntry = metric?.signal === 'ENTRY_LONG' || (metric?.signal === 'ENTRY' && metric?.direction === 'LONG');
+            const isArmedUpper = metric?.signal === 'ARMED_UPPER' || (metric?.signal === 'ARMED' && (metric?.zScore ?? 0) > 0);
+            const isArmedLower = metric?.signal === 'ARMED_LOWER' || (metric?.signal === 'ARMED' && (metric?.zScore ?? 0) < 0);
 
             return (
               <g
@@ -240,19 +270,32 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
                   rx="1"
                 />
 
-                {/* Entry Signal Marker */}
-                {isEntrySignal && (
+                {/* Short / Down Entry Signal Marker */}
+                {isShortEntry && (
                   <g>
-                    <circle cx={x} cy={yHigh - 12} r="5" fill="#f59e0b" className="animate-pulse" />
-                    <text x={x} y={yHigh - 20} fill="#f59e0b" fontSize="9" fontWeight="bold" textAnchor="middle">
-                      BUY
+                    <polygon points={`${x},${yHigh - 6} ${x - 5},${yHigh - 15} ${x + 5},${yHigh - 15}`} fill="#f59e0b" />
+                    <text x={x} y={yHigh - 18} fill="#f59e0b" fontSize="8.5" fontWeight="bold" textAnchor="middle" fontFamily="sans-serif">
+                      SHORT (▼)
                     </text>
                   </g>
                 )}
 
-                {/* Armed state alert marker */}
-                {isArmed && !isEntrySignal && (
+                {/* Long / Up Entry Signal Marker */}
+                {isLongEntry && (
+                  <g>
+                    <polygon points={`${x},${yLow + 6} ${x - 5},${yLow + 15} ${x + 5},${yLow + 15}`} fill="#10b981" />
+                    <text x={x} y={yLow + 25} fill="#10b981" fontSize="8.5" fontWeight="bold" textAnchor="middle" fontFamily="sans-serif">
+                      LONG (▲)
+                    </text>
+                  </g>
+                )}
+
+                {/* Armed state markers */}
+                {isArmedUpper && !isShortEntry && (
                   <circle cx={x} cy={yHigh - 8} r="3" fill="#f43f5e" opacity="0.8" />
+                )}
+                {isArmedLower && !isLongEntry && (
+                  <circle cx={x} cy={yLow + 8} r="3" fill="#10b981" opacity="0.8" />
                 )}
               </g>
             );
@@ -272,7 +315,7 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
           <g transform={`translate(0, ${candleHeight})`}>
             {/* Title / Indicator Label */}
             <text x={padding.left} y={16} fill="#94a3b8" fontSize="11" fontWeight="600">
-              14-PERIOD Z-SCORE OSCILLATOR (σ)
+              14-PERIOD BIDIRECTIONAL Z-SCORE OSCILLATOR (σ)
             </text>
 
             {/* Upper Bound Line (+2.0σ) */}
@@ -287,10 +330,10 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
               opacity="0.8"
             />
             <text x={width - padding.right + 8} y={zY(upperThreshold) + 3} fill="#f43f5e" fontSize="9" fontFamily="JetBrains Mono, monospace">
-              +{upperThreshold.toFixed(1)}σ (Arm)
+              +{upperThreshold.toFixed(1)}σ (Arm Down)
             </text>
 
-            {/* Entry Threshold Line (+1.90σ) */}
+            {/* Upper Entry Trigger Line (+1.90σ) */}
             <line
               x1={padding.left}
               y1={zY(entryThreshold)}
@@ -302,7 +345,7 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
               opacity="0.9"
             />
             <text x={width - padding.right + 8} y={zY(entryThreshold) + 3} fill="#f59e0b" fontSize="9" fontFamily="JetBrains Mono, monospace">
-              +{entryThreshold.toFixed(2)}σ (Trigger)
+              +{entryThreshold.toFixed(2)}σ (Trigger Short)
             </text>
 
             {/* Zero Baseline */}
@@ -316,22 +359,37 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
               opacity="0.5"
             />
             <text x={width - padding.right + 8} y={zY(0) + 3} fill="#64748b" fontSize="9" fontFamily="JetBrains Mono, monospace">
-              0.0σ
+              0.0σ Mean
+            </text>
+
+            {/* Lower Entry Trigger Line (-1.90σ) */}
+            <line
+              x1={padding.left}
+              y1={zY(lowerEntryThreshold)}
+              x2={width - padding.right}
+              y2={zY(lowerEntryThreshold)}
+              stroke="#2dd4bf"
+              strokeWidth="1"
+              strokeDasharray="2 2"
+              opacity="0.9"
+            />
+            <text x={width - padding.right + 8} y={zY(lowerEntryThreshold) + 3} fill="#2dd4bf" fontSize="9" fontFamily="JetBrains Mono, monospace">
+              {lowerEntryThreshold.toFixed(2)}σ (Trigger Long)
             </text>
 
             {/* Lower Bound Line (-2.0σ) */}
             <line
               x1={padding.left}
-              y1={zY(-upperThreshold)}
+              y1={zY(lowerThreshold)}
               x2={width - padding.right}
-              y2={zY(-upperThreshold)}
+              y2={zY(lowerThreshold)}
               stroke="#10b981"
               strokeWidth="1"
               strokeDasharray="4 2"
-              opacity="0.6"
+              opacity="0.7"
             />
-            <text x={width - padding.right + 8} y={zY(-upperThreshold) + 3} fill="#10b981" fontSize="9" fontFamily="JetBrains Mono, monospace">
-              -{upperThreshold.toFixed(1)}σ
+            <text x={width - padding.right + 8} y={zY(lowerThreshold) + 3} fill="#10b981" fontSize="9" fontFamily="JetBrains Mono, monospace">
+              {lowerThreshold.toFixed(1)}σ (Arm Up)
             </text>
 
             {/* Z-Score Curve */}
@@ -341,15 +399,21 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
             {visibleMetrics.map((m, i) => {
               const x = candleX(i);
               const y = zY(m.zScore);
-              const isOver = m.zScore >= upperThreshold;
-              const isTrigger = m.signal === 'ENTRY';
+              const isShortTrigger = m.signal === 'ENTRY_SHORT' || (m.signal === 'ENTRY' && m.direction !== 'LONG');
+              const isLongTrigger = m.signal === 'ENTRY_LONG' || (m.signal === 'ENTRY' && m.direction === 'LONG');
+              const isOverbought = m.zScore >= upperThreshold;
+              const isOversold = m.zScore <= lowerThreshold;
 
               return (
                 <g key={i}>
-                  {isTrigger ? (
+                  {isShortTrigger ? (
                     <circle cx={x} cy={y} r="5" fill="#f59e0b" stroke="#fff" strokeWidth="1.5" />
-                  ) : isOver ? (
+                  ) : isLongTrigger ? (
+                    <circle cx={x} cy={y} r="5" fill="#10b981" stroke="#fff" strokeWidth="1.5" />
+                  ) : isOverbought ? (
                     <circle cx={x} cy={y} r="3.5" fill="#f43f5e" />
+                  ) : isOversold ? (
+                    <circle cx={x} cy={y} r="3.5" fill="#10b981" />
                   ) : null}
                 </g>
               );
@@ -375,27 +439,31 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
       </div>
 
       {/* Legend & Status */}
-      <div className="flex flex-wrap items-center justify-between px-4 py-2 bg-slate-950/70 border-t border-slate-800 text-[11px] text-slate-400">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center justify-between px-4 py-2.5 bg-slate-950/70 border-t border-slate-800 text-[11px] text-slate-400 gap-2">
+        <div className="flex flex-wrap items-center gap-3 md:gap-4">
           <div className="flex items-center gap-1.5">
             <span className="w-3 h-0.5 bg-sky-400 inline-block"></span>
-            <span>14-SMA (Mean)</span>
+            <span>SMA (Mean)</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-3 h-0.5 bg-rose-500 inline-block border-b border-dashed border-rose-500"></span>
-            <span>+2.0σ Upper Arm</span>
+            <span>+{upperThreshold.toFixed(1)}σ Arm Short</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-3 h-0.5 bg-amber-400 inline-block border-b border-dashed border-amber-400"></span>
-            <span>+1.90σ Entry Trigger</span>
+            <span>+{entryThreshold.toFixed(2)}σ Trigger Short (▼)</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-3 h-0.5 bg-teal-400 inline-block border-b border-dashed border-teal-400"></span>
+            <span>{lowerEntryThreshold.toFixed(2)}σ Trigger Long (▲)</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-3 h-0.5 bg-emerald-500 inline-block"></span>
-            <span>-2.0σ Lower</span>
+            <span>{lowerThreshold.toFixed(1)}σ Arm Long</span>
           </div>
         </div>
-        <div className="text-slate-500 font-mono">
-          Updated on 15m candle close · Mean Reversion
+        <div className="text-emerald-400 font-mono font-semibold">
+          ⚡ Bidirectional Mean Reversion (Both Directions)
         </div>
       </div>
     </div>

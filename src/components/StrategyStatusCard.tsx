@@ -1,15 +1,29 @@
 import React from 'react';
 import { BotConfig } from '../types/bot';
-import { ShieldAlert, Zap, Radio, Volume2, VolumeX, Pause, Play, AlertCircle, Power, PlayCircle, PauseCircle } from 'lucide-react';
-import { soundController } from '../utils/audio';
+import {
+  ShieldAlert,
+  Zap,
+  Radio,
+  Volume2,
+  VolumeX,
+  Power,
+  PauseCircle,
+  TrendingUp,
+  TrendingDown,
+  ArrowDownCircle,
+  ArrowUpCircle,
+} from 'lucide-react';
 
 interface StrategyStatusCardProps {
   currentZScore: number;
   crossedUpperThreshold: boolean;
+  crossedLowerThreshold?: boolean;
+  lastTradeDirection?: 'SHORT' | 'LONG' | null;
+  activeSignal?: 'ENTRY_SHORT' | 'ENTRY_LONG' | null;
   isEntrySignal: boolean;
   botActive: boolean;
   onToggleBot: () => void;
-  onTriggerManualTrade?: () => void;
+  onTriggerManualTrade?: (direction?: 'SHORT' | 'LONG') => void;
   isExecuting?: boolean;
   soundEnabled: boolean;
   onToggleSound: () => void;
@@ -21,6 +35,9 @@ interface StrategyStatusCardProps {
 export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
   currentZScore,
   crossedUpperThreshold,
+  crossedLowerThreshold = false,
+  lastTradeDirection,
+  activeSignal,
   isEntrySignal,
   botActive,
   onToggleBot,
@@ -34,16 +51,32 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
 }) => {
   const isAr = lang === 'ar';
 
-  // Strategy Phase determination
-  let phase: 'MONITORING' | 'ARMED' | 'ENTRY_TRIGGERED' = 'MONITORING';
-  if (isEntrySignal) {
-    phase = 'ENTRY_TRIGGERED';
+  const lowerThresh = config.zScoreLower !== undefined ? config.zScoreLower : -config.zScoreUpper;
+  const lowerEntryThresh = config.zScoreLowerEntry !== undefined ? config.zScoreLowerEntry : -config.zScoreEntry;
+
+  // Upper direction phase (Short / Down)
+  let upperPhase: 'MONITORING' | 'ARMED' | 'ENTRY_TRIGGERED' = 'MONITORING';
+  if (isEntrySignal && (activeSignal === 'ENTRY_SHORT' || lastTradeDirection === 'SHORT')) {
+    upperPhase = 'ENTRY_TRIGGERED';
   } else if (crossedUpperThreshold) {
-    phase = 'ARMED';
+    upperPhase = 'ARMED';
+  }
+
+  // Lower direction phase (Long / Up)
+  let lowerPhase: 'MONITORING' | 'ARMED' | 'ENTRY_TRIGGERED' = 'MONITORING';
+  if (isEntrySignal && (activeSignal === 'ENTRY_LONG' || lastTradeDirection === 'LONG')) {
+    lowerPhase = 'ENTRY_TRIGGERED';
+  } else if (crossedLowerThreshold) {
+    lowerPhase = 'ARMED';
   }
 
   // Z-Score percentage within -3 to +3 range
   const normalizedZPct = Math.min(100, Math.max(0, ((currentZScore + 3) / 6) * 100));
+
+  const lowerArmPct = ((lowerThresh + 3) / 6) * 100;
+  const lowerEntryPct = ((lowerEntryThresh + 3) / 6) * 100;
+  const upperEntryPct = ((config.zScoreEntry + 3) / 6) * 100;
+  const upperArmPct = ((config.zScoreUpper + 3) / 6) * 100;
 
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900/90 backdrop-blur-sm p-4 flex flex-col gap-3.5 shadow-lg">
@@ -51,12 +84,27 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
       <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
         <div className="flex items-center gap-2">
           <Radio className={`w-4 h-4 ${botActive ? 'text-emerald-400 animate-pulse' : 'text-slate-500'}`} />
-          <h3 className="font-bold text-slate-100 text-xs tracking-wider uppercase">
-            {isAr ? 'حالة استراتيجية الانعكاس الإحصائي' : 'Strategy State Machine'}
+          <h3 className="font-bold text-slate-100 text-xs tracking-wider uppercase flex items-center gap-1.5">
+            <span>{isAr ? 'استراتيجية الانعكاس الإحصائي ثنائية الاتجاه' : 'Bidirectional Z-Score Strategy'}</span>
           </h3>
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Mode pill */}
+          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-sky-950 text-sky-300 border border-sky-800/60">
+            {isAr
+              ? config.strategyDirection === 'BOTH'
+                ? '⚡ صعود + هبوط (ثنائي)'
+                : config.strategyDirection === 'LONG_ONLY'
+                ? '▲ صعود فقط'
+                : '▼ هبوط فقط'
+              : config.strategyDirection === 'BOTH'
+              ? '⚡ Both (Long & Short)'
+              : config.strategyDirection === 'LONG_ONLY'
+              ? '▲ Long Only'
+              : '▼ Short Only'}
+          </span>
+
           <button
             onClick={onToggleSound}
             className={`p-1.5 rounded-lg border transition-colors ${
@@ -72,28 +120,34 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
       </div>
 
       {/* Primary Prominent Robot Control Box */}
-      <div className={`p-3.5 rounded-xl border transition-all ${
-        botActive
-          ? 'bg-gradient-to-b from-emerald-950/40 to-slate-950/60 border-emerald-600/50 shadow-lg shadow-emerald-950/40'
-          : 'bg-gradient-to-b from-slate-900/80 to-slate-950/60 border-slate-800'
-      }`}>
+      <div
+        className={`p-3.5 rounded-xl border transition-all ${
+          botActive
+            ? 'bg-gradient-to-b from-emerald-950/40 to-slate-950/60 border-emerald-600/50 shadow-lg shadow-emerald-950/40'
+            : 'bg-gradient-to-b from-slate-900/80 to-slate-950/60 border-slate-800'
+        }`}
+      >
         {/* Status Line */}
         <div className="flex items-center justify-between gap-2 mb-3">
           <div className="flex items-center gap-2">
-            <span className={`w-2.5 h-2.5 rounded-full ${
-              botActive ? 'bg-emerald-400 animate-pulse ring-4 ring-emerald-500/20' : 'bg-slate-600 ring-2 ring-slate-700'
-            }`} />
+            <span
+              className={`w-2.5 h-2.5 rounded-full ${
+                botActive ? 'bg-emerald-400 animate-pulse ring-4 ring-emerald-500/20' : 'bg-slate-600 ring-2 ring-slate-700'
+              }`}
+            />
             <span className="font-bold text-xs text-slate-200">
-              {isAr ? 'حالة الروبوت:' : 'Trading Engine:'}
+              {isAr ? 'حالة محرك التداول:' : 'Trading Engine:'}
             </span>
           </div>
 
-          <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold tracking-wide ${
-            botActive
-              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-              : 'bg-slate-800 text-slate-400 border border-slate-700'
-          }`}>
-            {isAr ? (botActive ? '● نشط ويعمل تلقائياً' : '○ متوقف حالياً') : (botActive ? '● AUTO RUNNING' : '○ PAUSED')}
+          <span
+            className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold tracking-wide ${
+              botActive
+                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                : 'bg-slate-800 text-slate-400 border border-slate-700'
+            }`}
+          >
+            {isAr ? (botActive ? '● نشط ويعمل تلقائياً (كلا الاتجاهين)' : '○ متوقف حالياً') : (botActive ? '● AUTO RUNNING (BIDIRECTIONAL)' : '○ PAUSED')}
           </span>
         </div>
 
@@ -114,97 +168,152 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
           ) : (
             <>
               <Power className="w-4 h-4 text-white" />
-              <span>{isAr ? 'تشغيل الروبوت الآن' : 'Start Trading Bot Now'}</span>
+              <span>{isAr ? 'تشغيل الروبوت الآن (كلا الاتجاهين)' : 'Start Trading Bot (Both Directions)'}</span>
             </>
           )}
         </button>
 
-        {/* Sub Row: Manual Test Order & Info */}
-        <div className="mt-2.5 pt-2.5 border-t border-slate-800/80 flex items-center justify-between gap-2 text-[11px]">
+        {/* Sub Row: Dual Manual Test Orders */}
+        <div className="mt-2.5 pt-2.5 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-[11px]">
           <span className="text-slate-400 text-[10px] truncate">
             {isAr
-              ? (botActive ? '⚡ تنفيذ فوري في نفس الشمعة بمجرد تحقق الإشارة' : 'لن يتم فتح صفقات تلقائية حتى تضغط تشغيل')
-              : (botActive ? '⚡ Instant same-candle execution on trigger' : 'Auto execution paused')}
+              ? (botActive ? '⚡ تنفيذ لحظي: شراء DOWN عند الارتداد من القمة، وشراء UP عند الارتداد من القاع' : 'التنفيذ التلقائي متوقف حتى تضغط تشغيل')
+              : (botActive ? '⚡ Auto-executes DOWN on upper pullback, and UP on lower bounce' : 'Auto execution paused')}
           </span>
 
           {onTriggerManualTrade && (
-            <button
-              onClick={onTriggerManualTrade}
-              disabled={isExecuting}
-              className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-slate-800/80 hover:bg-slate-700 text-sky-300 hover:text-sky-200 border border-slate-700 hover:border-sky-700/60 transition-colors disabled:opacity-50 cursor-pointer shrink-0"
-              title={isAr ? 'تجربة إرسال أمر فحص فوري إلى Limitless' : 'Execute an immediate test order via Limitless'}
-            >
-              <Zap className="w-3 h-3 text-sky-400" />
-              <span>{isAr ? 'أمر فحص' : 'Test Order'}</span>
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => onTriggerManualTrade('SHORT')}
+                disabled={isExecuting}
+                className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-rose-950/70 hover:bg-rose-900 text-rose-300 border border-rose-700/60 transition-colors disabled:opacity-50 cursor-pointer shrink-0"
+                title={isAr ? 'إرسال أمر فحص فوري لاتجاه الهبوط (SHORT / DOWN)' : 'Test Bearish Reversion Order (DOWN)'}
+              >
+                <ArrowDownCircle className="w-3 h-3 text-rose-400" />
+                <span>{isAr ? 'فحص هبوط (DOWN)' : 'Test SHORT'}</span>
+              </button>
+
+              <button
+                onClick={() => onTriggerManualTrade('LONG')}
+                disabled={isExecuting}
+                className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-emerald-950/70 hover:bg-emerald-900 text-emerald-300 border border-emerald-700/60 transition-colors disabled:opacity-50 cursor-pointer shrink-0"
+                title={isAr ? 'إرسال أمر فحص فوري لاتجاه الصعود (LONG / UP)' : 'Test Bullish Reversion Order (UP)'}
+              >
+                <ArrowUpCircle className="w-3 h-3 text-emerald-400" />
+                <span>{isAr ? 'فحص صعود (UP)' : 'Test LONG'}</span>
+              </button>
+            </div>
           )}
         </div>
       </div>
 
-      {/* Main Status Indicator Block */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-        {/* Phase 1: Monitoring */}
+      {/* Dual Direction Live Strategy Status Wings */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-xs">
+        {/* Wing 1: Upper Direction (Bearish Reversion / Short / DOWN) */}
         <div
-          className={`p-2.5 rounded-lg border text-xs transition-all ${
-            phase === 'MONITORING'
-              ? 'bg-sky-950/40 border-sky-500/50 text-slate-100 shadow-sm'
-              : 'bg-slate-950/30 border-slate-900 text-slate-500'
+          className={`p-3 rounded-xl border transition-all ${
+            upperPhase === 'ENTRY_TRIGGERED'
+              ? 'bg-amber-950/40 border-amber-500 shadow-md shadow-amber-950/40 ring-1 ring-amber-500'
+              : upperPhase === 'ARMED'
+              ? 'bg-rose-950/40 border-rose-500/80 shadow-md shadow-rose-950/40 animate-pulse'
+              : 'bg-slate-950/40 border-slate-800/80'
           }`}
         >
-          <div className="font-semibold flex items-center justify-between mb-1">
-            <span>1. {isAr ? 'المراقبة المستمرة' : 'Monitoring'}</span>
-            {phase === 'MONITORING' && <span className="w-2 h-2 rounded-full bg-sky-400"></span>}
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-1.5">
+              <TrendingDown className={`w-3.5 h-3.5 ${upperPhase === 'ARMED' ? 'text-rose-400' : 'text-slate-400'}`} />
+              <span className="font-bold text-slate-100 text-[11px]">
+                {isAr ? '1. اتجاه الهبوط (Bearish / DOWN)' : '1. Bearish Reversion (SHORT / DOWN)'}
+              </span>
+            </div>
+            <span
+              className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                upperPhase === 'ENTRY_TRIGGERED'
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/60'
+                  : upperPhase === 'ARMED'
+                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/60'
+                  : 'bg-slate-800 text-slate-400'
+              }`}
+            >
+              {upperPhase === 'ENTRY_TRIGGERED'
+                ? (isAr ? '🎯 إشارة دخول هبوط!' : '🎯 SHORT TRIGGERED')
+                : upperPhase === 'ARMED'
+                ? (isAr ? '⚠️ مسلح (ذروة شراء)' : '⚠️ ARMED (OVERBOUGHT)')
+                : (isAr ? 'مراقبة' : 'MONITORING')}
+            </span>
           </div>
-          <div className="text-[11px] text-slate-400">
-            {isAr ? 'بانتظار تجاوز 2.0σ' : 'Waiting for Z > 2.0σ'}
+
+          <div className="text-[11px] text-slate-300 space-y-1 font-mono">
+            <div className="flex justify-between">
+              <span className="text-slate-400">{isAr ? 'عتبة التأهب (Arm):' : 'Arm Threshold:'}</span>
+              <span className="text-rose-400 font-bold">&gt; +{config.zScoreUpper.toFixed(2)}σ</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">{isAr ? 'عتبة الدخول (Trigger):' : 'Trigger Pullback:'}</span>
+              <span className="text-amber-400 font-bold">&lt; +{config.zScoreEntry.toFixed(2)}σ</span>
+            </div>
           </div>
         </div>
 
-        {/* Phase 2: Armed */}
+        {/* Wing 2: Lower Direction (Bullish Reversion / Long / UP) */}
         <div
-          className={`p-2.5 rounded-lg border text-xs transition-all ${
-            phase === 'ARMED'
-              ? 'bg-rose-950/40 border-rose-500/70 text-slate-100 shadow-sm animate-pulse'
-              : 'bg-slate-950/30 border-slate-900 text-slate-500'
+          className={`p-3 rounded-xl border transition-all ${
+            lowerPhase === 'ENTRY_TRIGGERED'
+              ? 'bg-teal-950/40 border-teal-500 shadow-md shadow-teal-950/40 ring-1 ring-teal-500'
+              : lowerPhase === 'ARMED'
+              ? 'bg-emerald-950/40 border-emerald-500/80 shadow-md shadow-emerald-950/40 animate-pulse'
+              : 'bg-slate-950/40 border-slate-800/80'
           }`}
         >
-          <div className="font-semibold flex items-center justify-between mb-1">
-            <span>2. {isAr ? 'تأهب الدخول (Armed)' : 'Armed / Overbought'}</span>
-            {phase === 'ARMED' && <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />}
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-1.5">
+              <TrendingUp className={`w-3.5 h-3.5 ${lowerPhase === 'ARMED' ? 'text-emerald-400' : 'text-slate-400'}`} />
+              <span className="font-bold text-slate-100 text-[11px]">
+                {isAr ? '2. اتجاه الصعود (Bullish / UP)' : '2. Bullish Reversion (LONG / UP)'}
+              </span>
+            </div>
+            <span
+              className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                lowerPhase === 'ENTRY_TRIGGERED'
+                  ? 'bg-teal-500/20 text-teal-300 border border-teal-500/60'
+                  : lowerPhase === 'ARMED'
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/60'
+                  : 'bg-slate-800 text-slate-400'
+              }`}
+            >
+              {lowerPhase === 'ENTRY_TRIGGERED'
+                ? (isAr ? '🎯 إشارة دخول صعود!' : '🎯 LONG TRIGGERED')
+                : lowerPhase === 'ARMED'
+                ? (isAr ? '⚠️ مسلح (ذروة بيع)' : '⚠️ ARMED (OVERSOLD)')
+                : (isAr ? 'مراقبة' : 'MONITORING')}
+            </span>
           </div>
-          <div className="text-[11px] text-slate-400">
-            {isAr ? 'تجاوز 2.0σ، بانتظار الهبوط تحت 1.90' : 'Z crossed > 2.0σ, watching < 1.90'}
-          </div>
-        </div>
 
-        {/* Phase 3: Triggered */}
-        <div
-          className={`p-2.5 rounded-lg border text-xs transition-all ${
-            phase === 'ENTRY_TRIGGERED'
-              ? 'bg-amber-950/40 border-amber-500 text-slate-100 shadow-sm'
-              : 'bg-slate-950/30 border-slate-900 text-slate-500'
-          }`}
-        >
-          <div className="font-semibold flex items-center justify-between mb-1">
-            <span>3. {isAr ? 'إشارة الدخول (ENTRY)' : 'Entry Signal'}</span>
-            {phase === 'ENTRY_TRIGGERED' && <Zap className="w-3.5 h-3.5 text-amber-400" />}
-          </div>
-          <div className="text-[11px] text-slate-400">
-            {isAr ? 'تنفيذ فوري في نفس الشمعة (4 أجزاء)' : 'Instant same-candle 4 chunks'}
+          <div className="text-[11px] text-slate-300 space-y-1 font-mono">
+            <div className="flex justify-between">
+              <span className="text-slate-400">{isAr ? 'عتبة التأهب (Arm):' : 'Arm Threshold:'}</span>
+              <span className="text-emerald-400 font-bold">&lt; {lowerThresh.toFixed(2)}σ</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">{isAr ? 'عتبة الدخول (Trigger):' : 'Trigger Rebound:'}</span>
+              <span className="text-teal-400 font-bold">&gt; {lowerEntryThresh.toFixed(2)}σ</span>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Live Z-Score Gauge Bar (Forced LTR for correct numerical scale) */}
+      {/* Live Bidirectional Z-Score Gauge Bar (Forced LTR) */}
       <div className="space-y-1.5 pt-1">
         <div className="flex justify-between text-xs font-mono">
           <span className="text-slate-400">
-            {isAr ? 'قيمة Z-Score الحالية:' : 'Current Z-Score:'}{' '}
+            {isAr ? 'قيمة Z-Score اللحظية:' : 'Current Z-Score:'}{' '}
             <span
-              className={`font-bold ${
+              className={`font-bold text-sm ${
                 currentZScore >= config.zScoreUpper
                   ? 'text-rose-400'
-                  : currentZScore >= config.zScoreEntry
+                  : currentZScore <= lowerThresh
+                  ? 'text-emerald-400'
+                  : currentZScore > 0
                   ? 'text-amber-400'
                   : 'text-sky-300'
               }`}
@@ -212,32 +321,50 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
               {currentZScore > 0 ? `+${currentZScore.toFixed(2)}σ` : `${currentZScore.toFixed(2)}σ`}
             </span>
           </span>
-          <span className="text-slate-400 text-[11px] font-mono">
-            {isAr ? 'هدف الارتداد للدخول:' : 'Entry Target:'}{' '}
-            <span className="text-amber-400 font-bold">&lt; +{config.zScoreEntry.toFixed(2)}σ</span>
-          </span>
+
+          <div className="flex items-center gap-3 text-[11px] font-mono">
+            <span className="text-emerald-400">
+              {isAr ? 'قاع صعود:' : 'Long Trigger:'} {lowerEntryThresh.toFixed(2)}σ
+            </span>
+            <span className="text-slate-600">|</span>
+            <span className="text-amber-400">
+              {isAr ? 'قمة هبوط:' : 'Short Trigger:'} +{config.zScoreEntry.toFixed(2)}σ
+            </span>
+          </div>
         </div>
 
         {/* Meter - LTR guaranteed */}
         <div dir="ltr" className="space-y-1">
-          <div className="relative w-full h-3 bg-slate-950 rounded-full border border-slate-800 overflow-hidden">
-            {/* Center Zero Marker */}
+          <div className="relative w-full h-3.5 bg-slate-950 rounded-full border border-slate-800 overflow-hidden">
+            {/* Center Zero Marker (Mean SMA) */}
             <div
-              className="absolute top-0 bottom-0 w-px bg-slate-700 z-10"
+              className="absolute top-0 bottom-0 w-0.5 bg-slate-600 z-10"
               style={{ left: '50%' }}
               title="0.0σ Mean"
             />
-            {/* Entry Threshold Marker */}
+            {/* Lower Arm Marker */}
+            <div
+              className="absolute top-0 bottom-0 w-0.5 bg-emerald-500 z-20 shadow-xs shadow-emerald-500"
+              style={{ left: `${lowerArmPct}%` }}
+              title={`Lower Arm: ${lowerThresh}σ`}
+            />
+            {/* Lower Entry Marker */}
+            <div
+              className="absolute top-0 bottom-0 w-0.5 bg-teal-400 z-20 shadow-xs shadow-teal-400"
+              style={{ left: `${lowerEntryPct}%` }}
+              title={`Lower Trigger: ${lowerEntryThresh}σ`}
+            />
+            {/* Upper Entry Threshold Marker */}
             <div
               className="absolute top-0 bottom-0 w-0.5 bg-amber-400 z-20 shadow-xs shadow-amber-400"
-              style={{ left: `${((config.zScoreEntry + 3) / 6) * 100}%` }}
-              title={`Entry: +${config.zScoreEntry}σ`}
+              style={{ left: `${upperEntryPct}%` }}
+              title={`Upper Entry: +${config.zScoreEntry}σ`}
             />
             {/* Upper Threshold Marker */}
             <div
               className="absolute top-0 bottom-0 w-0.5 bg-rose-500 z-20 shadow-xs shadow-rose-500"
-              style={{ left: `${((config.zScoreUpper + 3) / 6) * 100}%` }}
-              title={`Upper: +${config.zScoreUpper}σ`}
+              style={{ left: `${upperArmPct}%` }}
+              title={`Upper Arm: +${config.zScoreUpper}σ`}
             />
 
             {/* Value fill from left (-3.0) to right (+3.0) */}
@@ -245,23 +372,24 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
               className={`h-full transition-all duration-300 ${
                 currentZScore >= config.zScoreUpper
                   ? 'bg-rose-500'
+                  : currentZScore <= lowerThresh
+                  ? 'bg-emerald-400'
                   : currentZScore >= config.zScoreEntry
                   ? 'bg-amber-400'
-                  : currentZScore < 0
-                  ? 'bg-sky-500'
-                  : 'bg-emerald-400'
+                  : currentZScore <= lowerEntryThresh
+                  ? 'bg-teal-400'
+                  : 'bg-sky-500'
               }`}
               style={{ width: `${normalizedZPct}%` }}
             />
           </div>
 
           <div className="flex justify-between text-[10px] font-mono text-slate-500 px-0.5">
-            <span>-3.0σ</span>
-            <span>-1.5σ</span>
-            <span className="text-slate-400">0.0σ</span>
+            <span className="text-emerald-400">{lowerThresh.toFixed(1)}σ</span>
+            <span className="text-teal-400">{lowerEntryThresh.toFixed(1)}σ</span>
+            <span className="text-slate-400">0.0σ (SMA)</span>
             <span className="text-amber-400">+{config.zScoreEntry.toFixed(1)}σ</span>
             <span className="text-rose-400">+{config.zScoreUpper.toFixed(1)}σ</span>
-            <span>+3.0σ</span>
           </div>
         </div>
 
@@ -270,12 +398,12 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
           <div className="mt-2.5 p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 text-[11px] font-mono space-y-1.5">
             <div className="flex items-center justify-between text-slate-400 border-b border-slate-900 pb-1 text-[10px]">
               <span className="font-sans font-semibold text-slate-300">
-                {isAr ? '📐 التحقق الحسابي الدقيق من المعادلة' : '📐 Live Statistical Formula Check'}
+                {isAr ? '📐 التحقق الحسابي الدقيق من معادلة Z-Score ثنائية الاتجاه' : '📐 Live Bidirectional Statistical Check'}
               </span>
-              <span className="text-emerald-400 font-bold">14-Periods SMA</span>
+              <span className="text-emerald-400 font-bold">{config.periods}-Periods SMA</span>
             </div>
 
-            <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-slate-300">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-slate-300">
               <div>
                 <span className="text-slate-500">{isAr ? 'السعر (P): ' : 'Price (P): '}</span>
                 <span className="font-bold text-slate-100">${metric.price.toFixed(2)}</span>
@@ -290,7 +418,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
               </div>
               <div>
                 <span className="text-slate-500">{isAr ? 'الفارق (P-μ): ' : 'Diff (P-μ): '}</span>
-                <span className={`font-bold ${metric.price - metric.mean >= 0 ? 'text-emerald-400' : 'text-sky-400'}`}>
+                <span className={`font-bold ${metric.price - metric.mean >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                   {metric.price - metric.mean >= 0 ? '+' : ''}{(metric.price - metric.mean).toFixed(2)}
                 </span>
               </div>
