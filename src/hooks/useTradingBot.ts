@@ -194,7 +194,7 @@ export function useTradingBot() {
           hadArmedUpper = true;
           signal = 'ARMED_UPPER';
           dir = 'SHORT';
-        } else if (hadArmedUpper && stats.zScore < cfg.zScoreEntry) {
+        } else if (hadArmedUpper && stats.zScore <= cfg.zScoreEntry) {
           hadArmedUpper = false;
           signal = 'ENTRY_SHORT';
           dir = 'SHORT';
@@ -207,7 +207,7 @@ export function useTradingBot() {
           hadArmedLower = true;
           signal = 'ARMED_LOWER';
           dir = 'LONG';
-        } else if (hadArmedLower && stats.zScore > lowerEntryThresh) {
+        } else if (hadArmedLower && stats.zScore >= lowerEntryThresh) {
           hadArmedLower = false;
           signal = 'ENTRY_LONG';
           dir = 'LONG';
@@ -352,8 +352,8 @@ export function useTradingBot() {
           }
         }
 
-        // Trigger Short: Reversion back below entry threshold in the same candle
-        if (crossedUpperThresholdRef.current && zScore < cfg.zScoreEntry) {
+        // Trigger Short: Reversion back below or equal to entry threshold in the same candle
+        if (crossedUpperThresholdRef.current && zScore <= cfg.zScoreEntry) {
           if (!isExecutingRef.current && (!candleTime || lastExecutedCandleTimeRef.current !== candleTime)) {
             console.log(`🎯 INSTANT LIVE SHORT ENTRY! Z-Score reverted below +${cfg.zScoreEntry}σ (${zScore.toFixed(2)}σ) in the SAME candle. Executing BEARISH REVERSION order!`);
             crossedUpperThresholdRef.current = false;
@@ -378,8 +378,8 @@ export function useTradingBot() {
           }
         }
 
-        // Trigger Long: Rebound back above lower entry threshold in the same candle
-        if (crossedLowerThresholdRef.current && zScore > lowerEntryThresh) {
+        // Trigger Long: Rebound back above or equal to lower entry threshold in the same candle
+        if (crossedLowerThresholdRef.current && zScore >= lowerEntryThresh) {
           if (!isExecutingRef.current && (!candleTime || lastExecutedCandleTimeRef.current !== candleTime)) {
             console.log(`🎯 INSTANT LIVE LONG ENTRY! Z-Score bounced above ${lowerEntryThresh}σ (${zScore.toFixed(2)}σ) in the SAME candle. Executing BULLISH REVERSION order!`);
             crossedLowerThresholdRef.current = false;

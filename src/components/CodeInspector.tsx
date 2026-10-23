@@ -240,7 +240,7 @@ class LimitlessTradingBot {
                 }
             }
 
-            if (this.crossedUpperThreshold && currentZScore < CONFIG.Z_SCORE_ENTRY) {
+            if (this.crossedUpperThreshold && currentZScore <= CONFIG.Z_SCORE_ENTRY) {
                 if (!this.isExecutingTrade && (!candleTime || this.lastExecutedCandleTime !== candleTime)) {
                     console.log(\`🎯 LIVE SHORT ENTRY! Z-Score reverted below +\${CONFIG.Z_SCORE_ENTRY}σ (\${currentZScore.toFixed(2)}σ). Executing DOWN order!\`);
                     this.crossedUpperThreshold = false;
@@ -259,7 +259,7 @@ class LimitlessTradingBot {
                 }
             }
 
-            if (this.crossedLowerThreshold && currentZScore > CONFIG.Z_SCORE_LOWER_ENTRY) {
+            if (this.crossedLowerThreshold && currentZScore >= CONFIG.Z_SCORE_LOWER_ENTRY) {
                 if (!this.isExecutingTrade && (!candleTime || this.lastExecutedCandleTime !== candleTime)) {
                     console.log(\`🎯 LIVE LONG ENTRY! Z-Score bounced above \${CONFIG.Z_SCORE_LOWER_ENTRY}σ (\${currentZScore.toFixed(2)}σ). Executing UP order!\`);
                     this.crossedLowerThreshold = false;
