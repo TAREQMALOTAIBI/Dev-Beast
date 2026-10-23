@@ -94,23 +94,52 @@ class LimitlessTradingBot {
 
             // استقبال تحديثات دفتر الأوامر
             this.limitlessWs.on('orderbookUpdate', (data: any) => {
-                const bestBid = data.orderbook.bids[0];
-                const bestAsk = data.orderbook.asks[0];
+                const bestBid = data.orderbook?.bids?.[0];
+                const bestAsk = data.orderbook?.asks?.[0];
                 console.log(\`[\${data.marketSlug}] CLOB Best Bid: \${bestBid?.price ?? '-'} | Best Ask: \${bestAsk?.price ?? '-'}\`);
             });
 
-            // استقبال تحديثات المراكز
+            // استقبال تحديثات أسعار الأوراكل الحية (Chainlink / Pyth)
+            this.limitlessWs.on('oraclePriceData', (data: any) => {
+                console.log(\`🔮 Oracle [\${data.marketSlug}] Value: \${data.value} @ \${data.timestamp}\`);
+            });
+
+            // استقبال تحديثات المراكز الحقيقية
             this.limitlessWs.on('positions', (data: any) => {
                 console.log('📊 Position update received:', data);
             });
 
-            // استقبال أحداث دورة حياة الأوامر (OME & Settlement)
+            // استقبال دورة حياة الأوامر (OME / Settlement)
             this.limitlessWs.on('orderEvent', (event: any) => {
-                console.log('⚡ Order event:', event.source, event.type, event.orderId);
+                if (event.source === 'OME') {
+                    console.log('⚡ OME Order State:', event.type, event.orderId, event.clientOrderId ?? '');
+                } else {
+                    console.log('🔗 On-Chain Settlement:', event.type, event.orderId, event.txHash ?? '');
+                }
             });
 
-            this.limitlessWs.on('disconnect', (reason: string) => {
+            // استقبال أحداث المعاملات
+            this.limitlessWs.on('tx', (data: any) => {
+                console.log(\`📜 Tx confirmation: \${data.txHash} Status: \${data.status}\`);
+            });
+
+            // استقبال رسائل النظام الداخلية
+            this.limitlessWs.on('system', (msg: any) => {
+                console.log('ℹ️ Limitless System Notice:', msg);
+            });
+
+            // معالجة انقطاع الاتصال وإعادة الاتصال بمصافحة HMAC جديدة طبقاً للتوثيق
+            this.limitlessWs.on('disconnect', async (reason: string) => {
                 console.log('⚠️ Limitless disconnected:', reason);
+                console.log('🔄 Re-initiating fresh handshake to avoid replaying expired HMAC signature...');
+                setTimeout(async () => {
+                    try {
+                        await this.limitlessWs.disconnect();
+                        await this.initLimitlessWS();
+                    } catch (err) {
+                        console.error('Reconnect error:', err);
+                    }
+                }, 3000);
             });
 
         } catch (err) {
@@ -269,10 +298,15 @@ class LimitlessTradingBot {
 }
 
 // ==========================================
-// 9. تشغيل الروبوت الحي
+// 9. تشغيل الروبوت الحي والإغلاق الآمن
 // ==========================================
 const bot = new LimitlessTradingBot();
 bot.fetchHistoricalData();
+
+process.on('SIGINT', () => {
+    console.log('🛑 Graceful shutdown initiated...');
+    process.exit(0);
+});
 `;
   };
 

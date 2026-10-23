@@ -25,6 +25,8 @@ export class LimitlessService {
   private currentOrderbook: OrderbookUpdate | null = null;
   private currentOracle: OraclePriceData | null = null;
   private currentPositions: PositionItem[] = [];
+  private isExplicitlyClosed = false;
+  private reconnectTimer: number | null = null;
 
   public subscribeStatus(listener: (status: LimitlessStatus) => void) {
     this.listeners.push(listener);
@@ -201,9 +203,36 @@ export class LimitlessService {
         this.log('INCOMING', { event: 'tx', txHash: data.txHash, status: data.status });
       });
 
+      // AMM prices event as documented in official streaming spec
+      ws.on('newPriceData', (data: unknown) => {
+        this.log('INCOMING', { event: 'newPriceData', data });
+      });
+
+      // Server-side system messages
+      ws.on('system', (data: unknown) => {
+        this.log('SYSTEM', data as Record<string, unknown> | string);
+      });
+
       ws.on('disconnect', (reason: string) => {
         this.setStatus('DISCONNECTED');
         this.log('SYSTEM', `[LIMITLESS SDK] Disconnected: ${reason}`);
+
+        // Official doc guideline: on SDK 1.1.0 automatic reconnect does not restore subscriptions,
+        // and replayed signatures trigger 'Invalid HMAC authentication'.
+        // We gracefully re-issue connect() with a fresh handshake signature when dropped.
+        if (!this.isExplicitlyClosed) {
+          if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+          this.reconnectTimer = window.setTimeout(async () => {
+            if (!this.isExplicitlyClosed) {
+              this.log('SYSTEM', '[LIMITLESS SDK] Re-initiating fresh connection with signed handshake...');
+              try {
+                await this.connect(url, marketSlug, credentials);
+              } catch (err) {
+                this.log('SYSTEM', `[LIMITLESS SDK RECONNECT ERROR] ${err instanceof Error ? err.message : String(err)}`);
+              }
+            }
+          }, 3000);
+        }
       });
 
       ws.on('error', (err: unknown) => {
@@ -257,6 +286,11 @@ export class LimitlessService {
   }
 
   public disconnect() {
+    this.isExplicitlyClosed = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.client) {
       try {
         const c = this.client as { disconnect?: () => Promise<void> | void; close?: () => void };
