@@ -82,8 +82,9 @@ export function calculateKellySizing(
   const positionSizeUsd = balance * riskToTake;
   const numberOfContracts = Math.floor(positionSizeUsd / price);
 
-  const chunkSize = fractionChunks > 0 ? Math.floor(numberOfContracts / fractionChunks) : numberOfContracts;
-  const lastChunkSize = numberOfContracts - chunkSize * (fractionChunks - 1);
+  const effectiveChunks = Math.max(1, fractionChunks || 1);
+  const chunkSize = effectiveChunks === 1 ? numberOfContracts : Math.floor(numberOfContracts / effectiveChunks);
+  const lastChunkSize = effectiveChunks === 1 ? numberOfContracts : Math.max(0, numberOfContracts - chunkSize * (effectiveChunks - 1));
 
   return {
     b,
@@ -94,7 +95,7 @@ export function calculateKellySizing(
     positionSizeUsd,
     numberOfContracts,
     chunkSize,
-    lastChunkSize: Math.max(0, lastChunkSize),
+    lastChunkSize,
   };
 }
 

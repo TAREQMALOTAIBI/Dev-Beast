@@ -425,6 +425,7 @@ export default function App() {
                 marketSlug={config.limitlessMarketSlug}
                 onOpenConfig={() => setIsConfigOpen(true)}
                 lang={lang}
+                chunksCount={config.fractionChunks}
               />
             </div>
           </div>

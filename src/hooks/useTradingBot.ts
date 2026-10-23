@@ -22,7 +22,7 @@ const DEFAULT_CONFIG: BotConfig = {
   maxPriceCents: 0.2, // 20 cents and below
   maxRiskPercent: 0.05,
   orderType: 'FAK', // Fill-And-Kill
-  fractionChunks: 4,
+  fractionChunks: 1, // 1 instant single order for FAK execution
   chunkDelayMs: 500,
   winProbability: 0.55,
   initialBalance: 1000,
@@ -51,12 +51,15 @@ export function useTradingBot() {
         if (parsed.limitlessWsUrl && parsed.limitlessWsUrl.includes('api.limitless.exchange')) {
           parsed.limitlessWsUrl = DEFAULT_CONFIG.limitlessWsUrl;
         }
-        // Migrate orderType to FAK if empty or previous GTC
+        // Migrate orderType to FAK and fractionChunks to 1
         if (!parsed.orderType || parsed.orderType === 'GTC') {
           parsed.orderType = 'FAK';
         }
         if (parsed.maxPriceCents === undefined || parsed.maxPriceCents > 0.2) {
           parsed.maxPriceCents = 0.2;
+        }
+        if (parsed.fractionChunks === 4 || !parsed.fractionChunks) {
+          parsed.fractionChunks = 1;
         }
         // Auto-inject env secrets if persisted config has empty credentials
         if (!parsed.limitlessTokenId && DEFAULT_CONFIG.limitlessTokenId) {

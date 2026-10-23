@@ -24,6 +24,7 @@ interface ExecutionConsoleProps {
   marketSlug: string;
   onOpenConfig: () => void;
   lang: 'en' | 'ar';
+  chunksCount?: number;
 }
 
 export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
@@ -39,6 +40,7 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
   marketSlug,
   onOpenConfig,
   lang,
+  chunksCount = 1,
 }) => {
   const isAr = lang === 'ar';
   const [selectedPayload, setSelectedPayload] = useState<Record<string, unknown> | null>(null);
@@ -95,7 +97,9 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              {isAr ? 'تجزئة العقود الحية (4)' : 'Live Chunks (4)'}
+              {isAr
+                ? (chunksCount === 1 ? 'أمر التنفيذ المباشر (FAK)' : `تجزئة العقود (${chunksCount})`)
+                : (chunksCount === 1 ? 'Direct Execution (FAK)' : `Live Chunks (${chunksCount})`)}
             </button>
             <button
               onClick={() => setActiveTab('orderbook')}
@@ -175,64 +179,79 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
       {/* Tab 1: Live Order Chunks */}
       {activeTab === 'chunks' && (
         <div className="p-4 flex flex-col gap-4">
-          <div className="flex items-center justify-between text-xs text-slate-400">
-            <div>
-              {isAr
-                ? 'تجزئة العقد إلى 4 أجزاء متتالية مع فارق زمني 500ms لتفادي قيود سرعة المنصة (Rate Limit)'
-                : 'Live fractionalization into 4 chunks with 500ms spacing to prevent exchange rate limits'}
-            </div>
-            {activeTrade && (
-              <div className="text-slate-300 font-mono">
-                Order in Progress:{' '}
-                <span className="text-sky-400 font-bold">{activeTrade.totalContracts} Contracts</span> (
-                {formatUsd(activeTrade.totalInvestmentUsd)})
-              </div>
-            )}
-          </div>
+          {(() => {
+            const effectiveChunks = Math.max(1, chunksCount || 1);
+            const chunkIndices = Array.from({ length: effectiveChunks }, (_, i) => i + 1);
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {[1, 2, 3, 4].map((chunkIndex) => {
-              const chunk = currentChunks.find((c) => c.chunkId === chunkIndex);
-              const isSent = chunk?.status === 'SENT';
-              const isSending = chunk?.status === 'SENDING';
-              const isQueued = chunk?.status === 'QUEUED';
-              const isFailed = chunk?.status === 'FAILED';
-
-              return (
-                <div
-                  key={chunkIndex}
-                  className={`p-3 rounded-lg border transition-all ${
-                    isSent
-                      ? 'bg-emerald-950/20 border-emerald-800/50'
-                      : isSending
-                      ? 'bg-sky-950/30 border-sky-500/60 ring-1 ring-sky-500/50'
-                      : isFailed
-                      ? 'bg-rose-950/30 border-rose-800/60'
-                      : isQueued
-                      ? 'bg-slate-950/60 border-slate-800'
-                      : 'bg-slate-950/30 border-slate-900 opacity-60'
-                  }`}
-                >
-                  <div className="flex items-center justify-between text-xs mb-2">
-                    <span className="font-bold text-slate-300">
-                      {isAr ? `الجزء ${chunkIndex} من 4` : `Chunk ${chunkIndex} of 4`}
-                    </span>
-                    <span
-                      className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
-                        isSent
-                          ? 'bg-emerald-900/60 text-emerald-300'
-                          : isSending
-                          ? 'bg-sky-900/60 text-sky-300 animate-pulse'
-                          : isFailed
-                          ? 'bg-rose-900/60 text-rose-300'
-                          : isQueued
-                          ? 'bg-slate-800 text-slate-400'
-                          : 'bg-slate-900 text-slate-500'
-                      }`}
-                    >
-                      {chunk?.status || 'IDLE'}
+            return (
+              <>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-400">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                    <span>
+                      {effectiveChunks === 1
+                        ? (isAr
+                            ? 'تنفيذ فوري مباشر للأمر كاملاً دفعة واحدة بنوع FAK دون أي تأخير زمني (0ms)'
+                            : 'Direct instant execution for full order via FAK with zero delay (0ms)')
+                        : (isAr
+                            ? `تجزئة العقد إلى ${effectiveChunks} أجزاء متتالية مع فارق زمني 500ms لتفادي قيود سرعة المنصة (Rate Limit)`
+                            : `Live fractionalization into ${effectiveChunks} chunks with 500ms spacing to prevent exchange rate limits`)}
                     </span>
                   </div>
+                  {activeTrade && (
+                    <div className="text-slate-300 font-mono">
+                      Order in Progress:{' '}
+                      <span className="text-sky-400 font-bold">{activeTrade.totalContracts} Contracts</span> (
+                      {formatUsd(activeTrade.totalInvestmentUsd)})
+                    </div>
+                  )}
+                </div>
+
+                <div className={`grid grid-cols-1 ${effectiveChunks === 1 ? 'max-w-md' : effectiveChunks === 2 ? 'sm:grid-cols-2 max-w-xl' : 'sm:grid-cols-2 lg:grid-cols-4'} gap-3`}>
+                  {chunkIndices.map((chunkIndex) => {
+                    const chunk = currentChunks.find((c) => c.chunkId === chunkIndex);
+                    const isSent = chunk?.status === 'SENT';
+                    const isSending = chunk?.status === 'SENDING';
+                    const isQueued = chunk?.status === 'QUEUED';
+                    const isFailed = chunk?.status === 'FAILED';
+
+                    return (
+                      <div
+                        key={chunkIndex}
+                        className={`p-3 rounded-lg border transition-all ${
+                          isSent
+                            ? 'bg-emerald-950/20 border-emerald-800/50'
+                            : isSending
+                            ? 'bg-sky-950/30 border-sky-500/60 ring-1 ring-sky-500/50'
+                            : isFailed
+                            ? 'bg-rose-950/30 border-rose-800/60'
+                            : isQueued
+                            ? 'bg-slate-950/60 border-slate-800'
+                            : 'bg-slate-950/30 border-slate-900 opacity-60'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-xs mb-2">
+                          <span className="font-bold text-slate-300">
+                            {effectiveChunks === 1
+                              ? (isAr ? 'الأمر الفوري المباشر (FAK)' : 'Direct Instant Order (FAK)')
+                              : (isAr ? `الجزء ${chunkIndex} من ${effectiveChunks}` : `Chunk ${chunkIndex} of ${effectiveChunks}`)}
+                          </span>
+                          <span
+                            className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                              isSent
+                                ? 'bg-emerald-900/60 text-emerald-300'
+                                : isSending
+                                ? 'bg-sky-900/60 text-sky-300 animate-pulse'
+                                : isFailed
+                                ? 'bg-rose-900/60 text-rose-300'
+                                : isQueued
+                                ? 'bg-slate-800 text-slate-400'
+                                : 'bg-slate-900 text-slate-500'
+                            }`}
+                          >
+                            {chunk?.status || 'IDLE'}
+                          </span>
+                        </div>
 
                   <div className="space-y-1 text-xs font-mono">
                     <div className="flex justify-between text-slate-400">
@@ -255,21 +274,24 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
                     </div>
                   </div>
 
-                  {chunk && (
-                    <button
-                      onClick={() => setSelectedPayload(chunk.payload)}
-                      className="mt-3 w-full py-1 text-[11px] text-slate-400 hover:text-sky-300 bg-slate-900/90 rounded border border-slate-800/80 flex items-center justify-center gap-1 transition-colors"
-                    >
-                      <Code className="w-3 h-3" />
-                      <span>{isAr ? 'فحص حمولة JSON' : 'Inspect JSON Payload'}</span>
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+                    {chunk && (
+                      <button
+                        onClick={() => setSelectedPayload(chunk.payload)}
+                        className="mt-3 w-full py-1 text-[11px] text-slate-400 hover:text-sky-300 bg-slate-900/90 rounded border border-slate-800/80 flex items-center justify-center gap-1 transition-colors"
+                      >
+                        <Code className="w-3 h-3" />
+                        <span>{isAr ? 'فحص حمولة JSON' : 'Inspect JSON Payload'}</span>
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+              </div>
+            </>
+          );
+        })()}
+      </div>
+    )}
 
       {/* Tab 2: Live CLOB Orderbook */}
       {activeTab === 'orderbook' && (
