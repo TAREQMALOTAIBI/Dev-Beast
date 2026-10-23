@@ -103,7 +103,17 @@ export function useTradingBot() {
   const [orderbook, setOrderbook] = useState<import('../types/bot').OrderbookUpdate | null>(null);
   const [oracle, setOracle] = useState<import('../types/bot').OraclePriceData | null>(null);
   const [positions, setPositions] = useState<import('../types/bot').PositionItem[]>([]);
-  const [botActive, setBotActive] = useState<boolean>(true);
+  const [botActive, setBotActive] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('limitless_bot_active_state');
+      if (saved !== null) {
+        return saved === 'true';
+      }
+    } catch {
+      // Safe fallback
+    }
+    return false; // Default to stopped for maximum safety until the user starts it
+  });
   const [binanceStatus, setBinanceStatus] = useState<'CONNECTING' | 'CONNECTED' | 'DISCONNECTED'>('CONNECTING');
   const [limitlessStatus, setLimitlessStatus] = useState<LimitlessStatus>('DISCONNECTED');
   const [wsLogs, setWsLogs] = useState<WsMessageLog[]>([]);
@@ -118,7 +128,7 @@ export function useTradingBot() {
   const closePricesRef = useRef<number[]>([]);
   const crossedUpperThresholdRef = useRef<boolean>(false);
   const crossedLowerThresholdRef = useRef<boolean>(false);
-  const botActiveRef = useRef<boolean>(true);
+  const botActiveRef = useRef<boolean>(botActive);
   const configRef = useRef<BotConfig>(config);
   const currentBalanceRef = useRef<number>(currentBalance);
   const isExecutingRef = useRef<boolean>(false);
@@ -586,6 +596,12 @@ export function useTradingBot() {
   const toggleBot = () => {
     setBotActive((prev) => {
       const next = !prev;
+      botActiveRef.current = next;
+      try {
+        localStorage.setItem('limitless_bot_active_state', String(next));
+      } catch {
+        // Safe localStorage
+      }
       if (next) {
         soundController.playAlert();
       }
