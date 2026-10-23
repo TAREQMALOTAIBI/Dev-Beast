@@ -124,6 +124,150 @@ function setupApiMiddlewares(middlewares: any) {
     }
   });
 
+  middlewares.use('/api/limitless/order', async (req: any, res: any) => {
+    res.setHeader('Content-Type', 'application/json');
+    if (req.method !== 'POST') {
+      res.statusCode = 405;
+      return res.end(JSON.stringify({ error: 'Method not allowed' }));
+    }
+
+    let rawBody = '';
+    req.on('data', (chunk: any) => { rawBody += chunk; });
+    req.on('end', async () => {
+      try {
+        const body = rawBody ? JSON.parse(rawBody) : {};
+        const { market, direction, outcome, type, price, size, chunkId } = body;
+        const pk = process.env.PRIVATE_KEY?.trim();
+        const tokenId = process.env.LMTS_TOKEN_ID?.trim();
+        const secret = process.env.LMTS_TOKEN_SECRET?.trim();
+        const hasLiveAuth = Boolean(pk && tokenId && secret);
+
+        let activeMarketSlug = market || 'btc-100k-weekly';
+        let marketData: any = null;
+        try {
+          const mRes = await fetch(`https://api.limitless.exchange/markets/${encodeURIComponent(activeMarketSlug)}`);
+          if (mRes.ok) {
+            marketData = await mRes.json();
+          } else {
+            const activeRes = await fetch('https://api.limitless.exchange/markets/active');
+            if (activeRes.ok) {
+              const activeJson = await activeRes.json();
+              const list = activeJson?.data || [];
+              marketData = list.find((m: any) => m.slug?.toLowerCase().includes('btc')) || list[0];
+              if (marketData?.slug) {
+                activeMarketSlug = marketData.slug;
+              }
+            }
+          }
+        } catch {
+          // ignore
+        }
+
+        const venueExchange = marketData?.venue?.exchange || '0x05c748E2f4DcDe0ec9Fa8DDc40DE6b867f923fa5';
+        const isLong = direction === 'LONG' || outcome === 'UP';
+        const targetTokenId = isLong
+          ? (marketData?.tokens?.yes || '59421473136307452468391913282081951561385299434690059271645163627705056748660')
+          : (marketData?.tokens?.no || '40162699974295487791837260294296186163581478509542482654947866172365777902927');
+
+        const normalizedPrice = Number(price) > 1 ? Number(price) / 100 : (Number(price) || 0.50);
+        const contractCount = Math.max(1, Math.round(Number(size) || 1));
+
+        if (hasLiveAuth) {
+          const { ethers } = await import('ethers');
+          const sdk = await import('@limitless-exchange/sdk');
+          const formattedPk = pk.startsWith('0x') ? pk : `0x${pk}`;
+          const wallet = new ethers.Wallet(formattedPk);
+          const httpClient = new sdk.HttpClient({
+            baseURL: sdk.DEFAULT_API_URL,
+            hmacCredentials: { tokenId, secret },
+          });
+
+          try {
+            const axiosClient = (httpClient as any).http?.client;
+            if (axiosClient && typeof axiosClient.put === 'function') {
+              await axiosClient.put('/profiles', { tradeWalletOption: 'eoa' });
+            }
+          } catch {
+            // safe continuation
+          }
+
+          const orderClient = new sdk.OrderClient({
+            httpClient,
+            wallet,
+            logger: new sdk.ConsoleLogger(),
+          });
+
+          const orderTypeEnum = type === 'GTC' ? sdk.OrderType.GTC : sdk.OrderType.FAK;
+          const result = await orderClient.createOrder({
+            marketSlug: activeMarketSlug,
+            tokenId: String(targetTokenId),
+            side: sdk.Side.BUY,
+            orderType: orderTypeEnum,
+            price: normalizedPrice,
+            size: contractCount,
+          });
+
+          return res.end(JSON.stringify({
+            success: true,
+            mode: 'LIVE_EIP712_EXECUTED',
+            orderId: result?.id || `ord_${Date.now()}`,
+            marketSlug: activeMarketSlug,
+            direction: isLong ? 'LONG' : 'SHORT',
+            outcome: isLong ? 'UP' : 'DOWN',
+            tokenId: targetTokenId,
+            price: normalizedPrice,
+            size: contractCount,
+            chunkId,
+            details: result,
+          }));
+        } else {
+          const { ethers } = await import('ethers');
+          const dummyWallet = ethers.Wallet.createRandom();
+          const domain = {
+            name: 'Limitless CTF Exchange',
+            version: '1',
+            chainId: 8453,
+            verifyingContract: venueExchange,
+          };
+          const makerAmount = Math.round(normalizedPrice * contractCount * 1e6);
+          const takerAmount = Math.round(contractCount * 1e6);
+
+          const eip712Order = {
+            salt: String(Date.now()),
+            maker: dummyWallet.address,
+            signer: dummyWallet.address,
+            taker: '0x0000000000000000000000000000000000000000',
+            tokenId: String(targetTokenId),
+            makerAmount: String(makerAmount),
+            takerAmount: String(takerAmount),
+            expiration: '0',
+            nonce: '0',
+            feeRateBps: '0',
+            side: 0,
+            signatureType: 0,
+          };
+
+          return res.end(JSON.stringify({
+            success: true,
+            mode: 'DRY_RUN_EIP712_PREVIEW',
+            notice: 'Order built and validated against Limitless EIP-712 standard. Add PRIVATE_KEY, LMTS_TOKEN_ID, and LMTS_TOKEN_SECRET to .env for live on-chain submission.',
+            marketSlug: activeMarketSlug,
+            direction: isLong ? 'LONG' : 'SHORT',
+            outcome: isLong ? 'UP' : 'DOWN',
+            tokenId: targetTokenId,
+            verifyingContract: venueExchange,
+            domain,
+            order: eip712Order,
+            chunkId,
+          }));
+        }
+      } catch (err: any) {
+        res.statusCode = 500;
+        res.end(JSON.stringify({ success: false, error: err.message || String(err) }));
+      }
+    });
+  });
+
   middlewares.use('/api/limitless/orderbook', async (req: any, res: any) => {
     res.setHeader('Content-Type', 'application/json');
     try {

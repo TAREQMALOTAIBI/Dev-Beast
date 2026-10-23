@@ -14,7 +14,17 @@ export const CodeInspector: React.FC<CodeInspectorProps> = ({ config, lang }) =>
   const generateSourceCode = () => {
     return `import WebSocket from 'ws';
 import axios from 'axios';
-import { WebSocketClient } from '@limitless-exchange/sdk';
+import { ethers } from 'ethers';
+import {
+    WebSocketClient,
+    HttpClient,
+    OrderClient,
+    MarketFetcher,
+    ConsoleLogger,
+    Side,
+    OrderType,
+    DEFAULT_API_URL
+} from '@limitless-exchange/sdk';
 
 // ==========================================
 // 1. إعدادات المتغيرات والاستراتيجية (Config)
@@ -42,25 +52,29 @@ const CONFIG = {
     LIMITLESS_WS_URL: '${config.limitlessWsUrl}', // wss://ws.limitless.exchange
     LIMITLESS_MARKET_SLUG: '${config.limitlessMarketSlug}', // e.g. 'btc-100k-weekly'
     
-    // توثيق HMAC لمنصة Limitless
+    // مفاتيح المحفظة وتوثيق HMAC (EIP-712 Order Signing)
+    PRIVATE_KEY: process.env.PRIVATE_KEY || '',
     LMTS_TOKEN_ID: process.env.LMTS_TOKEN_ID || '${config.limitlessTokenId || ''}',
     LMTS_TOKEN_SECRET: process.env.LMTS_TOKEN_SECRET || '${config.limitlessTokenSecret || ''}',
     API_KEY: process.env.LIMITLESS_API_KEY || '${config.limitlessApiKey || ''}'
 };
 
 // ==========================================
-// 2. الكلاس الرئيسي للروبوت
+// 2. الكلاس الرئيسي للروبوت وتوقيع EIP-712
 // ==========================================
 class LimitlessTradingBot {
     private closePrices: number[] = [];
     private crossedUpperThreshold: boolean = false;
     private crossedLowerThreshold: boolean = false;
     private limitlessWs: WebSocketClient;
+    private httpClient: HttpClient | null = null;
+    private orderClient: OrderClient | null = null;
+    private wallet: ethers.Wallet | null = null;
     private currentBalance: number = ${config.initialBalance};
     private winProbability: number = ${config.winProbability.toFixed(2)};
 
     constructor() {
-        // تهيئة عميل Limitless الرسمي مع دعم إعادة الاتصال التلقائي وتوقيع HMAC
+        // 1. تهيئة عميل WebSocket
         const credentials = CONFIG.LMTS_TOKEN_ID && CONFIG.LMTS_TOKEN_SECRET
             ? { tokenId: CONFIG.LMTS_TOKEN_ID, secret: CONFIG.LMTS_TOKEN_SECRET }
             : undefined;
@@ -72,7 +86,36 @@ class LimitlessTradingBot {
             apiKey: CONFIG.API_KEY || undefined,
         });
 
+        // 2. تهيئة محرك التوقيع EIP-712 وOrderClient
+        if (CONFIG.PRIVATE_KEY && credentials) {
+            const pk = CONFIG.PRIVATE_KEY.startsWith('0x') ? CONFIG.PRIVATE_KEY : \`0x\${CONFIG.PRIVATE_KEY}\`;
+            this.wallet = new ethers.Wallet(pk);
+            this.httpClient = new HttpClient({
+                baseURL: DEFAULT_API_URL,
+                hmacCredentials: credentials
+            });
+            this.orderClient = new OrderClient({
+                httpClient: this.httpClient,
+                wallet: this.wallet,
+                logger: new ConsoleLogger()
+            });
+            this.ensureEoaTradingMode();
+        }
+
         this.initLimitlessWS();
+    }
+
+    // تفعيل وضع EOA لتمكين توقيع الأوامر الذاتي وفق متطلبات Limitless
+    private async ensureEoaTradingMode() {
+        try {
+            const axiosInstance = (this.httpClient as any)?.http?.client;
+            if (axiosInstance && typeof axiosInstance.put === 'function') {
+                await axiosInstance.put('/profiles', { tradeWalletOption: 'eoa' });
+                console.log('✅ Trading wallet profile confirmed: EOA Mode');
+            }
+        } catch (e: any) {
+            console.log('Profile trading mode notice:', e.message);
+        }
     }
 
     // تهيئة واستقبال أحداث Limitless WebSocket الحية
@@ -291,9 +334,9 @@ class LimitlessTradingBot {
     }
 
     // ==========================================
-    // 8. تنفيذ الأوامر وتجزئة العقود (Limitless SDK)
+    // 8. تنفيذ وتوقيع الأوامر (EIP-712 Order Signing & Chunking)
     // ==========================================
-    private executeTrade(direction: 'SHORT' | 'LONG' = 'SHORT') {
+    private async executeTrade(direction: 'SHORT' | 'LONG' = 'SHORT') {
         const totalInvestment = this.calculatePositionSize();
         const numberOfContracts = Math.floor(totalInvestment / CONFIG.MAX_PRICE_CENTS);
 
@@ -303,7 +346,7 @@ class LimitlessTradingBot {
         }
 
         const outcome = direction === 'LONG' ? 'UP' : 'DOWN';
-        console.log(\`🛒 Preparing to buy \${numberOfContracts} contracts for \${outcome} (\${direction}) at max $\${CONFIG.MAX_PRICE_CENTS} \${CONFIG.ORDER_TYPE}\`);
+        console.log(\`🛒 Preparing to execute \${numberOfContracts} contracts for \${outcome} (\${direction}) via EIP-712 Signing...\`);
 
         const chunkSize = Math.floor(numberOfContracts / CONFIG.FRACTION_CHUNKS);
         let remainingContracts = numberOfContracts;
@@ -311,24 +354,49 @@ class LimitlessTradingBot {
         for (let i = 0; i < CONFIG.FRACTION_CHUNKS; i++) {
             const contractsToBuy = (i === CONFIG.FRACTION_CHUNKS - 1) ? remainingContracts : chunkSize;
             remainingContracts -= contractsToBuy;
+            if (contractsToBuy <= 0) continue;
 
-            const orderPayload = {
-                action: 'PLACE_ORDER',
-                market: CONFIG.LIMITLESS_MARKET_SLUG,
-                side: 'BUY',
-                direction,
-                outcome,
-                type: CONFIG.ORDER_TYPE,
-                price: CONFIG.MAX_PRICE_CENTS,
-                size: contractsToBuy,
-                chunkId: i + 1
-            };
+            const chunkIndex = i + 1;
+            setTimeout(async () => {
+                try {
+                    // في حال توفر OrderClient والمحفظة، يتم توقيع العقد فورياً وفق معيار EIP-712
+                    if (this.orderClient) {
+                        const marketFetcher = new MarketFetcher(this.httpClient!);
+                        const market = await marketFetcher.getMarket(CONFIG.LIMITLESS_MARKET_SLUG);
+                        const tokenId = direction === 'LONG' ? market.tokens?.yes : market.tokens?.no;
 
-            setTimeout(() => {
-                console.log(\`🚀 Chunk \${i + 1}/\${CONFIG.FRACTION_CHUNKS} [\${direction}] dispatched: \${contractsToBuy} contracts @ $\${CONFIG.MAX_PRICE_CENTS}\`);
-                // إرسال عبر مقبس Limitless الحي
-                if ((this.limitlessWs as any).socket) {
-                    (this.limitlessWs as any).socket.emit('order', orderPayload);
+                        if (tokenId) {
+                            const signedOrder = await this.orderClient.createOrder({
+                                marketSlug: CONFIG.LIMITLESS_MARKET_SLUG,
+                                tokenId: String(tokenId),
+                                side: Side.BUY,
+                                orderType: CONFIG.ORDER_TYPE === 'GTC' ? OrderType.GTC : OrderType.FAK,
+                                price: CONFIG.MAX_PRICE_CENTS,
+                                size: contractsToBuy
+                            });
+                            console.log(\`✅ Chunk \${chunkIndex}/\${CONFIG.FRACTION_CHUNKS} EIP-712 Order Executed! ID: \${signedOrder.id}\`);
+                            return;
+                        }
+                    }
+
+                    // بث أمر التجزئة المباشر عبر WebSocket
+                    const orderPayload = {
+                        action: 'PLACE_ORDER',
+                        market: CONFIG.LIMITLESS_MARKET_SLUG,
+                        side: 'BUY',
+                        direction,
+                        outcome,
+                        type: CONFIG.ORDER_TYPE,
+                        price: CONFIG.MAX_PRICE_CENTS,
+                        size: contractsToBuy,
+                        chunkId: chunkIndex
+                    };
+                    if ((this.limitlessWs as any).socket) {
+                        (this.limitlessWs as any).socket.emit('order', orderPayload);
+                    }
+                    console.log(\`🚀 Chunk \${chunkIndex}/\${CONFIG.FRACTION_CHUNKS} [\${direction}] dispatched via stream: \${contractsToBuy} contracts\`);
+                } catch (err: any) {
+                    console.error(\`❌ Chunk \${chunkIndex} failed:\`, err.message);
                 }
             }, i * CONFIG.CHUNK_DELAY_MS);
         }
@@ -418,6 +486,48 @@ process.on('SIGINT', () => {
         <pre className="text-slate-300">
           <code>{generateSourceCode()}</code>
         </pre>
+      </div>
+
+      {/* EIP-712 Architecture & Protocol Specs */}
+      <div className="p-4 bg-slate-950/90 border-t border-slate-800 space-y-3 text-xs">
+        <div className="flex items-center gap-2 text-sky-400 font-semibold">
+          <Shield className="w-4 h-4" />
+          <span>{isAr ? 'معايير التوقيع المشفر EIP-712 في شبكة Base (ChainId: 8453)' : 'EIP-712 Order Signing Specification (Base Mainnet)'}</span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 font-mono text-[11px]">
+          <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+            <span className="text-slate-400 block mb-1 font-bold">{isAr ? '1. مجال التوقيع (Domain)' : '1. Domain Separator'}</span>
+            <div className="text-slate-300 space-y-0.5">
+              <div>name: <span className="text-emerald-400 font-bold">&quot;Limitless CTF Exchange&quot;</span></div>
+              <div>version: <span className="text-emerald-400 font-bold">&quot;1&quot;</span></div>
+              <div>chainId: <span className="text-emerald-400 font-bold">8453</span> (Base)</div>
+              <div>verifyingContract: <span className="text-emerald-400 font-bold">venue.exchange</span></div>
+            </div>
+          </div>
+
+          <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+            <span className="text-slate-400 block mb-1 font-bold">{isAr ? '2. وضع المحفظة (Wallet Mode)' : '2. Profile Wallet Mode'}</span>
+            <div className="text-slate-300 space-y-1">
+              <div>Option: <span className="text-amber-400 font-bold">&quot;eoa&quot;</span></div>
+              <div className="text-slate-400 text-[10px]">
+                {isAr
+                  ? 'يتطلب إرسال PUT /profiles مع tradeWalletOption: "eoa" لتفادي خطأ 400 Signer Mismatch.'
+                  : 'Requires tradeWalletOption: "eoa" to authorize direct self-signed orders.'}
+              </div>
+            </div>
+          </div>
+
+          <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+            <span className="text-slate-400 block mb-1 font-bold">{isAr ? '3. معايير الحقول (Field Rules)' : '3. Field Rules & Scaling'}</span>
+            <div className="text-slate-300 space-y-0.5">
+              <div>Amounts: <span className="text-sky-400 font-bold">Scaled by 1e6</span> (USDC)</div>
+              <div>expiration: <span className="text-sky-400 font-bold">0</span> | nonce: <span className="text-sky-400 font-bold">0</span></div>
+              <div>feeRateBps: <span className="text-sky-400 font-bold">0</span> (Collateral Venue)</div>
+              <div>taker: <span className="text-sky-400 font-bold">0x000...000</span></div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
