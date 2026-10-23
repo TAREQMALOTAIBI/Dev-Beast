@@ -6,6 +6,7 @@ import {
   ExecutedChunk,
   TradeOrder,
   WsMessageLog,
+  LiveWalletInfo,
 } from '../types/bot';
 import { binanceService } from '../services/binanceService';
 import { limitlessService, LimitlessStatus } from '../services/limitlessService';
@@ -29,9 +30,9 @@ const DEFAULT_CONFIG: BotConfig = {
   binanceWsUrl: 'wss://stream.binance.com/ws/btcusdt@kline_15m',
   limitlessWsUrl: 'wss://ws.limitless.exchange',
   limitlessMarketSlug: 'btc-100k-weekly',
-  limitlessApiKey: '',
-  limitlessTokenId: '',
-  limitlessTokenSecret: '',
+  limitlessApiKey: (typeof process !== 'undefined' && process.env?.LIMITLESS_API_KEY) || '',
+  limitlessTokenId: (typeof process !== 'undefined' && process.env?.LMTS_TOKEN_ID) || '',
+  limitlessTokenSecret: (typeof process !== 'undefined' && process.env?.LMTS_TOKEN_SECRET) || '',
 };
 
 export function useTradingBot() {
@@ -49,6 +50,16 @@ export function useTradingBot() {
         }
         if (parsed.limitlessWsUrl && parsed.limitlessWsUrl.includes('api.limitless.exchange')) {
           parsed.limitlessWsUrl = DEFAULT_CONFIG.limitlessWsUrl;
+        }
+        // Auto-inject env secrets if persisted config has empty credentials
+        if (!parsed.limitlessTokenId && DEFAULT_CONFIG.limitlessTokenId) {
+          parsed.limitlessTokenId = DEFAULT_CONFIG.limitlessTokenId;
+        }
+        if (!parsed.limitlessTokenSecret && DEFAULT_CONFIG.limitlessTokenSecret) {
+          parsed.limitlessTokenSecret = DEFAULT_CONFIG.limitlessTokenSecret;
+        }
+        if (!parsed.limitlessApiKey && DEFAULT_CONFIG.limitlessApiKey) {
+          parsed.limitlessApiKey = DEFAULT_CONFIG.limitlessApiKey;
         }
         return { ...DEFAULT_CONFIG, ...parsed };
       }
@@ -372,6 +383,76 @@ export function useTradingBot() {
     };
   }, [config.symbol, config.timeframe, config.periods, config.binanceRestUrl, rebuildMetrics, evaluateLiveStrategy]);
 
+  const [hasEnvCredentials, setHasEnvCredentials] = useState<boolean>(() => {
+    return Boolean(config.limitlessTokenId && config.limitlessTokenSecret);
+  });
+  const [liveWallet, setLiveWallet] = useState<LiveWalletInfo | null>(null);
+  const [isLiveBalance, setIsLiveBalance] = useState<boolean>(false);
+  const [isFetchingBalance, setIsFetchingBalance] = useState<boolean>(false);
+
+  const refreshLiveBalance = useCallback(async () => {
+    setIsFetchingBalance(true);
+    try {
+      const res = await fetch('/api/balance');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data && data.success && data.isLive) {
+        setIsLiveBalance(true);
+        setCurrentBalance(data.usdcBalance);
+        setLiveWallet({
+          isLive: true,
+          address: data.address,
+          usdcBalance: data.usdcBalance,
+          ethBalance: data.ethBalance,
+          network: data.network,
+          username: data.profile?.username,
+          points: data.profile?.points,
+          rank: data.profile?.rank,
+          lastUpdated: Date.now(),
+        });
+      }
+    } catch {
+      // Ignore
+    } finally {
+      setIsFetchingBalance(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetch('/api/credentials')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && data.hasLmtsTokenId && data.hasLmtsTokenSecret) {
+          setHasEnvCredentials(true);
+          setConfig((prev) => {
+            if (!prev.limitlessTokenId || !prev.limitlessTokenSecret) {
+              const updated = {
+                ...prev,
+                limitlessTokenId: data.limitlessTokenId,
+                limitlessTokenSecret: data.limitlessTokenSecret,
+                limitlessApiKey: data.limitlessApiKey || prev.limitlessApiKey,
+                walletAddress: data.walletAddress || prev.walletAddress,
+              };
+              try {
+                localStorage.setItem('limitless_live_bot_config', JSON.stringify(updated));
+              } catch {
+                // Ignore
+              }
+              return updated;
+            }
+            return prev;
+          });
+        }
+      })
+      .catch(() => {
+        // Fallback to define
+      });
+
+    refreshLiveBalance();
+    const interval = setInterval(refreshLiveBalance, 10000);
+    return () => clearInterval(interval);
+  }, [refreshLiveBalance]);
+
   const toggleBot = () => {
     setBotActive((prev) => !prev);
   };
@@ -392,6 +473,10 @@ export function useTradingBot() {
     crossedUpperThreshold,
     isEntrySignal,
     currentBalance,
+    isLiveBalance,
+    liveWallet,
+    isFetchingBalance,
+    refreshLiveBalance,
     botActive,
     toggleBot,
     binanceStatus,
@@ -408,5 +493,6 @@ export function useTradingBot() {
     orderbook,
     oracle,
     positions,
+    hasEnvCredentials,
   };
 }

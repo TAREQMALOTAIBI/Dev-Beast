@@ -9,6 +9,7 @@ interface KellyLabProps {
   kelly: KellyMath;
   onUpdateConfig: (partial: Partial<BotConfig>) => void;
   lang: 'en' | 'ar';
+  isLiveBalance?: boolean;
 }
 
 export const KellyLab: React.FC<KellyLabProps> = ({
@@ -17,6 +18,7 @@ export const KellyLab: React.FC<KellyLabProps> = ({
   kelly,
   onUpdateConfig,
   lang,
+  isLiveBalance,
 }) => {
   const isAr = lang === 'ar';
 
@@ -101,9 +103,16 @@ export const KellyLab: React.FC<KellyLabProps> = ({
           <div className="text-2xl font-mono font-bold text-slate-100 mt-0.5">
             {formatUsd(kelly.positionSizeUsd)}
           </div>
-          <div className="text-xs text-slate-400 mt-0.5">
-            {isAr ? 'من إجمالي الرصيد الحالي ' : 'From current account balance '}{' '}
-            <span className="font-mono text-slate-200">{formatUsd(balance)}</span>
+          <div className="text-xs text-slate-400 mt-0.5 flex flex-wrap items-center gap-1.5">
+            <span>
+              {isAr ? 'من إجمالي الرصيد الفعلي ' : 'From current live account balance '}
+            </span>
+            <span className="font-mono text-emerald-300 font-bold">{formatUsd(balance)}</span>
+            {isLiveBalance && (
+              <span className="text-[10px] text-emerald-400 bg-emerald-950 px-1.5 py-0.5 rounded border border-emerald-700/60 font-sans font-medium">
+                {isAr ? 'محفظة Base الحقيقية' : 'Base Mainnet'}
+              </span>
+            )}
           </div>
         </div>
 

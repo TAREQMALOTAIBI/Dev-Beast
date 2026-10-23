@@ -16,6 +16,9 @@ import {
   Layers,
   FileCode,
   ShieldCheck,
+  RefreshCw,
+  Wallet,
+  ExternalLink,
 } from 'lucide-react';
 
 export default function App() {
@@ -33,6 +36,10 @@ export default function App() {
     crossedUpperThreshold,
     isEntrySignal,
     currentBalance,
+    isLiveBalance,
+    liveWallet,
+    isFetchingBalance,
+    refreshLiveBalance,
     botActive,
     toggleBot,
     binanceStatus,
@@ -48,6 +55,7 @@ export default function App() {
     orderbook,
     oracle,
     positions,
+    hasEnvCredentials,
   } = useTradingBot();
 
   const isAr = lang === 'ar';
@@ -122,6 +130,9 @@ export default function App() {
             >
               <SlidersHorizontal className="w-3.5 h-3.5 text-emerald-400" />
               <span>{isAr ? 'إعدادات ومفاتيح التداول الحي' : 'Live Credentials & Config'}</span>
+              {hasEnvCredentials && (
+                <span className="w-2 h-2 rounded-full bg-emerald-400 ring-2 ring-emerald-950 animate-pulse" title={isAr ? 'المفاتيح نشطة من .env' : 'Active from .env'}></span>
+              )}
             </button>
           </div>
         </div>
@@ -141,12 +152,60 @@ export default function App() {
               ${latestCandle ? formatPrice(latestCandle.close) : 'Loading...'}
             </span>
             <span className="text-slate-700">·</span>
-            <span className="text-slate-400">
-              {isAr ? 'الرصيد الفعلي:' : 'Live Balance:'}{' '}
-              <span className="text-slate-100 font-mono font-bold">
-                {formatUsd(currentBalance)}
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-400">
+                {isAr ? 'الرصيد الحي الحقيقي:' : 'Live Balance:'}
               </span>
-            </span>
+              <span className="text-emerald-300 font-mono font-bold text-sm bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-500/50 shadow-sm flex items-center gap-1">
+                <span>{formatUsd(currentBalance)}</span>
+                <span className="text-[10px] text-emerald-400 font-sans font-normal">USDC</span>
+              </span>
+              {isLiveBalance ? (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-600/60 shadow-sm">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span>{isAr ? 'شبكة Base الحية' : 'Live Base'}</span>
+                </span>
+              ) : (
+                <span className="text-[10px] text-amber-400 font-mono">({isAr ? 'افتراضي' : 'Simulated'})</span>
+              )}
+              <button
+                onClick={() => refreshLiveBalance()}
+                disabled={isFetchingBalance}
+                className={`p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors ${
+                  isFetchingBalance ? 'animate-spin text-emerald-400' : ''
+                }`}
+                title={isAr ? 'تحديث الرصيد الحي من البلوكشين' : 'Refresh live on-chain balance'}
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            {liveWallet?.address && (
+              <>
+                <span className="text-slate-700">·</span>
+                <div className="flex items-center gap-1.5 text-[11px] text-slate-300 font-mono">
+                  <Wallet className="w-3.5 h-3.5 text-sky-400" />
+                  <a
+                    href={`https://basescan.org/address/${liveWallet.address}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sky-400 hover:underline hover:text-sky-300 flex items-center gap-0.5"
+                    title={liveWallet.address}
+                  >
+                    <span>
+                      {liveWallet.username
+                        ? `${liveWallet.username} (${liveWallet.address.slice(0, 6)}...${liveWallet.address.slice(-4)})`
+                        : `${liveWallet.address.slice(0, 6)}...${liveWallet.address.slice(-4)}`}
+                    </span>
+                    <ExternalLink className="w-2.5 h-2.5 opacity-70" />
+                  </a>
+                  {liveWallet.ethBalance > 0 && (
+                    <span className="text-slate-500 text-[10px]">
+                      ({liveWallet.ethBalance.toFixed(4)} ETH gas)
+                    </span>
+                  )}
+                </div>
+              </>
+            )}
           </div>
 
           {/* Real Sockets Health */}
@@ -180,6 +239,15 @@ export default function App() {
             <div className="text-slate-300">
               Kelly 5% Cap: <span className="text-emerald-400 font-bold">{formatUsd(kelly.positionSizeUsd)}</span>
             </div>
+            {hasEnvCredentials && (
+              <>
+                <span className="text-slate-700">·</span>
+                <div className="flex items-center gap-1.5 text-emerald-400 font-semibold">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>{isAr ? 'مفاتيح HMAC: نشطة' : 'HMAC: Active'}</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </section>
@@ -284,6 +352,19 @@ export default function App() {
                         3 × {kelly.chunkSize} + 1 × {kelly.lastChunkSize} contracts
                       </span>
                     </div>
+                    <div className="flex justify-between items-center text-slate-400 pt-1.5 border-t border-slate-800/80 text-[11px]">
+                      <span>{isAr ? 'مصدر الرصيد المعتمد:' : 'Balance Source:'}</span>
+                      <span className="text-emerald-400 font-sans font-medium flex items-center gap-1">
+                        {isLiveBalance ? (
+                          <>
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                            <span>{isAr ? 'محفظة Base الحية (USDC)' : 'Live Base USDC Wallet'}</span>
+                          </>
+                        ) : (
+                          <span className="text-amber-400">{isAr ? 'رصيد افتراضي ($1000)' : 'Simulated ($1000)'}</span>
+                        )}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -318,6 +399,7 @@ export default function App() {
               kelly={kelly}
               onUpdateConfig={updateConfig}
               lang={lang}
+              isLiveBalance={isLiveBalance}
             />
 
             <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 text-xs text-slate-300 space-y-3">
@@ -367,6 +449,8 @@ export default function App() {
         onClose={() => setIsConfigOpen(false)}
         onSave={(newCfg) => updateConfig(newCfg)}
         lang={lang}
+        hasEnvCredentials={hasEnvCredentials}
+        liveWallet={liveWallet}
       />
     </div>
   );

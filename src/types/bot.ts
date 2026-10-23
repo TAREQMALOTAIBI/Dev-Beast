@@ -18,6 +18,19 @@ export interface BotConfig {
   limitlessApiKey: string;
   limitlessTokenId: string;
   limitlessTokenSecret: string;
+  walletAddress?: string;
+}
+
+export interface LiveWalletInfo {
+  isLive: boolean;
+  address: string;
+  usdcBalance: number;
+  ethBalance: number;
+  network: string;
+  username?: string;
+  points?: number;
+  rank?: string;
+  lastUpdated: number;
 }
 
 export interface CandleData {

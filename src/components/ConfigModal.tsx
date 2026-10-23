@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { BotConfig } from '../types/bot';
-import { Settings, X, RotateCcw, Save, KeyRound, Radio } from 'lucide-react';
+import { Settings, X, RotateCcw, Save, KeyRound, Radio, ShieldCheck } from 'lucide-react';
 
 interface ConfigModalProps {
   config: BotConfig;
@@ -8,6 +8,8 @@ interface ConfigModalProps {
   onClose: () => void;
   onSave: (newConfig: BotConfig) => void;
   lang: 'en' | 'ar';
+  hasEnvCredentials?: boolean;
+  liveWallet?: import('../types/bot').LiveWalletInfo | null;
 }
 
 export const ConfigModal: React.FC<ConfigModalProps> = ({
@@ -16,6 +18,8 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
   onClose,
   onSave,
   lang,
+  hasEnvCredentials,
+  liveWallet,
 }) => {
   const isAr = lang === 'ar';
   const [draft, setDraft] = useState<BotConfig>({ ...config });
@@ -77,11 +81,41 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
 
         {/* Form Body */}
         <div className="p-6 overflow-y-auto space-y-5 text-xs text-slate-300">
+          {liveWallet && (
+            <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-600/50 flex flex-wrap items-center justify-between gap-3 shadow-sm">
+              <div className="flex items-center gap-2.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <div>
+                  <div className="font-bold text-slate-100 flex items-center gap-2">
+                    <span>{liveWallet.username || 'On-Chain Wallet'}</span>
+                    <span className="font-mono text-[11px] text-slate-300">
+                      ({liveWallet.address.slice(0, 6)}...{liveWallet.address.slice(-4)})
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-emerald-400 mt-0.5">
+                    {liveWallet.network} · {liveWallet.ethBalance.toFixed(4)} ETH for gas
+                  </div>
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-[10px] text-slate-400">{isAr ? 'الرصيد الحي الحقيقي (Base)' : 'Live Balance'}</div>
+                <div className="text-base font-bold font-mono text-emerald-300">${liveWallet.usdcBalance.toFixed(2)} USDC</div>
+              </div>
+            </div>
+          )}
           {/* Section 1: Authentication & Endpoints */}
           <div className="p-3.5 rounded-xl bg-slate-950/80 border border-emerald-800/40 space-y-3">
-            <div className="flex items-center gap-2 font-bold text-emerald-400 text-xs uppercase tracking-wider">
-              <KeyRound className="w-4 h-4" />
-              <span>{isAr ? 'بيانات توثيق Limitless SDK (HMAC / API)' : 'Limitless SDK & HMAC Credentials'}</span>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 font-bold text-emerald-400 text-xs uppercase tracking-wider">
+                <KeyRound className="w-4 h-4" />
+                <span>{isAr ? 'بيانات توثيق Limitless SDK (HMAC / API)' : 'Limitless SDK & HMAC Credentials'}</span>
+              </div>
+              {hasEnvCredentials && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-600/60 shadow-sm">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  {isAr ? 'تم التحميل تلقائياً من ملف البيئة (.env)' : 'Active from environment (.env)'}
+                </span>
+              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

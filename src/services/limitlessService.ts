@@ -291,12 +291,14 @@ export class LimitlessService {
     }
 
     const executedChunks: ExecutedChunk[] = [];
-    const chunkSize = Math.floor(totalContracts / chunksCount);
+    const effectiveChunks = Math.min(Math.max(1, totalContracts), chunksCount);
+    const chunkSize = Math.floor(totalContracts / effectiveChunks);
     let remainingContracts = totalContracts;
 
-    for (let i = 0; i < chunksCount; i++) {
-      const contractsToBuy = i === chunksCount - 1 ? remainingContracts : chunkSize;
+    for (let i = 0; i < effectiveChunks; i++) {
+      const contractsToBuy = i === effectiveChunks - 1 ? remainingContracts : chunkSize;
       remainingContracts -= contractsToBuy;
+      if (contractsToBuy <= 0) continue;
 
       const chunkId = i + 1;
       const orderPayload = {
