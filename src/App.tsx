@@ -33,6 +33,7 @@ export default function App() {
     updateConfig,
     candles,
     metrics,
+    latestMetric,
     currentZScore,
     crossedUpperThreshold,
     isEntrySignal,
@@ -343,6 +344,7 @@ export default function App() {
                   onToggleSound={toggleSound}
                   config={config}
                   lang={lang}
+                  metric={latestMetric}
                 />
 
                 {/* Sizing & Position Allocation Card */}

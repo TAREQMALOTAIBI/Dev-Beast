@@ -15,6 +15,7 @@ interface StrategyStatusCardProps {
   onToggleSound: () => void;
   config: BotConfig;
   lang: 'en' | 'ar';
+  metric?: import('../types/bot').ZScoreMetric | null;
 }
 
 export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
@@ -29,6 +30,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
   onToggleSound,
   config,
   lang,
+  metric,
 }) => {
   const isAr = lang === 'ar';
 
@@ -193,7 +195,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
         </div>
       </div>
 
-      {/* Live Z-Score Gauge Bar */}
+      {/* Live Z-Score Gauge Bar (Forced LTR for correct numerical scale) */}
       <div className="space-y-1.5 pt-1">
         <div className="flex justify-between text-xs font-mono">
           <span className="text-slate-400">
@@ -207,48 +209,101 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
                   : 'text-sky-300'
               }`}
             >
-              {currentZScore.toFixed(2)}σ
+              {currentZScore > 0 ? `+${currentZScore.toFixed(2)}σ` : `${currentZScore.toFixed(2)}σ`}
             </span>
           </span>
-          <span className="text-slate-500 text-[11px]">
-            Target: &lt; {config.zScoreEntry.toFixed(2)}σ
+          <span className="text-slate-400 text-[11px] font-mono">
+            {isAr ? 'هدف الارتداد للدخول:' : 'Entry Target:'}{' '}
+            <span className="text-amber-400 font-bold">&lt; +{config.zScoreEntry.toFixed(2)}σ</span>
           </span>
         </div>
 
-        {/* Meter */}
-        <div className="relative w-full h-2.5 bg-slate-950 rounded-full border border-slate-800 overflow-hidden">
-          {/* Threshold markers */}
-          <div
-            className="absolute top-0 bottom-0 w-0.5 bg-amber-400 z-10"
-            style={{ left: `${((config.zScoreEntry + 3) / 6) * 100}%` }}
-            title={`Entry: ${config.zScoreEntry}`}
-          />
-          <div
-            className="absolute top-0 bottom-0 w-0.5 bg-rose-500 z-10"
-            style={{ left: `${((config.zScoreUpper + 3) / 6) * 100}%` }}
-            title={`Upper: ${config.zScoreUpper}`}
-          />
+        {/* Meter - LTR guaranteed */}
+        <div dir="ltr" className="space-y-1">
+          <div className="relative w-full h-3 bg-slate-950 rounded-full border border-slate-800 overflow-hidden">
+            {/* Center Zero Marker */}
+            <div
+              className="absolute top-0 bottom-0 w-px bg-slate-700 z-10"
+              style={{ left: '50%' }}
+              title="0.0σ Mean"
+            />
+            {/* Entry Threshold Marker */}
+            <div
+              className="absolute top-0 bottom-0 w-0.5 bg-amber-400 z-20 shadow-xs shadow-amber-400"
+              style={{ left: `${((config.zScoreEntry + 3) / 6) * 100}%` }}
+              title={`Entry: +${config.zScoreEntry}σ`}
+            />
+            {/* Upper Threshold Marker */}
+            <div
+              className="absolute top-0 bottom-0 w-0.5 bg-rose-500 z-20 shadow-xs shadow-rose-500"
+              style={{ left: `${((config.zScoreUpper + 3) / 6) * 100}%` }}
+              title={`Upper: +${config.zScoreUpper}σ`}
+            />
 
-          {/* Value fill */}
-          <div
-            className={`h-full transition-all duration-300 ${
-              currentZScore >= config.zScoreUpper
-                ? 'bg-rose-500'
-                : currentZScore >= config.zScoreEntry
-                ? 'bg-amber-400'
-                : 'bg-sky-400'
-            }`}
-            style={{ width: `${normalizedZPct}%` }}
-          />
+            {/* Value fill from left (-3.0) to right (+3.0) */}
+            <div
+              className={`h-full transition-all duration-300 ${
+                currentZScore >= config.zScoreUpper
+                  ? 'bg-rose-500'
+                  : currentZScore >= config.zScoreEntry
+                  ? 'bg-amber-400'
+                  : currentZScore < 0
+                  ? 'bg-sky-500'
+                  : 'bg-emerald-400'
+              }`}
+              style={{ width: `${normalizedZPct}%` }}
+            />
+          </div>
+
+          <div className="flex justify-between text-[10px] font-mono text-slate-500 px-0.5">
+            <span>-3.0σ</span>
+            <span>-1.5σ</span>
+            <span className="text-slate-400">0.0σ</span>
+            <span className="text-amber-400">+{config.zScoreEntry.toFixed(1)}σ</span>
+            <span className="text-rose-400">+{config.zScoreUpper.toFixed(1)}σ</span>
+            <span>+3.0σ</span>
+          </div>
         </div>
 
-        <div className="flex justify-between text-[10px] font-mono text-slate-500">
-          <span>-3.0σ</span>
-          <span>0.0σ</span>
-          <span className="text-amber-400">+{config.zScoreEntry.toFixed(1)}σ</span>
-          <span className="text-rose-400">+{config.zScoreUpper.toFixed(1)}σ</span>
-          <span>+3.0σ</span>
-        </div>
+        {/* Real-Time Mathematical Formula Verification Proof */}
+        {metric && metric.stdDev > 0 && (
+          <div className="mt-2.5 p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 text-[11px] font-mono space-y-1.5">
+            <div className="flex items-center justify-between text-slate-400 border-b border-slate-900 pb-1 text-[10px]">
+              <span className="font-sans font-semibold text-slate-300">
+                {isAr ? '📐 التحقق الحسابي الدقيق من المعادلة' : '📐 Live Statistical Formula Check'}
+              </span>
+              <span className="text-emerald-400 font-bold">14-Periods SMA</span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-slate-300">
+              <div>
+                <span className="text-slate-500">{isAr ? 'السعر (P): ' : 'Price (P): '}</span>
+                <span className="font-bold text-slate-100">${metric.price.toFixed(2)}</span>
+              </div>
+              <div>
+                <span className="text-slate-500">{isAr ? 'المتوسط (μ): ' : 'Mean (μ): '}</span>
+                <span className="font-bold text-slate-100">${metric.mean.toFixed(2)}</span>
+              </div>
+              <div>
+                <span className="text-slate-500">{isAr ? 'الانحراف (σ): ' : 'StdDev (σ): '}</span>
+                <span className="font-bold text-slate-100">${metric.stdDev.toFixed(2)}</span>
+              </div>
+              <div>
+                <span className="text-slate-500">{isAr ? 'الفارق (P-μ): ' : 'Diff (P-μ): '}</span>
+                <span className={`font-bold ${metric.price - metric.mean >= 0 ? 'text-emerald-400' : 'text-sky-400'}`}>
+                  {metric.price - metric.mean >= 0 ? '+' : ''}{(metric.price - metric.mean).toFixed(2)}
+                </span>
+              </div>
+            </div>
+
+            <div className="pt-1.5 text-[10px] text-slate-400 border-t border-slate-900 flex flex-wrap items-center justify-between gap-1">
+              <span className="text-slate-400">Z = (Price - Mean) / StdDev</span>
+              <span className="text-emerald-300 font-bold bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/40">
+                ({(metric.price - metric.mean).toFixed(2)}) / {metric.stdDev.toFixed(2)} = {metric.zScore > 0 ? '+' : ''}{metric.zScore.toFixed(2)}σ
+              </span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

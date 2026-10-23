@@ -127,7 +127,7 @@ export function useTradingBot() {
     let hadArmed = false;
 
     for (let i = 0; i < candleList.length; i++) {
-      if (i < cfg.periods) {
+      if (i < cfg.periods - 1) {
         result.push({
           time: candleList[i].time,
           price: candleList[i].close,
@@ -146,7 +146,7 @@ export function useTradingBot() {
         continue;
       }
 
-      const windowSlice = closes.slice(i - cfg.periods, i);
+      const windowSlice = closes.slice(i - cfg.periods + 1, i + 1);
       const stats = calculateZScore(windowSlice, cfg.zScoreUpper, cfg.zScoreEntry);
 
       let signal: 'ARMED' | 'ENTRY' | null = null;
@@ -364,6 +364,11 @@ export function useTradingBot() {
               const updatedCloses = [...closePricesRef.current.slice(1), tickCandle.close];
               closePricesRef.current = updatedCloses;
               evaluateLiveStrategy(updatedCloses);
+            } else {
+              // Real-time calculation on current live open candle tick
+              const liveCloses = [...closePricesRef.current.slice(1), tickCandle.close];
+              const { zScore } = calculateZScore(liveCloses, configRef.current.zScoreUpper, configRef.current.zScoreEntry);
+              setCurrentZScore(zScore);
             }
 
             rebuildMetrics(next, configRef.current);
@@ -477,6 +482,7 @@ export function useTradingBot() {
     updateConfig,
     candles,
     metrics,
+    latestMetric: metrics.length > 0 ? metrics[metrics.length - 1] : null,
     currentZScore,
     crossedUpperThreshold,
     isEntrySignal,
