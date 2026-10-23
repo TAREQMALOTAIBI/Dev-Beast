@@ -1,0 +1,275 @@
+import React, { useState } from 'react';
+import { BotConfig } from '../types/bot';
+import { Settings, X, RotateCcw, Save, KeyRound, Radio } from 'lucide-react';
+
+interface ConfigModalProps {
+  config: BotConfig;
+  isOpen: boolean;
+  onClose: () => void;
+  onSave: (newConfig: BotConfig) => void;
+  lang: 'en' | 'ar';
+}
+
+export const ConfigModal: React.FC<ConfigModalProps> = ({
+  config,
+  isOpen,
+  onClose,
+  onSave,
+  lang,
+}) => {
+  const isAr = lang === 'ar';
+  const [draft, setDraft] = useState<BotConfig>({ ...config });
+
+  if (!isOpen) return null;
+
+  const handleResetDefaults = () => {
+    setDraft({
+      symbol: 'BTCUSDT',
+      timeframe: '15m',
+      periods: 14,
+      zScoreUpper: 2.0,
+      zScoreEntry: 1.9,
+      maxPriceCents: 0.2,
+      maxRiskPercent: 0.05,
+      orderType: 'GTC',
+      fractionChunks: 4,
+      chunkDelayMs: 500,
+      winProbability: 0.55,
+      initialBalance: 1000,
+      binanceRestUrl: 'https://api.binance.vision/api/v3/klines',
+      binanceWsUrl: 'wss://stream.binance.com:9443/ws/btcusdt@kline_15m',
+      limitlessWsUrl: 'wss://api.limitless.exchange/v1/ws',
+      limitlessApiKey: draft.limitlessApiKey || '',
+    });
+  };
+
+  const handleSave = () => {
+    onSave(draft);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+      <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-2xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/70">
+          <div className="flex items-center gap-2.5">
+            <Radio className="w-5 h-5 text-emerald-400 animate-pulse" />
+            <div>
+              <h2 className="text-base font-bold text-slate-100">
+                {isAr ? 'إعدادات التداول الحي الحقيقي (LIVE TRADING)' : 'Live Trading Configuration'}
+              </h2>
+              <div className="text-[11px] text-slate-400">
+                {isAr ? 'تخصيص بيانات الربط الفعلي ومفاتيح API' : 'Direct Exchange Endpoints & API Authentication'}
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Form Body */}
+        <div className="p-6 overflow-y-auto space-y-5 text-xs text-slate-300">
+          {/* Section 1: Authentication & Endpoints */}
+          <div className="p-3.5 rounded-xl bg-slate-950/80 border border-emerald-800/40 space-y-3">
+            <div className="flex items-center gap-2 font-bold text-emerald-400 text-xs uppercase tracking-wider">
+              <KeyRound className="w-4 h-4" />
+              <span>{isAr ? 'بيانات التوثيق والاتصال بمنصة Limitless' : 'Limitless Exchange Credentials'}</span>
+            </div>
+
+            <div>
+              <label className="block text-slate-300 mb-1 font-semibold">
+                {isAr ? 'مفتاح API الخاص بك (Limitless API Key):' : 'Limitless API Key:'}
+              </label>
+              <input
+                type="password"
+                placeholder={isAr ? 'أدخل مفتاح API الحي الخاص بك' : 'Enter your live Limitless API key'}
+                value={draft.limitlessApiKey}
+                onChange={(e) => setDraft({ ...draft, limitlessApiKey: e.target.value })}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono focus:outline-none focus:border-emerald-500"
+              />
+              <span className="text-[10px] text-slate-400 mt-1 block">
+                {isAr
+                  ? 'يتم إرساله في حزمة المصادقة الأولية: { type: "AUTH", apiKey: "..." }'
+                  : 'Sent in initial WebSocket authentication frame: { type: "AUTH", apiKey: "..." }'}
+              </span>
+            </div>
+
+            <div>
+              <label className="block text-slate-400 mb-1">Limitless WebSocket URL</label>
+              <input
+                type="text"
+                value={draft.limitlessWsUrl}
+                onChange={(e) => setDraft({ ...draft, limitlessWsUrl: e.target.value })}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
+              />
+            </div>
+          </div>
+
+          {/* Section 2: Market & Timeframe */}
+          <div>
+            <h3 className="font-semibold text-slate-100 uppercase tracking-wider text-[11px] mb-3 text-sky-400">
+              {isAr ? 'السوق وفترة الشموع الحية (Binance)' : 'Market & Rolling Window'}
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-slate-400 mb-1">Trading Pair (SYMBOL)</label>
+                <input
+                  type="text"
+                  value={draft.symbol}
+                  onChange={(e) => setDraft({ ...draft, symbol: e.target.value.toUpperCase() })}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 mb-1">Interval (TIMEFRAME)</label>
+                <select
+                  value={draft.timeframe}
+                  onChange={(e) => setDraft({ ...draft, timeframe: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
+                >
+                  <option value="1m">1m</option>
+                  <option value="5m">5m</option>
+                  <option value="15m">15m (Default)</option>
+                  <option value="1h">1h</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-400 mb-1">Rolling Periods (N)</label>
+                <input
+                  type="number"
+                  min="5"
+                  max="50"
+                  value={draft.periods}
+                  onChange={(e) => setDraft({ ...draft, periods: parseInt(e.target.value) || 14 })}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Section 3: Z-Score Conditions */}
+          <div className="border-t border-slate-800 pt-4">
+            <h3 className="font-semibold text-slate-100 uppercase tracking-wider text-[11px] mb-3 text-sky-400">
+              {isAr ? 'عتبات استراتيجية Z-Score' : 'Z-Score Thresholds'}
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-slate-400 mb-1">
+                  Upper Threshold (Z_SCORE_UPPER)
+                </label>
+                <input
+                  type="number"
+                  step="0.05"
+                  value={draft.zScoreUpper}
+                  onChange={(e) => setDraft({ ...draft, zScoreUpper: parseFloat(e.target.value) || 2.0 })}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
+                />
+                <span className="text-[10px] text-slate-500 mt-1 block">
+                  {isAr ? 'يؤهل الروبوت للدخول عند تجاوز السعر لهذا الانحراف' : 'Arms bot when price diverges above upper standard deviation'}
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-slate-400 mb-1">
+                  Entry Trigger (Z_SCORE_ENTRY)
+                </label>
+                <input
+                  type="number"
+                  step="0.05"
+                  value={draft.zScoreEntry}
+                  onChange={(e) => setDraft({ ...draft, zScoreEntry: parseFloat(e.target.value) || 1.9 })}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
+                />
+                <span className="text-[10px] text-slate-500 mt-1 block">
+                  {isAr ? 'يرسل أمر الشراء الحي فور ارتداد السعر دون هذه العتبة' : 'Fires live BUY order when price begins reverting back'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 4: Risk Sizing & Chunks */}
+          <div className="border-t border-slate-800 pt-4">
+            <h3 className="font-semibold text-slate-100 uppercase tracking-wider text-[11px] mb-3 text-sky-400">
+              {isAr ? 'إدارة المخاطر وتجزئة الأوامر' : 'Execution & Kelly Risk Sizing'}
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-slate-400 mb-1">
+                  {isAr ? 'أقصى سعر للعقد ($)' : 'Max Price Cents ($)'}
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={draft.maxPriceCents}
+                  onChange={(e) => setDraft({ ...draft, maxPriceCents: parseFloat(e.target.value) || 0.2 })}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 mb-1">
+                  {isAr ? 'عدد الأجزاء (Chunks)' : 'Chunks (FRACTION_CHUNKS)'}
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={draft.fractionChunks}
+                  onChange={(e) => setDraft({ ...draft, fractionChunks: parseInt(e.target.value) || 4 })}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 mb-1">
+                  {isAr ? 'سقف المخاطرة (5% Max)' : 'Max Risk Cap (0.05)'}
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={draft.maxRiskPercent}
+                  onChange={(e) => setDraft({ ...draft, maxRiskPercent: parseFloat(e.target.value) || 0.05 })}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between px-6 py-4 border-t border-slate-800 bg-slate-950/60">
+          <button
+            onClick={handleResetDefaults}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>{isAr ? 'استعادة إعدادات الكود' : 'Reset to Script Defaults'}</span>
+          </button>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 text-xs font-medium text-slate-400 hover:text-white transition-colors"
+            >
+              {isAr ? 'إلغاء' : 'Cancel'}
+            </button>
+            <button
+              onClick={handleSave}
+              className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg shadow-sm transition-colors"
+            >
+              <Save className="w-3.5 h-3.5" />
+              <span>{isAr ? 'حفظ وتطبيق إعدادات التداول الحي' : 'Save Live Settings'}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};

@@ -1,0 +1,6 @@
+{
+  "name": "Limitless Quant Bot Terminal",
+  "description": "Real-time algorithmic trading terminal for Binance 15m Z-Score mean reversion strategy with Kelly Criterion risk management and Limitless fractional order execution.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

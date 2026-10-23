@@ -1,0 +1,124 @@
+import { BotConfig, KellyMath, ZScoreMetric } from '../types/bot';
+
+/**
+ * Calculates Z-Score and statistical parameters from a window of close prices
+ * Matching the exact formula in LimitlessTradingBot:
+ * mean = sum(prices) / n
+ * variance = sum((p - mean)^2) / n
+ * stdDev = sqrt(variance)
+ * zScore = (currentPrice - mean) / stdDev
+ */
+export function calculateZScore(
+  closePrices: number[],
+  upperThreshold = 2.0,
+  entryThreshold = 1.90
+): {
+  mean: number;
+  variance: number;
+  stdDev: number;
+  zScore: number;
+  currentPrice: number;
+  upperBand: number;
+  entryBand: number;
+  lowerBand: number;
+} {
+  const n = closePrices.length;
+  if (n === 0) {
+    return {
+      mean: 0,
+      variance: 0,
+      stdDev: 0,
+      zScore: 0,
+      currentPrice: 0,
+      upperBand: 0,
+      entryBand: 0,
+      lowerBand: 0,
+    };
+  }
+
+  const currentPrice = closePrices[n - 1];
+  const mean = closePrices.reduce((a, b) => a + b, 0) / n;
+  const variance = closePrices.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / n;
+  const stdDev = Math.sqrt(variance);
+
+  const zScore = stdDev > 0 ? (currentPrice - mean) / stdDev : 0;
+
+  return {
+    mean,
+    variance,
+    stdDev,
+    zScore,
+    currentPrice,
+    upperBand: mean + upperThreshold * stdDev,
+    entryBand: mean + entryThreshold * stdDev,
+    lowerBand: mean - upperThreshold * stdDev,
+  };
+}
+
+/**
+ * Calculates Kelly Criterion position sizing with the 5% max risk cap
+ * and contract fractionalization.
+ * 
+ * b: payout odds = (1.00 - MAX_PRICE_CENTS) / MAX_PRICE_CENTS (at $0.20, b = 4.0)
+ * p: win probability (e.g. 0.55)
+ * q: 1 - p (0.45)
+ * kellyFraction: (b * p - q) / b
+ * riskToTake: clamp between 0 and MAX_RISK_PERCENT
+ */
+export function calculateKellySizing(
+  balance: number,
+  config: Pick<BotConfig, 'maxPriceCents' | 'winProbability' | 'maxRiskPercent' | 'fractionChunks'>
+): KellyMath {
+  const { maxPriceCents, winProbability, maxRiskPercent, fractionChunks } = config;
+
+  // Safe bounds
+  const price = Math.max(0.01, Math.min(0.99, maxPriceCents));
+  const b = (1.00 - price) / price;
+  const p = Math.max(0.01, Math.min(0.99, winProbability));
+  const q = 1 - p;
+
+  const kellyFraction = (b * p - q) / b;
+  const riskToTake = Math.min(Math.max(kellyFraction, 0), maxRiskPercent);
+  const positionSizeUsd = balance * riskToTake;
+  const numberOfContracts = Math.floor(positionSizeUsd / price);
+
+  const chunkSize = fractionChunks > 0 ? Math.floor(numberOfContracts / fractionChunks) : numberOfContracts;
+  const lastChunkSize = numberOfContracts - chunkSize * (fractionChunks - 1);
+
+  return {
+    b,
+    p,
+    q,
+    kellyFraction,
+    riskToTake,
+    positionSizeUsd,
+    numberOfContracts,
+    chunkSize,
+    lastChunkSize: Math.max(0, lastChunkSize),
+  };
+}
+
+/**
+ * Format currency with 2 decimals
+ */
+export function formatUsd(amount: number): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
+
+/**
+ * Format crypto price with adaptive precision
+ */
+export function formatPrice(price: number): string {
+  if (price >= 1000) {
+    return price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  if (price >= 1) {
+    return price.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+  }
+  return price.toLocaleString('en-US', { minimumFractionDigits: 6, maximumFractionDigits: 6 });
+}
