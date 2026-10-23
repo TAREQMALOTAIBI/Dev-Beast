@@ -118,28 +118,29 @@ export default function App() {
             {/* Primary Robot Start/Stop Button */}
             <button
               onClick={toggleBot}
-              className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-bold rounded-lg border transition-all shadow-md cursor-pointer select-none whitespace-nowrap ${
+              className={`flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer select-none whitespace-nowrap ${
                 botActive
-                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400 shadow-emerald-950/80 ring-2 ring-emerald-400/40'
-                  : 'bg-rose-700 hover:bg-rose-600 text-white border-rose-500 shadow-rose-950/80 ring-2 ring-rose-400/40'
+                  ? 'bg-emerald-950/70 hover:bg-emerald-900/80 text-emerald-300 border-emerald-500/60 shadow-sm shadow-emerald-950/60'
+                  : 'bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-700 hover:border-slate-600 shadow-sm'
               }`}
               title={
                 isAr
-                  ? (botActive ? 'الروبوت يعمل حالياً - اضغط لإيقافه مؤقتاً' : 'الروبوت متوقف - اضغط لتشغيل الروبوت الآن')
-                  : (botActive ? 'Bot is Running - Click to Pause' : 'Bot is Paused - Click to Start')
+                  ? (botActive ? 'الروبوت نشط - اضغط لإيقافه مؤقتاً' : 'الروبوت متوقف - اضغط للتشغيل الآن')
+                  : (botActive ? 'Bot is Active - Click to Pause' : 'Bot is Paused - Click to Start')
               }
             >
-              <Power className={`w-3.5 h-3.5 ${botActive ? 'text-white animate-pulse' : 'text-rose-100'}`} />
+              <span className="relative flex h-2 w-2">
+                {botActive && (
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                )}
+                <span className={`relative inline-flex rounded-full h-2 w-2 ${botActive ? 'bg-emerald-400' : 'bg-slate-500'}`}></span>
+              </span>
+              <Power className={`w-3.5 h-3.5 ${botActive ? 'text-emerald-400' : 'text-slate-400'}`} />
               <span>
                 {isAr
-                  ? (botActive ? 'الروبوت يعمل (إيقاف)' : 'تشغيل الروبوت الآن')
-                  : (botActive ? 'Bot Active (Pause)' : 'Start Bot Now')}
+                  ? (botActive ? 'الروبوت: يعمل' : 'تشغيل الروبوت')
+                  : (botActive ? 'Bot: Active' : 'Start Bot')}
               </span>
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  botActive ? 'bg-emerald-200 animate-ping' : 'bg-rose-300'
-                }`}
-              />
             </button>
 
             {/* Language Switcher */}
