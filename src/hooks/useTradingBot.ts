@@ -25,10 +25,13 @@ const DEFAULT_CONFIG: BotConfig = {
   chunkDelayMs: 500,
   winProbability: 0.55,
   initialBalance: 1000,
-  binanceRestUrl: 'https://api.binance.vision/api/v3/klines',
-  binanceWsUrl: 'wss://stream.binance.com:9443/ws/btcusdt@kline_15m',
-  limitlessWsUrl: 'wss://api.limitless.exchange/v1/ws',
+  binanceRestUrl: 'https://api.binance.com/api/v3/klines',
+  binanceWsUrl: 'wss://stream.binance.com/ws/btcusdt@kline_15m',
+  limitlessWsUrl: 'wss://ws.limitless.exchange',
+  limitlessMarketSlug: 'btc-100k-weekly',
   limitlessApiKey: '',
+  limitlessTokenId: '',
+  limitlessTokenSecret: '',
 };
 
 export function useTradingBot() {
@@ -36,7 +39,19 @@ export function useTradingBot() {
     // Read persisted config if available
     try {
       const saved = localStorage.getItem('limitless_live_bot_config');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.binanceWsUrl && parsed.binanceWsUrl.includes(':9443')) {
+          parsed.binanceWsUrl = DEFAULT_CONFIG.binanceWsUrl;
+        }
+        if (parsed.binanceRestUrl && parsed.binanceRestUrl.includes('binance.vision')) {
+          parsed.binanceRestUrl = DEFAULT_CONFIG.binanceRestUrl;
+        }
+        if (parsed.limitlessWsUrl && parsed.limitlessWsUrl.includes('api.limitless.exchange')) {
+          parsed.limitlessWsUrl = DEFAULT_CONFIG.limitlessWsUrl;
+        }
+        return { ...DEFAULT_CONFIG, ...parsed };
+      }
     } catch {
       // Fallback
     }
@@ -49,6 +64,9 @@ export function useTradingBot() {
   const [crossedUpperThreshold, setCrossedUpperThreshold] = useState<boolean>(false);
   const [isEntrySignal, setIsEntrySignal] = useState<boolean>(false);
   const [currentBalance, setCurrentBalance] = useState<number>(config.initialBalance);
+  const [orderbook, setOrderbook] = useState<import('../types/bot').OrderbookUpdate | null>(null);
+  const [oracle, setOracle] = useState<import('../types/bot').OraclePriceData | null>(null);
+  const [positions, setPositions] = useState<import('../types/bot').PositionItem[]>([]);
   const [botActive, setBotActive] = useState<boolean>(true);
   const [binanceStatus, setBinanceStatus] = useState<'CONNECTING' | 'CONNECTED' | 'DISCONNECTED'>('CONNECTING');
   const [limitlessStatus, setLimitlessStatus] = useState<LimitlessStatus>('DISCONNECTED');
@@ -259,26 +277,42 @@ export function useTradingBot() {
     [executeLiveTrade]
   );
 
-  // Subscribe to Limitless WebSocket Gateway
+  // Subscribe to Limitless WebSocket Gateway using official SDK
   useEffect(() => {
     const unsubStatus = limitlessService.subscribeStatus((st) => setLimitlessStatus(st));
     const unsubLogs = limitlessService.subscribeLogs((log) => {
       setWsLogs((prev) => [...prev.slice(-80), log]);
     });
     const unsubBalance = limitlessService.subscribeBalance((bal) => {
-      console.log(`[LIVE BALANCE UPDATE] Exchange reported new balance: $${bal}`);
+      console.log(`[LIVE BALANCE UPDATE] Exchange reported balance: $${bal}`);
       setCurrentBalance(bal);
     });
+    const unsubOrderbook = limitlessService.subscribeOrderbook((ob) => setOrderbook(ob));
+    const unsubOracle = limitlessService.subscribeOracle((orc) => setOracle(orc));
+    const unsubPositions = limitlessService.subscribePositions((pos) => setPositions(pos));
 
-    limitlessService.connect(config.limitlessWsUrl, config.limitlessApiKey);
+    limitlessService.connect(config.limitlessWsUrl, config.limitlessMarketSlug, {
+      apiKey: config.limitlessApiKey,
+      tokenId: config.limitlessTokenId,
+      secret: config.limitlessTokenSecret,
+    });
 
     return () => {
       unsubStatus();
       unsubLogs();
       unsubBalance();
+      unsubOrderbook();
+      unsubOracle();
+      unsubPositions();
       limitlessService.disconnect();
     };
-  }, [config.limitlessWsUrl, config.limitlessApiKey]);
+  }, [
+    config.limitlessWsUrl,
+    config.limitlessMarketSlug,
+    config.limitlessApiKey,
+    config.limitlessTokenId,
+    config.limitlessTokenSecret,
+  ]);
 
   // Load real Binance Historical Data & Live WebSocket
   useEffect(() => {
@@ -371,5 +405,8 @@ export function useTradingBot() {
     kelly,
     soundEnabled,
     toggleSound,
+    orderbook,
+    oracle,
+    positions,
   };
 }

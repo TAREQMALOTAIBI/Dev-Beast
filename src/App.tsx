@@ -45,6 +45,9 @@ export default function App() {
     kelly,
     soundEnabled,
     toggleSound,
+    orderbook,
+    oracle,
+    positions,
   } = useTradingBot();
 
   const isAr = lang === 'ar';
@@ -293,8 +296,12 @@ export default function App() {
                 activeTrade={activeTrade}
                 tradeHistory={tradeHistory}
                 wsLogs={wsLogs}
+                orderbook={orderbook}
+                oracle={oracle}
+                positions={positions}
                 isExecuting={isExecuting}
                 limitlessStatus={limitlessStatus}
+                marketSlug={config.limitlessMarketSlug}
                 onOpenConfig={() => setIsConfigOpen(true)}
                 lang={lang}
               />

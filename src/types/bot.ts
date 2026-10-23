@@ -13,8 +13,11 @@ export interface BotConfig {
   initialBalance: number;
   binanceRestUrl: string;
   binanceWsUrl: string;
-  limitlessWsUrl: string;
+  limitlessWsUrl: string; // 'wss://ws.limitless.exchange'
+  limitlessMarketSlug: string; // e.g. 'btc-100k-weekly' or 'btc-15m-prediction'
   limitlessApiKey: string;
+  limitlessTokenId: string;
+  limitlessTokenSecret: string;
 }
 
 export interface CandleData {
@@ -95,4 +98,21 @@ export interface WsMessageLog {
   channel: 'BINANCE' | 'LIMITLESS';
   timestamp: number;
   data: Record<string, unknown> | string;
+}
+
+// Re-export official Limitless Exchange Data Structures from @limitless-exchange/sdk
+export type {
+  OrderbookUpdate,
+  OraclePriceData,
+  OrderEvent,
+  TransactionEvent,
+} from '@limitless-exchange/sdk';
+
+export interface PositionItem {
+  tokenId: string;
+  marketId: number | string;
+  ctfBalance: string;
+  marketValue: string;
+  averageFillPrice: string;
+  costBasis: string;
 }

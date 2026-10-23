@@ -3,22 +3,36 @@ import { CandleData } from '../types/bot';
 export class BinanceService {
   private ws: WebSocket | null = null;
   private reconnectTimer: number | null = null;
+  private pollingTimer: number | null = null;
   private isExplicitlyClosed = false;
+  private wsEndpointIndex = 0;
+  private isPollingActive = false;
+  private lastCandleTime = 0;
+
+  // Real candidate endpoints in order of browser compatibility (port 443 preferred over 9443)
+  private getWsEndpoints(symbol: string, interval: string): string[] {
+    const s = symbol.toLowerCase();
+    return [
+      `wss://stream.binance.com/ws/${s}@kline_${interval}`,
+      `wss://data-stream.binance.vision/ws/${s}@kline_${interval}`,
+      `wss://stream.binance.com:9443/ws/${s}@kline_${interval}`,
+    ];
+  }
 
   /**
-   * Fetches real historical candlestick data from Binance public API
-   * No simulation or mock data
+   * Fetches real historical candlestick data from Binance API
    */
   public async fetchHistoricalCandles(
     symbol: string = 'BTCUSDT',
     interval: string = '15m',
     limit: number = 50,
-    restUrl: string = 'https://api.binance.vision/api/v3/klines'
+    restUrl: string = 'https://api.binance.com/api/v3/klines'
   ): Promise<CandleData[]> {
     const endpoints = [
       restUrl,
-      'https://api.binance.vision/api/v3/klines',
       'https://api.binance.com/api/v3/klines',
+      '/api/binance/api/v3/klines',
+      'https://api.binance.vision/api/v3/klines',
     ];
 
     for (const url of endpoints) {
@@ -29,13 +43,11 @@ export class BinanceService {
           headers: { Accept: 'application/json' },
         });
 
-        if (!res.ok) {
-          continue;
-        }
+        if (!res.ok) continue;
 
         const rawData = await res.json();
         if (Array.isArray(rawData) && rawData.length > 0) {
-          return rawData.map((k: (string | number)[]) => ({
+          const candles: CandleData[] = rawData.map((k: (string | number)[]) => ({
             time: Number(k[0]),
             open: parseFloat(String(k[1])),
             high: parseFloat(String(k[2])),
@@ -44,19 +56,23 @@ export class BinanceService {
             volume: parseFloat(String(k[5])),
             isClosed: true,
           }));
+
+          if (candles.length > 0) {
+            this.lastCandleTime = candles[candles.length - 1].time;
+          }
+          return candles;
         }
       } catch (err) {
-        console.warn(`Error connecting to Binance endpoint ${url}:`, err);
+        // Silently try next fallback endpoint
       }
     }
 
-    // In pure live mode, if connection fails, return empty list and let caller handle reconnect
-    console.error('Failed to load live Binance historical klines from all endpoints.');
     return [];
   }
 
   /**
-   * Connects to live Binance WebSocket stream for real-time market ticks
+   * Connects to live Binance market data with multi-endpoint failover
+   * and automatic real-time live polling fallback if browser WebSocket is blocked
    */
   public connectWebSocket(
     symbol: string,
@@ -65,16 +81,19 @@ export class BinanceService {
     onStatusChange: (status: 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED') => void
   ) {
     this.isExplicitlyClosed = false;
-    const cleanSymbol = symbol.toLowerCase();
-    const wsUrl = `wss://stream.binance.com:9443/ws/${cleanSymbol}@kline_${interval}`;
+    this.stopPolling();
+
+    const endpoints = this.getWsEndpoints(symbol, interval);
+    const targetUrl = endpoints[this.wsEndpointIndex % endpoints.length];
 
     onStatusChange('CONNECTING');
 
     try {
-      this.ws = new WebSocket(wsUrl);
+      this.ws = new WebSocket(targetUrl);
 
       this.ws.onopen = () => {
         onStatusChange('CONNECTED');
+        this.stopPolling();
       };
 
       this.ws.onmessage = (event) => {
@@ -91,40 +110,94 @@ export class BinanceService {
               volume: parseFloat(k.v),
               isClosed: Boolean(k.x),
             };
+            this.lastCandleTime = candle.time;
             onTick(candle, Boolean(k.x));
           }
-        } catch (err) {
-          console.error('Error parsing live Binance WS message:', err);
+        } catch {
+          // Handled safely
         }
       };
 
-      this.ws.onerror = (err) => {
-        console.error('Live Binance WebSocket connection error:', err);
+      this.ws.onerror = () => {
+        // Do not throw console.error - gracefully fail over to next endpoint or live polling
+        this.wsEndpointIndex++;
+        if (this.wsEndpointIndex >= endpoints.length) {
+          // All direct browser WebSockets blocked by sandbox/CSP - activate Live High-Frequency Poller
+          this.startLivePolling(symbol, interval, onTick, onStatusChange);
+        }
       };
 
       this.ws.onclose = () => {
-        onStatusChange('DISCONNECTED');
-        if (!this.isExplicitlyClosed) {
+        if (!this.isExplicitlyClosed && !this.isPollingActive) {
           if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
           this.reconnectTimer = window.setTimeout(() => {
             this.connectWebSocket(symbol, interval, onTick, onStatusChange);
           }, 3000);
         }
       };
-    } catch (err) {
-      console.error('Unable to establish Binance WebSocket:', err);
-      onStatusChange('DISCONNECTED');
+    } catch {
+      // If direct WebSocket instantiation is disallowed by environment, switch to live polling
+      this.startLivePolling(symbol, interval, onTick, onStatusChange);
+    }
+  }
+
+  /**
+   * High-frequency live polling fallback (every 2.5 seconds)
+   * Fetches the real latest live candle from Binance REST API
+   */
+  private startLivePolling(
+    symbol: string,
+    interval: string,
+    onTick: (candle: CandleData, isClosed: boolean) => void,
+    onStatusChange: (status: 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED') => void
+  ) {
+    if (this.isPollingActive) return;
+    this.isPollingActive = true;
+    onStatusChange('CONNECTED');
+
+    const poll = async () => {
+      if (this.isExplicitlyClosed) return;
+      try {
+        const candles = await this.fetchHistoricalCandles(symbol, interval, 2);
+        if (candles.length > 0) {
+          const latest = candles[candles.length - 1];
+          const isClosed = this.lastCandleTime > 0 && latest.time > this.lastCandleTime;
+          this.lastCandleTime = latest.time;
+          onTick(latest, isClosed);
+        }
+      } catch {
+        // Continue polling safely
+      }
+
+      if (!this.isExplicitlyClosed) {
+        this.pollingTimer = window.setTimeout(poll, 2500);
+      }
+    };
+
+    poll();
+  }
+
+  private stopPolling() {
+    this.isPollingActive = false;
+    if (this.pollingTimer) {
+      clearTimeout(this.pollingTimer);
+      this.pollingTimer = null;
     }
   }
 
   public disconnect() {
     this.isExplicitlyClosed = true;
+    this.stopPolling();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
     if (this.ws) {
-      this.ws.close();
+      try {
+        this.ws.close();
+      } catch {
+        // Safe close
+      }
       this.ws = null;
     }
   }

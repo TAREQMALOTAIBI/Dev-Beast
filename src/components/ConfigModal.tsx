@@ -36,10 +36,13 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
       chunkDelayMs: 500,
       winProbability: 0.55,
       initialBalance: 1000,
-      binanceRestUrl: 'https://api.binance.vision/api/v3/klines',
-      binanceWsUrl: 'wss://stream.binance.com:9443/ws/btcusdt@kline_15m',
-      limitlessWsUrl: 'wss://api.limitless.exchange/v1/ws',
-      limitlessApiKey: draft.limitlessApiKey || '',
+      binanceRestUrl: 'https://api.binance.com/api/v3/klines',
+      binanceWsUrl: 'wss://stream.binance.com/ws/btcusdt@kline_15m',
+      limitlessWsUrl: 'wss://ws.limitless.exchange',
+      limitlessMarketSlug: 'btc-100k-weekly',
+      limitlessApiKey: '',
+      limitlessTokenId: '',
+      limitlessTokenSecret: '',
     });
   };
 
@@ -78,29 +81,65 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
           <div className="p-3.5 rounded-xl bg-slate-950/80 border border-emerald-800/40 space-y-3">
             <div className="flex items-center gap-2 font-bold text-emerald-400 text-xs uppercase tracking-wider">
               <KeyRound className="w-4 h-4" />
-              <span>{isAr ? 'بيانات التوثيق والاتصال بمنصة Limitless' : 'Limitless Exchange Credentials'}</span>
+              <span>{isAr ? 'بيانات توثيق Limitless SDK (HMAC / API)' : 'Limitless SDK & HMAC Credentials'}</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-slate-300 mb-1 font-semibold">
+                  HMAC Token ID (LMTS_TOKEN_ID):
+                </label>
+                <input
+                  type="text"
+                  placeholder="token_..."
+                  value={draft.limitlessTokenId}
+                  onChange={(e) => setDraft({ ...draft, limitlessTokenId: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 mb-1 font-semibold">
+                  HMAC Secret (LMTS_TOKEN_SECRET):
+                </label>
+                <input
+                  type="password"
+                  placeholder="secret_..."
+                  value={draft.limitlessTokenSecret}
+                  onChange={(e) => setDraft({ ...draft, limitlessTokenSecret: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-slate-400 mb-1">
+                  {isAr ? 'رمز سوق التوقع (Market Slug):' : 'Prediction Market Slug:'}
+                </label>
+                <input
+                  type="text"
+                  placeholder="btc-100k-weekly"
+                  value={draft.limitlessMarketSlug}
+                  onChange={(e) => setDraft({ ...draft, limitlessMarketSlug: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 mb-1">Legacy X-API-Key (Optional):</label>
+                <input
+                  type="password"
+                  placeholder="X-API-Key..."
+                  value={draft.limitlessApiKey}
+                  onChange={(e) => setDraft({ ...draft, limitlessApiKey: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
+                />
+              </div>
             </div>
 
             <div>
-              <label className="block text-slate-300 mb-1 font-semibold">
-                {isAr ? 'مفتاح API الخاص بك (Limitless API Key):' : 'Limitless API Key:'}
-              </label>
-              <input
-                type="password"
-                placeholder={isAr ? 'أدخل مفتاح API الحي الخاص بك' : 'Enter your live Limitless API key'}
-                value={draft.limitlessApiKey}
-                onChange={(e) => setDraft({ ...draft, limitlessApiKey: e.target.value })}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono focus:outline-none focus:border-emerald-500"
-              />
-              <span className="text-[10px] text-slate-400 mt-1 block">
-                {isAr
-                  ? 'يتم إرساله في حزمة المصادقة الأولية: { type: "AUTH", apiKey: "..." }'
-                  : 'Sent in initial WebSocket authentication frame: { type: "AUTH", apiKey: "..." }'}
-              </span>
-            </div>
-
-            <div>
-              <label className="block text-slate-400 mb-1">Limitless WebSocket URL</label>
+              <label className="block text-slate-400 mb-1">Limitless WebSocket URL (Official SDK Default):</label>
               <input
                 type="text"
                 value={draft.limitlessWsUrl}
