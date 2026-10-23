@@ -84,7 +84,41 @@ async function fetchLiveWalletAndBalance() {
   };
 }
 
+function setupApiMiddlewares(middlewares: any) {
+  middlewares.use('/api/balance', async (_req: any, res: any) => {
+    res.setHeader('Content-Type', 'application/json');
+    try {
+      const data = await fetchLiveWalletAndBalance();
+      res.end(JSON.stringify({ success: true, ...data }));
+    } catch (err) {
+      res.statusCode = 500;
+      res.end(JSON.stringify({ success: false, error: String(err) }));
+    }
+  });
+
+  middlewares.use('/api/credentials', async (_req: any, res: any) => {
+    res.setHeader('Content-Type', 'application/json');
+    const walletData = await fetchLiveWalletAndBalance();
+    res.end(
+      JSON.stringify({
+        hasLmtsTokenId: Boolean(process.env.LMTS_TOKEN_ID),
+        hasLmtsTokenSecret: Boolean(process.env.LMTS_TOKEN_SECRET),
+        hasPrivateKey: Boolean(process.env.PRIVATE_KEY),
+        hasGeminiKey: Boolean(process.env.GEMINI_API_KEY),
+        hasApiKey: Boolean(process.env.LIMITLESS_API_KEY),
+        limitlessTokenId: process.env.LMTS_TOKEN_ID || '',
+        limitlessTokenSecret: process.env.LMTS_TOKEN_SECRET || '',
+        limitlessApiKey: process.env.LIMITLESS_API_KEY || '',
+        walletAddress: walletData.address,
+        liveUsdcBalance: walletData.usdcBalance,
+        username: walletData.profile?.username,
+      })
+    );
+  });
+}
+
 export default defineConfig(() => {
+  const port = Number(process.env.PORT) || 3000;
   return {
     define: {
       'process.env.LMTS_TOKEN_ID': JSON.stringify(process.env.LMTS_TOKEN_ID || ''),
@@ -99,36 +133,10 @@ export default defineConfig(() => {
       {
         name: 'credentials-api',
         configureServer(server) {
-          server.middlewares.use('/api/balance', async (_req, res) => {
-            res.setHeader('Content-Type', 'application/json');
-            try {
-              const data = await fetchLiveWalletAndBalance();
-              res.end(JSON.stringify({ success: true, ...data }));
-            } catch (err) {
-              res.statusCode = 500;
-              res.end(JSON.stringify({ success: false, error: String(err) }));
-            }
-          });
-
-          server.middlewares.use('/api/credentials', async (_req, res) => {
-            res.setHeader('Content-Type', 'application/json');
-            const walletData = await fetchLiveWalletAndBalance();
-            res.end(
-              JSON.stringify({
-                hasLmtsTokenId: Boolean(process.env.LMTS_TOKEN_ID),
-                hasLmtsTokenSecret: Boolean(process.env.LMTS_TOKEN_SECRET),
-                hasPrivateKey: Boolean(process.env.PRIVATE_KEY),
-                hasGeminiKey: Boolean(process.env.GEMINI_API_KEY),
-                hasApiKey: Boolean(process.env.LIMITLESS_API_KEY),
-                limitlessTokenId: process.env.LMTS_TOKEN_ID || '',
-                limitlessTokenSecret: process.env.LMTS_TOKEN_SECRET || '',
-                limitlessApiKey: process.env.LIMITLESS_API_KEY || '',
-                walletAddress: walletData.address,
-                liveUsdcBalance: walletData.usdcBalance,
-                username: walletData.profile?.username,
-              })
-            );
-          });
+          setupApiMiddlewares(server.middlewares);
+        },
+        configurePreviewServer(server) {
+          setupApiMiddlewares(server.middlewares);
         },
       },
     ],
@@ -139,7 +147,7 @@ export default defineConfig(() => {
     },
     server: {
       host: '0.0.0.0',
-      port: 3000,
+      port,
       allowedHosts: true,
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modify—file watching is disabled to prevent flickering during agent edits.
@@ -153,6 +161,11 @@ export default defineConfig(() => {
           rewrite: (p) => p.replace(/^\/api\/binance/, ''),
         },
       },
+    },
+    preview: {
+      host: '0.0.0.0',
+      port,
+      allowedHosts: true,
     },
   };
 });
