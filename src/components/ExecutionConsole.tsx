@@ -242,7 +242,7 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
                       </span>
                     </div>
                     <div className="flex justify-between text-slate-400">
-                      <span>{isAr ? 'السعر (GTC):' : 'Price (GTC):'}</span>
+                      <span>{isAr ? `السعر (${chunk?.payload?.type || 'FAK'}):` : `Price (${chunk?.payload?.type || 'FAK'}):`}</span>
                       <span className="text-slate-200">
                         {chunk ? `$${chunk.price.toFixed(2)}` : '—'}
                       </span>

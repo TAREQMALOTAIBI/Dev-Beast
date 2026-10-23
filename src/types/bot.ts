@@ -6,7 +6,7 @@ export interface BotConfig {
   zScoreEntry: number;
   maxPriceCents: number;
   maxRiskPercent: number;
-  orderType: 'GTC' | 'IOC' | 'FOK';
+  orderType: 'FAK' | 'IOC' | 'GTC' | 'FOK';
   fractionChunks: number;
   chunkDelayMs: number;
   winProbability: number;
@@ -101,7 +101,7 @@ export interface TradeOrder {
   totalInvestmentUsd: number;
   kellyRiskPct: number;
   chunks: ExecutedChunk[];
-  status: 'PENDING_WS' | 'TRANSMITTED' | 'ACTIVE_GTC' | 'CONFIRMED_FILLED' | 'REJECTED';
+  status: 'PENDING_WS' | 'TRANSMITTED' | 'ACTIVE_GTC' | 'EXECUTED_FAK' | 'CONFIRMED_FILLED' | 'REJECTED';
   exchangeOrderId?: string;
 }
 

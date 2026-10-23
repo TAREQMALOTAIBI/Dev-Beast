@@ -19,9 +19,9 @@ const DEFAULT_CONFIG: BotConfig = {
   periods: 14,
   zScoreUpper: 2.0,
   zScoreEntry: 1.9,
-  maxPriceCents: 0.2,
+  maxPriceCents: 0.2, // 20 cents and below
   maxRiskPercent: 0.05,
-  orderType: 'GTC',
+  orderType: 'FAK', // Fill-And-Kill
   fractionChunks: 4,
   chunkDelayMs: 500,
   winProbability: 0.55,
@@ -50,6 +50,13 @@ export function useTradingBot() {
         }
         if (parsed.limitlessWsUrl && parsed.limitlessWsUrl.includes('api.limitless.exchange')) {
           parsed.limitlessWsUrl = DEFAULT_CONFIG.limitlessWsUrl;
+        }
+        // Migrate orderType to FAK if empty or previous GTC
+        if (!parsed.orderType || parsed.orderType === 'GTC') {
+          parsed.orderType = 'FAK';
+        }
+        if (parsed.maxPriceCents === undefined || parsed.maxPriceCents > 0.2) {
+          parsed.maxPriceCents = 0.2;
         }
         // Auto-inject env secrets if persisted config has empty credentials
         if (!parsed.limitlessTokenId && DEFAULT_CONFIG.limitlessTokenId) {
@@ -244,7 +251,7 @@ export function useTradingBot() {
       const completedTrade: TradeOrder = {
         ...initialTrade,
         chunks: executed,
-        status: 'ACTIVE_GTC',
+        status: cfg.orderType === 'FAK' ? 'EXECUTED_FAK' : 'ACTIVE_GTC',
       };
 
       setActiveTrade(completedTrade);

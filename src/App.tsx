@@ -269,6 +269,13 @@ export default function App() {
             <div className="text-slate-300">
               Kelly 5% Cap: <span className="text-emerald-400 font-bold">{formatUsd(kelly.positionSizeUsd)}</span>
             </div>
+            <span className="text-slate-700">·</span>
+            <div className="flex items-center gap-1">
+              <span className="text-slate-400">{isAr ? 'نوع الأمر:' : 'Order:'}</span>
+              <span className="text-emerald-300 font-bold bg-emerald-950/70 px-1.5 py-0.5 rounded border border-emerald-600/50">
+                {config.orderType} ≤ ${config.maxPriceCents.toFixed(2)}
+              </span>
+            </div>
             {hasEnvCredentials && (
               <>
                 <span className="text-slate-700">·</span>
@@ -376,7 +383,7 @@ export default function App() {
                     <div className="flex justify-between text-slate-400">
                       <span>{isAr ? 'عقود التوقع المستهدفة:' : 'Prediction Contracts:'}</span>
                       <span className="text-sky-400 font-bold">
-                        {kelly.numberOfContracts} @ ${config.maxPriceCents.toFixed(2)}
+                        {kelly.numberOfContracts} @ ${config.maxPriceCents.toFixed(2)} ({config.orderType})
                       </span>
                     </div>
                     <div className="flex justify-between text-slate-400">

@@ -35,7 +35,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
       zScoreEntry: 1.9,
       maxPriceCents: 0.2,
       maxRiskPercent: 0.05,
-      orderType: 'GTC',
+      orderType: 'FAK',
       fractionChunks: 4,
       chunkDelayMs: 500,
       winProbability: 0.55,
@@ -272,7 +272,23 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
             <h3 className="font-semibold text-slate-100 uppercase tracking-wider text-[11px] mb-3 text-sky-400">
               {isAr ? 'إدارة المخاطر وتجزئة الأوامر' : 'Execution & Kelly Risk Sizing'}
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div>
+                <label className="block text-slate-400 mb-1">
+                  {isAr ? 'نوع الأمر (Order Type)' : 'Order Type'}
+                </label>
+                <select
+                  value={draft.orderType}
+                  onChange={(e) => setDraft({ ...draft, orderType: e.target.value as any })}
+                  className="w-full bg-slate-950 border border-emerald-600/60 rounded-lg px-3 py-2 text-emerald-300 font-mono font-bold"
+                >
+                  <option value="FAK">FAK (Fill-And-Kill)</option>
+                  <option value="IOC">IOC (Immediate-Or-Cancel)</option>
+                  <option value="GTC">GTC (Good-Til-Cancelled)</option>
+                  <option value="FOK">FOK (Fill-Or-Kill)</option>
+                </select>
+              </div>
+
               <div>
                 <label className="block text-slate-400 mb-1">
                   {isAr ? 'أقصى سعر للعقد ($)' : 'Max Price Cents ($)'}
@@ -312,6 +328,12 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
                 />
               </div>
+            </div>
+
+            <div className="mt-2.5 p-2 rounded-lg bg-emerald-950/30 border border-emerald-700/40 text-[11px] text-emerald-300">
+              {isAr
+                ? '⚡ أمر FAK (Fill-And-Kill): يتم تنفيذه فورياً على العقود المعروضة بسعر 20 سنت أو أقل، ويتم إلغاء (Kill) أي جزء متبقٍ في الحال دون تركه معلقاً.'
+                : '⚡ FAK (Fill-And-Kill): Executes immediately against asks at $0.20 or lower, and instantly kills (cancels) any unfilled remainder.'}
             </div>
           </div>
         </div>
