@@ -23,13 +23,19 @@ interface StrategyStatusCardProps {
   isEntrySignal: boolean;
   botActive: boolean;
   onToggleBot: () => void;
-  onTriggerManualTrade?: (direction?: 'SHORT' | 'LONG') => void;
   isExecuting?: boolean;
   soundEnabled: boolean;
   onToggleSound: () => void;
   config: BotConfig;
   lang: 'en' | 'ar';
   metric?: import('../types/bot').ZScoreMetric | null;
+  executionNotice?: {
+    type: 'SUCCESS' | 'WARNING' | 'ERROR';
+    message: string;
+    timestamp: number;
+    action?: 'START_BOT' | 'TRIGGER_TRADE';
+  } | null;
+  onClearNotice?: () => void;
 }
 
 export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
@@ -41,13 +47,14 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
   isEntrySignal,
   botActive,
   onToggleBot,
-  onTriggerManualTrade,
   isExecuting = false,
   soundEnabled,
   onToggleSound,
   config,
   lang,
   metric,
+  executionNotice,
+  onClearNotice,
 }) => {
   const isAr = lang === 'ar';
 
@@ -119,6 +126,63 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
         </div>
       </div>
 
+      {/* Execution Alert / Diagnostic Banner */}
+      {executionNotice && (
+        <div
+          className={`p-3 rounded-xl border flex items-start justify-between gap-3 text-xs transition-all ${
+            executionNotice.type === 'SUCCESS'
+              ? 'bg-emerald-950/70 border-emerald-500/70 text-emerald-200'
+              : executionNotice.type === 'ERROR'
+              ? 'bg-rose-950/70 border-rose-500/70 text-rose-200'
+              : 'bg-amber-950/70 border-amber-500/70 text-amber-200 animate-pulse'
+          }`}
+        >
+          <div className="flex items-start gap-2">
+            <Zap className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
+            <div className="space-y-1">
+              <p className="font-semibold">{executionNotice.message}</p>
+              {executionNotice.action === 'START_BOT' && !botActive && (
+                <button
+                  onClick={onToggleBot}
+                  className="mt-1 px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md font-bold text-[11px] shadow-sm cursor-pointer flex items-center gap-1.5"
+                >
+                  <Power className="w-3 h-3" />
+                  <span>{isAr ? 'اضغط هنا لتشغيل الروبوت الآن' : 'Start Bot Now'}</span>
+                </button>
+              )}
+            </div>
+          </div>
+          {onClearNotice && (
+            <button
+              onClick={onClearNotice}
+              className="text-slate-400 hover:text-slate-200 text-xs px-1.5 py-0.5 rounded cursor-pointer"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Warning Notice when Bot is Paused but Signals Occur */}
+      {!botActive && (
+        <div className="p-2.5 rounded-lg bg-amber-950/30 border border-amber-600/40 text-[11px] text-amber-300 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+            <span>
+              {isAr
+                ? '⚠️ تنبيه: الروبوت متوقف حالياً. يتم رصد الإشارات فقط على الشارت ولن يتم إرسال صفقات تلقائية حتى تضغط تشغيل الروبوت.'
+                : '⚠️ Notice: Bot is currently paused. Signals are monitored on the chart, but automatic trades will not execute until you click Start Bot.'}
+            </span>
+          </div>
+          <button
+            onClick={onToggleBot}
+            className="shrink-0 px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded text-[10px] cursor-pointer"
+          >
+            {isAr ? 'تشغيل الآن' : 'Start Now'}
+          </button>
+        </div>
+      )}
+
       {/* Primary Prominent Robot Control Box */}
       <div
         className={`p-3.5 rounded-xl border transition-all ${
@@ -173,37 +237,13 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
           )}
         </button>
 
-        {/* Sub Row: Dual Manual Test Orders */}
-        <div className="mt-2.5 pt-2.5 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-[11px]">
-          <span className="text-slate-400 text-[10px] truncate">
+        {/* Automated Execution Status Info */}
+        <div className="mt-2.5 pt-2 border-t border-slate-800/80 text-[11px] text-slate-400 text-center">
+          <span>
             {isAr
-              ? (botActive ? '⚡ تنفيذ لحظي: شراء DOWN عند الارتداد من القمة، وشراء UP عند الارتداد من القاع' : 'التنفيذ التلقائي متوقف حتى تضغط تشغيل')
-              : (botActive ? '⚡ Auto-executes DOWN on upper pullback, and UP on lower bounce' : 'Auto execution paused')}
+              ? (botActive ? '⚡ محرك التداول الآلي يعمل بنشاط: تنفيذ الصفقات يتم تلقائياً بالكامل عند ارتداد السعر وتحقق إشارات Z-Score' : 'التنفيذ التلقائي متوقف حالياً. اضغط الزر أعلاه لتشغيل الروبوت.')
+              : (botActive ? '⚡ Automated engine active: Real-time execution triggers automatically on Z-Score reversal signals.' : 'Automated execution is paused. Click above to start.')}
           </span>
-
-          {onTriggerManualTrade && (
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={() => onTriggerManualTrade('SHORT')}
-                disabled={isExecuting}
-                className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-rose-950/70 hover:bg-rose-900 text-rose-300 border border-rose-700/60 transition-colors disabled:opacity-50 cursor-pointer shrink-0"
-                title={isAr ? 'إرسال أمر فحص فوري لاتجاه الهبوط (SHORT / DOWN)' : 'Test Bearish Reversion Order (DOWN)'}
-              >
-                <ArrowDownCircle className="w-3 h-3 text-rose-400" />
-                <span>{isAr ? 'فحص هبوط (DOWN)' : 'Test SHORT'}</span>
-              </button>
-
-              <button
-                onClick={() => onTriggerManualTrade('LONG')}
-                disabled={isExecuting}
-                className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-emerald-950/70 hover:bg-emerald-900 text-emerald-300 border border-emerald-700/60 transition-colors disabled:opacity-50 cursor-pointer shrink-0"
-                title={isAr ? 'إرسال أمر فحص فوري لاتجاه الصعود (LONG / UP)' : 'Test Bullish Reversion Order (UP)'}
-              >
-                <ArrowUpCircle className="w-3 h-3 text-emerald-400" />
-                <span>{isAr ? 'فحص صعود (UP)' : 'Test LONG'}</span>
-              </button>
-            </div>
-          )}
         </div>
       </div>
 

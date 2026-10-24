@@ -42,38 +42,6 @@ function is15MinBtcMarket(m) {
   return is15 && !is5;
 }
 
-// Discover active BTC 15-minute prediction market on Limitless
-app.get('/api/limitless/active-btc', async (_req, res) => {
-  try {
-    const now = Date.now();
-    if (cachedActiveBtc && is15MinBtcMarket(cachedActiveBtc) && now - lastBtcFetchTime < 15000) {
-      return res.json({ success: true, ...cachedActiveBtc });
-    }
-
-    const response = await fetch('https://api.limitless.exchange/markets/active');
-    const json = await response.json();
-    const markets = json?.data || [];
-
-    // STRICT FILTER: Match exclusively 15-minute BTC prediction markets
-    const btcMarket = markets.find((m) => is15MinBtcMarket(m));
-
-    if (btcMarket) {
-      cachedActiveBtc = {
-        slug: btcMarket.slug,
-        title: btcMarket.title,
-        status: btcMarket.status,
-        prices: btcMarket.prices,
-        address: btcMarket.address,
-      };
-      lastBtcFetchTime = now;
-      return res.json({ success: true, ...cachedActiveBtc });
-    }
-
-    res.json({ success: false, message: 'No active BTC prediction market found' });
-  } catch (err) {
-    res.status(500).json({ success: false, error: String(err) });
-  }
-});
 
 // ============================================================================
 // Limitless Official WebSocketClient Streaming Manager (per official docs)

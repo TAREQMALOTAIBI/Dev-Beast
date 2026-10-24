@@ -42,6 +42,9 @@ export default function App() {
     activeSignal,
     isEntrySignal,
     currentBalance,
+    liveUsdcBalance,
+    executionNotice,
+    setExecutionNotice,
     isLiveBalance,
     liveWallet,
     isFetchingBalance,
@@ -190,22 +193,22 @@ export default function App() {
               ${latestCandle ? formatPrice(latestCandle.close) : 'Loading...'}
             </span>
             <span className="text-slate-700">·</span>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-2">
               <span className="text-slate-400">
-                {isAr ? 'الرصيد الحي الحقيقي:' : 'Live Balance:'}
+                {isAr ? 'الرصيد الحي المباشر:' : 'Live Balance:'}
               </span>
               <span className="text-emerald-300 font-mono font-bold text-sm bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-500/50 shadow-sm flex items-center gap-1">
                 <span>{formatUsd(currentBalance)}</span>
                 <span className="text-[10px] text-emerald-400 font-sans font-normal">USDC</span>
               </span>
-              {isLiveBalance ? (
+
+              {isLiveBalance && (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-950 text-emerald-300 border border-emerald-600/60 shadow-sm">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                  <span>{isAr ? 'شبكة Base الحية' : 'Live Base'}</span>
+                  <span>{isAr ? 'شبكة Base الحية' : 'Live Base (8453)'}</span>
                 </span>
-              ) : (
-                <span className="text-[10px] text-amber-400 font-mono">({isAr ? 'افتراضي' : 'Simulated'})</span>
               )}
+
               <button
                 onClick={() => refreshLiveBalance()}
                 disabled={isFetchingBalance}
@@ -369,13 +372,14 @@ export default function App() {
                   isEntrySignal={isEntrySignal}
                   botActive={botActive}
                   onToggleBot={toggleBot}
-                  onTriggerManualTrade={triggerManualTrade}
                   isExecuting={isExecuting}
                   soundEnabled={soundEnabled}
                   onToggleSound={toggleSound}
                   config={config}
                   lang={lang}
                   metric={latestMetric}
+                  executionNotice={executionNotice}
+                  onClearNotice={() => setExecutionNotice(null)}
                 />
 
                 {/* Sizing & Position Allocation Card */}
@@ -418,15 +422,9 @@ export default function App() {
                     </div>
                     <div className="flex justify-between items-center text-slate-400 pt-1.5 border-t border-slate-800/80 text-[11px]">
                       <span>{isAr ? 'مصدر الرصيد المعتمد:' : 'Balance Source:'}</span>
-                      <span className="text-emerald-400 font-sans font-medium flex items-center gap-1">
-                        {isLiveBalance ? (
-                          <>
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                            <span>{isAr ? 'محفظة Base الحية (USDC)' : 'Live Base USDC Wallet'}</span>
-                          </>
-                        ) : (
-                          <span className="text-amber-400">{isAr ? 'رصيد افتراضي ($1000)' : 'Simulated ($1000)'}</span>
-                        )}
+                      <span className="font-sans font-medium flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                        <span className="text-emerald-400 font-semibold">{isAr ? 'محفظة Base الحية (USDC)' : 'Live Base USDC Wallet'}</span>
                       </span>
                     </div>
                   </div>

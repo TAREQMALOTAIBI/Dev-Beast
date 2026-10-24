@@ -108,7 +108,15 @@ export function useTradingBot() {
   const [lastTradeDirection, setLastTradeDirection] = useState<'SHORT' | 'LONG' | null>(null);
   const [activeSignal, setActiveSignal] = useState<'ENTRY_SHORT' | 'ENTRY_LONG' | null>(null);
   const [isEntrySignal, setIsEntrySignal] = useState<boolean>(false);
-  const [currentBalance, setCurrentBalance] = useState<number>(config.initialBalance);
+  const [currentBalance, setCurrentBalance] = useState<number>(0);
+  const [liveUsdcBalance, setLiveUsdcBalance] = useState<number>(0);
+  const [executionNotice, setExecutionNotice] = useState<{
+    type: 'SUCCESS' | 'WARNING' | 'ERROR';
+    message: string;
+    timestamp: number;
+    action?: 'START_BOT' | 'TRIGGER_TRADE';
+  } | null>(null);
+
   const [orderbook, setOrderbook] = useState<import('../types/bot').OrderbookUpdate | null>(null);
   const [oracle, setOracle] = useState<import('../types/bot').OraclePriceData | null>(null);
   const [positions, setPositions] = useState<import('../types/bot').PositionItem[]>([]);
@@ -121,16 +129,22 @@ export function useTradingBot() {
     } catch {
       // Safe fallback
     }
-    return false; // Default to stopped for maximum safety until the user starts it
+    return true; // Default to active so live signals execute automatically
   });
   const [binanceStatus, setBinanceStatus] = useState<'CONNECTING' | 'CONNECTED' | 'DISCONNECTED'>('CONNECTING');
   const [limitlessStatus, setLimitlessStatus] = useState<LimitlessStatus>('DISCONNECTED');
   const [wsLogs, setWsLogs] = useState<WsMessageLog[]>([]);
   const [currentChunks, setCurrentChunks] = useState<ExecutedChunk[]>([]);
   const [activeTrade, setActiveTrade] = useState<TradeOrder | null>(null);
-  const [tradeHistory, setTradeHistory] = useState<TradeOrder[]>([]);
+  const [tradeHistory, setTradeHistory] = useState<TradeOrder[]>(() => {
+    try {
+      const saved = localStorage.getItem('limitless_bot_trade_history');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [];
+  });
   const [isExecuting, setIsExecuting] = useState<boolean>(false);
-  const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(false); // Completely muted by default per user request
   const [lastSignalTime, setLastSignalTime] = useState<number | null>(null);
 
   // References for live closures
@@ -142,6 +156,7 @@ export function useTradingBot() {
   const currentBalanceRef = useRef<number>(currentBalance);
   const isExecutingRef = useRef<boolean>(false);
   const lastExecutedCandleTimeRef = useRef<number>(0);
+  const activeLimitlessMarketRef = useRef<LimitlessMarketDetails | null>(null);
 
   configRef.current = config;
   botActiveRef.current = botActive;
@@ -257,11 +272,25 @@ export function useTradingBot() {
     if (result.length > 0) {
       const latest = result[result.length - 1];
       setCurrentZScore(latest.zScore);
+
+      // Synchronize armed states with recent candles
+      if (hadArmedUpper) {
+        crossedUpperThresholdRef.current = true;
+        setCrossedUpperThreshold(true);
+      }
+      if (hadArmedLower) {
+        crossedLowerThresholdRef.current = true;
+        setCrossedLowerThreshold(true);
+      }
     }
   }, []);
 
-  // Execute LIVE Trade strictly across Limitless WebSocket
-  const executeLiveTrade = useCallback(async (triggerZ: number, direction: 'SHORT' | 'LONG' = 'SHORT') => {
+  // Execute LIVE Trade strictly across Limitless
+  const executeLiveTrade = useCallback(async (
+    triggerZ: number,
+    direction: 'SHORT' | 'LONG' = 'SHORT',
+    candleTime?: number
+  ) => {
     const cfg = configRef.current;
     const balance = currentBalanceRef.current;
 
@@ -272,8 +301,17 @@ export function useTradingBot() {
       fractionChunks: cfg.fractionChunks,
     });
 
-    if (kelly.numberOfContracts <= 0) {
-      console.warn('Live trade aborted: Calculated contract size is 0.');
+    const effectiveContracts = kelly.numberOfContracts;
+
+    if (effectiveContracts <= 0) {
+      const warnMsg = `⚠️ تعذر إرسال الصفقة: رصيد المحفظة الحالي (${balance.toFixed(2)} USDC) غير كافٍ لشراء عقد واحد بسعر ${cfg.maxPriceCents}$ (الحد الأدنى المطلوب وفق إدارة المخاطر 5% هو ${(cfg.maxPriceCents / 0.05).toFixed(2)}$ USDC). يرجى شحن المحفظة بـ USDC على شبكة Base للمتابعة.`;
+      console.warn(warnMsg);
+      limitlessService.logDirect('SYSTEM', warnMsg);
+      setExecutionNotice({
+        type: 'WARNING',
+        message: warnMsg,
+        timestamp: Date.now(),
+      });
       return;
     }
 
@@ -283,14 +321,14 @@ export function useTradingBot() {
     setActiveSignal(direction === 'LONG' ? 'ENTRY_LONG' : 'ENTRY_SHORT');
     setLastTradeDirection(direction);
     setLastSignalTime(Date.now());
-    soundController.playEntrySignal();
 
-    // Determine target 15-minute market slug
+    // Determine target 15-minute market slug using latest live ref
+    const currentMarket = activeLimitlessMarketRef.current;
     const resolvedMarketSlug =
-      activeLimitlessMarket?.slug && activeLimitlessMarket.slug.includes('15-min')
-        ? activeLimitlessMarket.slug
-        : config.limitlessMarketSlug && config.limitlessMarketSlug.includes('15-min')
-        ? config.limitlessMarketSlug
+      currentMarket?.slug && currentMarket.slug.includes('15-min')
+        ? currentMarket.slug
+        : cfg.limitlessMarketSlug && cfg.limitlessMarketSlug.includes('15-min')
+        ? cfg.limitlessMarketSlug
         : 'btc-up-or-down-15-min';
 
     // Strict Safety Guard: NEVER trade 5-minute contracts
@@ -314,8 +352,8 @@ export function useTradingBot() {
       outcome,
       triggerZScore: triggerZ,
       contractPrice: cfg.maxPriceCents,
-      totalContracts: kelly.numberOfContracts,
-      totalInvestmentUsd: kelly.numberOfContracts * cfg.maxPriceCents,
+      totalContracts: effectiveContracts,
+      totalInvestmentUsd: effectiveContracts * cfg.maxPriceCents,
       kellyRiskPct: kelly.riskToTake,
       chunks: [],
       status: 'PENDING_WS',
@@ -325,13 +363,18 @@ export function useTradingBot() {
 
     try {
       console.log(
-        `[LIVE EXECUTION - ${direction}] Sending ${kelly.numberOfContracts} contracts in ${cfg.fractionChunks} chunks to Limitless (${resolvedMarketSlug} - ${outcome} / ${
+        `[LIVE EXECUTION - ${direction}] Sending ${effectiveContracts} contracts in ${cfg.fractionChunks} chunks to Limitless (${resolvedMarketSlug} - ${outcome} / ${
           direction === 'LONG' ? 'BUY UP/YES' : 'BUY DOWN/NO'
         })...`
       );
 
+      limitlessService.logDirect(
+        'OUTGOING',
+        `🚀 [بدء تنفيذ صفقة] إرسال ${effectiveContracts} عقود ${outcome} (${direction}) بسعر ${cfg.maxPriceCents}$ إلى سوق ${resolvedMarketSlug}...`
+      );
+
       const executed = await limitlessService.executeChunkedOrder(
-        kelly.numberOfContracts,
+        effectiveContracts,
         cfg.maxPriceCents,
         cfg.fractionChunks,
         cfg.orderType,
@@ -353,13 +396,40 @@ export function useTradingBot() {
       };
 
       setActiveTrade(completedTrade);
-      setTradeHistory((prev) => [completedTrade, ...prev]);
+      setTradeHistory((prev) => {
+        const next = [completedTrade, ...prev];
+        try {
+          localStorage.setItem('limitless_bot_trade_history', JSON.stringify(next.slice(0, 100)));
+        } catch {}
+        return next;
+      });
 
-      // Deduct invested funds pending exchange settlement
-      setCurrentBalance((prev) => Math.max(0, prev - completedTrade.totalInvestmentUsd));
-    } catch (err) {
+      if (candleTime) {
+        lastExecutedCandleTimeRef.current = candleTime;
+      }
+
+      // Deduct invested funds
+      const invested = completedTrade.totalInvestmentUsd;
+      setCurrentBalance((prev) => Math.max(0, prev - invested));
+      currentBalanceRef.current = Math.max(0, currentBalanceRef.current - invested);
+
+      const successNotice = `✅ تم إرسال الصفقة بنجاح: شراء ${outcome} (${direction}) لعدد ${effectiveContracts} عقد بقيمة $${invested.toFixed(2)} على سوق ${resolvedMarketSlug}`;
+      limitlessService.logDirect('SYSTEM', successNotice);
+      setExecutionNotice({
+        type: 'SUCCESS',
+        message: successNotice,
+        timestamp: Date.now(),
+      });
+    } catch (err: any) {
       console.error('[LIVE ORDER ERROR] Failed to transmit chunks:', err);
+      const errMsg = err?.message || String(err);
+      limitlessService.logDirect('SYSTEM', `❌ فشل تنفيذ الصفقة: ${errMsg}`);
       setActiveTrade((prev) => (prev ? { ...prev, status: 'REJECTED' } : null));
+      setExecutionNotice({
+        type: 'ERROR',
+        message: `فشل تنفيذ الصفقة: ${errMsg}`,
+        timestamp: Date.now(),
+      });
     } finally {
       isExecutingRef.current = false;
       setIsExecuting(false);
@@ -374,7 +444,7 @@ export function useTradingBot() {
   const evaluateLiveStrategy = useCallback(
     (prices: number[], candleTime?: number) => {
       const cfg = configRef.current;
-      if (!botActiveRef.current || prices.length < cfg.periods) return;
+      if (prices.length < cfg.periods) return;
 
       const lowerThresh = cfg.zScoreLower !== undefined ? cfg.zScoreLower : -cfg.zScoreUpper;
       const lowerEntryThresh = cfg.zScoreLowerEntry !== undefined ? cfg.zScoreLowerEntry : -cfg.zScoreEntry;
@@ -389,21 +459,33 @@ export function useTradingBot() {
           if (!crossedUpperThresholdRef.current) {
             crossedUpperThresholdRef.current = true;
             setCrossedUpperThreshold(true);
-            soundController.playAlert();
-            console.log(`⚠️ Live Z-Score crossed above +${cfg.zScoreUpper}σ (${zScore.toFixed(2)}σ). Bot is ARMED for BEARISH REVERSION (SHORT/DOWN).`);
+            const armMsg = `⚠️ [تأهب هبوط] قيمة Z-Score ارتفعت فوق +${cfg.zScoreUpper}σ (${zScore.toFixed(2)}σ) - الروبوت متأهب لشراء DOWN عند الارتداد.`;
+            console.log(armMsg);
+            limitlessService.logDirect('SYSTEM', armMsg);
           }
         }
 
         // Trigger Short: Reversion back below or equal to entry threshold in the same candle
         if (crossedUpperThresholdRef.current && zScore <= cfg.zScoreEntry) {
+          if (!botActiveRef.current) {
+            // Bot is stopped: warn user why trade was not executed
+            const pauseWarn = `⚠️ تحققت إشارة ارتداد هبوط (Z=${zScore.toFixed(2)}σ) ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
+            console.warn(pauseWarn);
+            limitlessService.logDirect('SYSTEM', pauseWarn);
+            setExecutionNotice({
+              type: 'WARNING',
+              message: pauseWarn,
+              timestamp: Date.now(),
+              action: 'START_BOT',
+            });
+            return;
+          }
+
           if (!isExecutingRef.current && (!candleTime || lastExecutedCandleTimeRef.current !== candleTime)) {
             console.log(`🎯 INSTANT LIVE SHORT ENTRY! Z-Score reverted below +${cfg.zScoreEntry}σ (${zScore.toFixed(2)}σ) in the SAME candle. Executing BEARISH REVERSION order!`);
             crossedUpperThresholdRef.current = false;
             setCrossedUpperThreshold(false);
-            if (candleTime) {
-              lastExecutedCandleTimeRef.current = candleTime;
-            }
-            executeLiveTrade(zScore, 'SHORT');
+            executeLiveTrade(zScore, 'SHORT', candleTime);
           }
         }
       }
@@ -415,21 +497,33 @@ export function useTradingBot() {
           if (!crossedLowerThresholdRef.current) {
             crossedLowerThresholdRef.current = true;
             setCrossedLowerThreshold(true);
-            soundController.playAlert();
-            console.log(`⚠️ Live Z-Score dropped below ${lowerThresh}σ (${zScore.toFixed(2)}σ). Bot is ARMED for BULLISH REVERSION (LONG/UP).`);
+            const armMsg = `⚠️ [تأهب صعود] قيمة Z-Score هبطت تحت ${lowerThresh}σ (${zScore.toFixed(2)}σ) - الروبوت متأهب لشراء UP عند الارتداد.`;
+            console.log(armMsg);
+            limitlessService.logDirect('SYSTEM', armMsg);
           }
         }
 
         // Trigger Long: Rebound back above or equal to lower entry threshold in the same candle
         if (crossedLowerThresholdRef.current && zScore >= lowerEntryThresh) {
+          if (!botActiveRef.current) {
+            // Bot is stopped: warn user why trade was not executed
+            const pauseWarn = `⚠️ تحققت إشارة ارتداد صعود (Z=${zScore.toFixed(2)}σ) ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
+            console.warn(pauseWarn);
+            limitlessService.logDirect('SYSTEM', pauseWarn);
+            setExecutionNotice({
+              type: 'WARNING',
+              message: pauseWarn,
+              timestamp: Date.now(),
+              action: 'START_BOT',
+            });
+            return;
+          }
+
           if (!isExecutingRef.current && (!candleTime || lastExecutedCandleTimeRef.current !== candleTime)) {
             console.log(`🎯 INSTANT LIVE LONG ENTRY! Z-Score bounced above ${lowerEntryThresh}σ (${zScore.toFixed(2)}σ) in the SAME candle. Executing BULLISH REVERSION order!`);
             crossedLowerThresholdRef.current = false;
             setCrossedLowerThreshold(false);
-            if (candleTime) {
-              lastExecutedCandleTimeRef.current = candleTime;
-            }
-            executeLiveTrade(zScore, 'LONG');
+            executeLiveTrade(zScore, 'LONG', candleTime);
           }
         }
       }
@@ -562,6 +656,7 @@ export function useTradingBot() {
           !/(^|[^0-9])5-min/i.test(data.slug)
         ) {
           setActiveLimitlessMarket(data);
+          activeLimitlessMarketRef.current = data;
           setConfig((prev) => {
             if (prev.limitlessMarketSlug !== data.slug) {
               const updated = { ...prev, limitlessMarketSlug: data.slug };
@@ -589,7 +684,9 @@ export function useTradingBot() {
       const data = await res.json();
       if (data && data.success && data.isLive) {
         setIsLiveBalance(true);
+        setLiveUsdcBalance(data.usdcBalance);
         setCurrentBalance(data.usdcBalance);
+        currentBalanceRef.current = data.usdcBalance;
         setLiveWallet({
           isLive: true,
           address: data.address,
@@ -662,9 +759,6 @@ export function useTradingBot() {
       } catch {
         // Safe localStorage
       }
-      if (next) {
-        soundController.playAlert();
-      }
       return next;
     });
   };
@@ -697,6 +791,9 @@ export function useTradingBot() {
     activeSignal,
     isEntrySignal,
     currentBalance,
+    liveUsdcBalance,
+    executionNotice,
+    setExecutionNotice,
     isLiveBalance,
     liveWallet,
     isFetchingBalance,

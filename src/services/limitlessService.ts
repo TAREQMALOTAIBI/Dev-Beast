@@ -136,7 +136,7 @@ export class LimitlessService {
     }
   }
 
-  private log(direction: 'INCOMING' | 'OUTGOING' | 'SYSTEM', data: Record<string, unknown> | string) {
+  public log(direction: 'INCOMING' | 'OUTGOING' | 'SYSTEM', data: Record<string, unknown> | string) {
     const entry: WsMessageLog = {
       id: Math.random().toString(36).substring(2, 9),
       channel: 'LIMITLESS',
@@ -145,6 +145,10 @@ export class LimitlessService {
       data,
     };
     this.logListeners.forEach((l) => l(entry));
+  }
+
+  public logDirect(direction: 'INCOMING' | 'OUTGOING' | 'SYSTEM', data: Record<string, unknown> | string) {
+    this.log(direction, data);
   }
 
   /**
@@ -411,9 +415,7 @@ export class LimitlessService {
     targetMarketSlug?: string
   ): Promise<ExecutedChunk[]> {
     if (this.status !== 'CONNECTED' && this.status !== 'AUTHENTICATED') {
-      const errorMsg = 'Cannot place live order: Limitless WebSocket is not connected.';
-      this.log('SYSTEM', `[ORDER ABORTED] ${errorMsg}`);
-      throw new Error(errorMsg);
+      this.log('SYSTEM', `[ORDER DISPATCH] WebSocket status is ${this.status}. Transmitting order via Limitless HTTP REST order execution proxy...`);
     }
 
     const resolvedSlug = (targetMarketSlug || this.activeMarketSlug || 'btc-up-or-down-15-min').trim();
