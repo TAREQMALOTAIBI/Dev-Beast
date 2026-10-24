@@ -33,7 +33,7 @@ const DEFAULT_CONFIG: BotConfig = {
   binanceRestUrl: 'https://api.binance.com/api/v3/klines',
   binanceWsUrl: 'wss://stream.binance.com/ws/btcusdt@kline_15m',
   limitlessWsUrl: 'wss://ws.limitless.exchange',
-  limitlessMarketSlug: 'btc-100k-weekly',
+  limitlessMarketSlug: 'btc-up-or-down-15-min',
   limitlessApiKey: (typeof process !== 'undefined' && process.env?.LIMITLESS_API_KEY) || '',
   limitlessTokenId: (typeof process !== 'undefined' && process.env?.LMTS_TOKEN_ID) || '',
   limitlessTokenSecret: (typeof process !== 'undefined' && process.env?.LMTS_TOKEN_SECRET) || '',
@@ -54,6 +54,14 @@ export function useTradingBot() {
         }
         if (parsed.limitlessWsUrl && parsed.limitlessWsUrl.includes('api.limitless.exchange')) {
           parsed.limitlessWsUrl = DEFAULT_CONFIG.limitlessWsUrl;
+        }
+        // Force migration away from 5-min or weekly markets to 15-min
+        if (
+          !parsed.limitlessMarketSlug ||
+          /(^|[^0-9])5-min/i.test(parsed.limitlessMarketSlug) ||
+          parsed.limitlessMarketSlug.includes('weekly')
+        ) {
+          parsed.limitlessMarketSlug = DEFAULT_CONFIG.limitlessMarketSlug;
         }
         if (!parsed.strategyDirection) {
           parsed.strategyDirection = 'BOTH';
@@ -277,13 +285,31 @@ export function useTradingBot() {
     setLastSignalTime(Date.now());
     soundController.playEntrySignal();
 
+    // Determine target 15-minute market slug
+    const resolvedMarketSlug =
+      activeLimitlessMarket?.slug && activeLimitlessMarket.slug.includes('15-min')
+        ? activeLimitlessMarket.slug
+        : config.limitlessMarketSlug && config.limitlessMarketSlug.includes('15-min')
+        ? config.limitlessMarketSlug
+        : 'btc-up-or-down-15-min';
+
+    // Strict Safety Guard: NEVER trade 5-minute contracts
+    if (/(^|[^0-9])5-min/i.test(resolvedMarketSlug)) {
+      console.error(
+        `[SAFETY SHIELD] 5-Minute contract '${resolvedMarketSlug}' blocked! Trading bot is locked strictly to 15-minute contracts.`
+      );
+      isExecutingRef.current = false;
+      setIsExecuting(false);
+      return;
+    }
+
     const outcome = direction === 'LONG' ? 'UP' : 'DOWN';
     const tradeId = `live_trd_${Date.now()}`;
     const initialTrade: TradeOrder = {
       id: tradeId,
       timestamp: Date.now(),
       symbol: cfg.symbol,
-      market: `${cfg.symbol.replace('USDT', '')}_${cfg.timeframe.toUpperCase()}_PREDICTION`,
+      market: resolvedMarketSlug,
       direction,
       outcome,
       triggerZScore: triggerZ,
@@ -298,8 +324,12 @@ export function useTradingBot() {
     setActiveTrade(initialTrade);
 
     try {
-      console.log(`[LIVE EXECUTION - ${direction}] Sending ${kelly.numberOfContracts} contracts in ${cfg.fractionChunks} chunks to Limitless (${outcome} / ${direction === 'LONG' ? 'BUY UP/YES' : 'BUY DOWN/NO'})...`);
-      
+      console.log(
+        `[LIVE EXECUTION - ${direction}] Sending ${kelly.numberOfContracts} contracts in ${cfg.fractionChunks} chunks to Limitless (${resolvedMarketSlug} - ${outcome} / ${
+          direction === 'LONG' ? 'BUY UP/YES' : 'BUY DOWN/NO'
+        })...`
+      );
+
       const executed = await limitlessService.executeChunkedOrder(
         kelly.numberOfContracts,
         cfg.maxPriceCents,
@@ -312,7 +342,8 @@ export function useTradingBot() {
             return [...filtered, updatedChunk].sort((a, b) => a.chunkId - b.chunkId);
           });
         },
-        direction
+        direction,
+        resolvedMarketSlug
       );
 
       const completedTrade: TradeOrder = {
@@ -517,7 +548,13 @@ export function useTradingBot() {
       const res = await fetch('/api/limitless/active-btc');
       if (res.ok) {
         const data = await res.json();
-        if (data && data.success && data.slug) {
+        if (
+          data &&
+          data.success &&
+          data.slug &&
+          (/(^|[^0-9])15-min/i.test(data.slug) || /15\s*min/i.test(data.title || '')) &&
+          !/(^|[^0-9])5-min/i.test(data.slug)
+        ) {
           setActiveLimitlessMarket(data);
           setConfig((prev) => {
             if (prev.limitlessMarketSlug !== data.slug) {

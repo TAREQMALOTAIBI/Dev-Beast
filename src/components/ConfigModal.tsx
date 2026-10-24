@@ -152,15 +152,18 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-slate-400 mb-1">
-                  {isAr ? 'رمز سوق التوقع (Market Slug):' : 'Prediction Market Slug:'}
+                  {isAr ? 'رمز سوق التوقع (15 دقيقة حصراً):' : 'Prediction Market Slug (15m Only):'}
                 </label>
                 <input
                   type="text"
-                  placeholder="btc-100k-weekly"
+                  placeholder="btc-up-or-down-15-min"
                   value={draft.limitlessMarketSlug}
                   onChange={(e) => setDraft({ ...draft, limitlessMarketSlug: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono text-xs"
                 />
+                <span className="text-[10px] text-emerald-400 mt-1 block">
+                  {isAr ? '✓ مؤمّن: عقود 5 دقائق محظورة تماماً لحماية صفقاتك' : '✓ Secured: 5-minute contracts are strictly prohibited'}
+                </span>
               </div>
 
               <div>

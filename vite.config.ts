@@ -88,8 +88,42 @@ let cachedActiveBtc: any = null;
 let lastBtcFetchTime = 0;
 
 // ============================================================================
-// Limitless WebSocket Streaming Manager (Official TypeScript SDK)
+// Limitless 15-Minute Strict Market Filter (Guarantees only 15m contracts)
 // ============================================================================
+function is15MinBtcMarket(m: any): boolean {
+  if (!m) return false;
+  const slug = (m.slug || '').toLowerCase();
+  const title = (m.title || '').toLowerCase();
+
+  // Must be Bitcoin
+  const isBtc = slug.includes('btc') || title.includes('btc') || title.includes('bitcoin');
+  if (!isBtc) return false;
+
+  // Must strictly be 15-minute
+  const is15 = /(^|[^0-9])15-min/i.test(slug) || /15\s*min/i.test(title) || /(^|[^0-9])15m/i.test(slug);
+  // Strictly reject 5-minute (use boundary so "15-min" does not match "5-min")
+  const is5 = /(^|[^0-9])5-min/i.test(slug) || /(^|[^0-9])5\s*min/i.test(title);
+
+  if (slug.includes('hourly') || slug.includes('daily')) {
+    return false;
+  }
+
+  return is15 && !is5;
+}
+
+async function fetchLive15MinBtcMarket(): Promise<any> {
+  try {
+    const res = await fetch('https://api.limitless.exchange/markets/active');
+    if (!res.ok) return null;
+    const json = await res.json();
+    const list = json?.data || [];
+    const btc15 = list.find((m: any) => is15MinBtcMarket(m));
+    return btc15 || null;
+  } catch {
+    return null;
+  }
+}
+
 let limitlessWsInstance: any = null;
 let currentWsStatus: string = 'DISCONNECTED';
 let latestOrderbookData: any = null;
@@ -137,29 +171,33 @@ async function initLimitlessSdkWebSocket() {
       broadcastSse('status', { status: currentWsStatus });
 
       try {
-        if (!cachedActiveBtc) {
-          const res = await fetch('https://api.limitless.exchange/markets/active');
-          if (res.ok) {
-            const json = await res.json();
-            const list = json?.data || [];
-            const btc = list.find((m: any) => m.slug?.toLowerCase().includes('btc') && m.slug?.includes('15-min')) ||
-                        list.find((m: any) => m.slug?.toLowerCase().includes('btc'));
-            if (btc) {
-              cachedActiveBtc = {
-                slug: btc.slug,
-                title: btc.title,
-                status: btc.status,
-                prices: btc.prices,
-                address: btc.address,
-              };
-            }
+        if (!cachedActiveBtc || !is15MinBtcMarket(cachedActiveBtc)) {
+          const btc15 = await fetchLive15MinBtcMarket();
+          if (btc15) {
+            cachedActiveBtc = {
+              slug: btc15.slug,
+              title: btc15.title,
+              status: btc15.status,
+              prices: btc15.prices,
+              tradePrices: btc15.tradePrices,
+              address: btc15.address,
+              expirationTimestamp: btc15.expirationTimestamp,
+              startAt: btc15.startAt,
+              openPrice: btc15.metadata?.openPrice,
+              tokens: btc15.tokens,
+              venueExchange: btc15.venue?.exchange,
+              volumeFormatted: btc15.volumeFormatted,
+              oracleSource: btc15.priceOracleMetadata?.name || 'Chainlink BTC 60s TWAP',
+            };
           }
         }
       } catch {
         // safe continuation
       }
 
-      const activeSlug = cachedActiveBtc?.slug || 'btc-100k-weekly';
+      const activeSlug = cachedActiveBtc?.slug && is15MinBtcMarket(cachedActiveBtc)
+        ? cachedActiveBtc.slug
+        : 'btc-up-or-down-15-min';
       try {
         await ws.subscribe('subscribe_market_prices', {
           marketSlugs: [activeSlug],
@@ -274,7 +312,7 @@ function setupApiMiddlewares(middlewares: any) {
     res.setHeader('Content-Type', 'application/json');
     try {
       const now = Date.now();
-      if (cachedActiveBtc && now - lastBtcFetchTime < 15000) {
+      if (cachedActiveBtc && is15MinBtcMarket(cachedActiveBtc) && now - lastBtcFetchTime < 15000) {
         return res.end(JSON.stringify({ success: true, ...cachedActiveBtc }));
       }
 
@@ -282,40 +320,38 @@ function setupApiMiddlewares(middlewares: any) {
       const json = await response.json();
       const markets = json?.data || [];
 
-      const btcMarket =
-        markets.find((m: any) => m.slug?.toLowerCase().includes('btc') && m.slug?.includes('15-min')) ||
-        markets.find((m: any) => m.slug?.toLowerCase().includes('btc') && m.slug?.includes('5-min')) ||
-        markets.find((m: any) => m.slug?.toLowerCase().includes('btc'));
+      // STRICT FILTER: Only 15-minute BTC markets. Zero fallback to 5-min or other intervals.
+      const btc15Market = markets.find((m: any) => is15MinBtcMarket(m));
 
-      if (btcMarket) {
+      if (btc15Market) {
         const previousSlug = cachedActiveBtc?.slug;
         cachedActiveBtc = {
-          slug: btcMarket.slug,
-          title: btcMarket.title,
-          status: btcMarket.status,
-          prices: btcMarket.prices,
-          tradePrices: btcMarket.tradePrices,
-          address: btcMarket.address,
-          expirationTimestamp: btcMarket.expirationTimestamp,
-          startAt: btcMarket.startAt,
-          openPrice: btcMarket.metadata?.openPrice,
-          tokens: btcMarket.tokens,
-          venueExchange: btcMarket.venue?.exchange,
-          volumeFormatted: btcMarket.volumeFormatted,
-          oracleSource: btcMarket.priceOracleMetadata?.name || 'Chainlink BTC 60s TWAP',
+          slug: btc15Market.slug,
+          title: btc15Market.title,
+          status: btc15Market.status,
+          prices: btc15Market.prices,
+          tradePrices: btc15Market.tradePrices,
+          address: btc15Market.address,
+          expirationTimestamp: btc15Market.expirationTimestamp,
+          startAt: btc15Market.startAt,
+          openPrice: btc15Market.metadata?.openPrice,
+          tokens: btc15Market.tokens,
+          venueExchange: btc15Market.venue?.exchange,
+          volumeFormatted: btc15Market.volumeFormatted,
+          oracleSource: btc15Market.priceOracleMetadata?.name || 'Chainlink BTC 60s TWAP',
         };
         lastBtcFetchTime = now;
 
-        if (limitlessWsInstance && previousSlug !== btcMarket.slug) {
+        if (limitlessWsInstance && previousSlug !== btc15Market.slug) {
           limitlessWsInstance.subscribe('subscribe_market_prices', {
-            marketSlugs: [btcMarket.slug],
+            marketSlugs: [btc15Market.slug],
           }).catch(() => {});
         }
 
         return res.end(JSON.stringify({ success: true, ...cachedActiveBtc }));
       }
 
-      res.end(JSON.stringify({ success: false, message: 'No active BTC prediction market found' }));
+      res.end(JSON.stringify({ success: false, message: 'No active 15-minute BTC prediction market found' }));
     } catch (err) {
       res.statusCode = 500;
       res.end(JSON.stringify({ success: false, error: String(err) }));
@@ -340,25 +376,56 @@ function setupApiMiddlewares(middlewares: any) {
         const secret = process.env.LMTS_TOKEN_SECRET?.trim();
         const hasLiveAuth = Boolean(pk && tokenId && secret);
 
-        let activeMarketSlug = market || 'btc-100k-weekly';
+        let activeMarketSlug = (market || '').trim();
         let marketData: any = null;
-        try {
-          const mRes = await fetch(`https://api.limitless.exchange/markets/${encodeURIComponent(activeMarketSlug)}`);
-          if (mRes.ok) {
-            marketData = await mRes.json();
-          } else {
-            const activeRes = await fetch('https://api.limitless.exchange/markets/active');
-            if (activeRes.ok) {
-              const activeJson = await activeRes.json();
-              const list = activeJson?.data || [];
-              marketData = list.find((m: any) => m.slug?.toLowerCase().includes('btc')) || list[0];
-              if (marketData?.slug) {
-                activeMarketSlug = marketData.slug;
+
+        // ====================================================================
+        // STRICT SAFETY GUARD: 15-MINUTE BTC ONLY
+        // ====================================================================
+        // If incoming slug is not 15-min or is a 5-min contract, find the live 15-min market
+        if (!activeMarketSlug || !is15MinBtcMarket({ slug: activeMarketSlug })) {
+          const live15 = (cachedActiveBtc && is15MinBtcMarket(cachedActiveBtc))
+            ? cachedActiveBtc
+            : await fetchLive15MinBtcMarket();
+
+          if (!live15 || !is15MinBtcMarket(live15)) {
+            res.statusCode = 400;
+            return res.end(JSON.stringify({
+              success: false,
+              error: `Safety Guard Blocked: Market '${activeMarketSlug}' is not a 15-minute BTC contract, and no active 15-minute market was found. Order aborted.`,
+            }));
+          }
+
+          console.log(`[SAFETY SHIELD] Non-15m market '${activeMarketSlug}' intercepted. Redirected safely to active 15-minute market: '${live15.slug}'`);
+          activeMarketSlug = live15.slug;
+          marketData = live15;
+        }
+
+        // Fetch detailed market data if not already retrieved
+        if (!marketData?.tokens) {
+          try {
+            const mRes = await fetch(`https://api.limitless.exchange/markets/${encodeURIComponent(activeMarketSlug)}`);
+            if (mRes.ok) {
+              marketData = await mRes.json();
+            } else {
+              const live15 = await fetchLive15MinBtcMarket();
+              if (live15) {
+                marketData = live15;
+                activeMarketSlug = live15.slug;
               }
             }
+          } catch {
+            // fallback
           }
-        } catch {
-          // ignore
+        }
+
+        // Final verification before order construction
+        if (!is15MinBtcMarket({ slug: activeMarketSlug, title: marketData?.title })) {
+          res.statusCode = 400;
+          return res.end(JSON.stringify({
+            success: false,
+            error: `Safety Guard Violation: Market '${activeMarketSlug}' is not a 15-minute contract. All orders are strictly restricted to BTC Up or Down - 15 Min. Execution blocked.`,
+          }));
         }
 
         const venueExchange = marketData?.venue?.exchange || '0x05c748E2f4DcDe0ec9Fa8DDc40DE6b867f923fa5';

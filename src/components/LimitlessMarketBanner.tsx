@@ -116,7 +116,11 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
               <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
             </span>
             <span className="text-xs font-extrabold uppercase tracking-wider text-emerald-400 bg-emerald-950/80 px-2.5 py-0.5 rounded-full border border-emerald-500/40">
-              {isAr ? 'عقد Limitless النشط (15 دقيقة)' : 'Active Limitless Market (15 Min)'}
+              {isAr ? 'عقد Limitless الحصري (15 دقيقة فقط)' : 'Exclusive Limitless Market (15m Only)'}
+            </span>
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-300 bg-emerald-950/90 px-2 py-0.5 rounded-full border border-emerald-500/50">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{isAr ? 'حماية الـ 15 دقيقة (عقود 5 د محظورة)' : '15m Lock (5m Blocked)'}</span>
             </span>
           </div>
 
