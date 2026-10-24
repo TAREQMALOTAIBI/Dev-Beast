@@ -68,13 +68,14 @@ export function calculateZScore(
  * p: win probability (e.g. 0.55)
  * q: 1 - p (0.45)
  * kellyFraction: (b * p - q) / b
- * riskToTake: clamp between 0 and MAX_RISK_PERCENT
+ * riskToTake: clamp between 0 and 5% max risk (0.05 maximum limit)
+ * Unified single order execution (chunking eliminated)
  */
 export function calculateKellySizing(
   balance: number,
   config: Pick<BotConfig, 'maxPriceCents' | 'winProbability' | 'maxRiskPercent' | 'fractionChunks'>
 ): KellyMath {
-  const { maxPriceCents, winProbability, maxRiskPercent, fractionChunks } = config;
+  const { maxPriceCents, winProbability, maxRiskPercent } = config;
 
   // Safe bounds
   const price = Math.max(0.01, Math.min(0.99, maxPriceCents));
@@ -83,22 +84,19 @@ export function calculateKellySizing(
   const q = 1 - p;
 
   const kellyFraction = (b * p - q) / b;
-  const riskToTake = Math.min(Math.max(kellyFraction, 0), maxRiskPercent);
+  // Strict 5% maximum limit cap as requested by user
+  const effectiveMaxRisk = Math.min(maxRiskPercent > 0 ? maxRiskPercent : 0.05, 0.05);
+  const riskToTake = Math.min(Math.max(kellyFraction, 0), effectiveMaxRisk);
   const positionSizeUsd = balance * riskToTake;
 
-  // Fractional contract calculation: Allows purchasing partial/fractional contracts
-  // (e.g. 0.1, 0.25, 0.5, 1.25) preserving exact Kelly risk without forced minimum 1 contract
+  // Contract calculation: Exact contract count according to 5% max risk
   const numberOfContracts = positionSizeUsd > 0 && price > 0
     ? parseFloat((positionSizeUsd / price).toFixed(2))
     : 0;
 
-  const effectiveChunks = Math.max(1, fractionChunks || 1);
-  const chunkSize = effectiveChunks === 1
-    ? numberOfContracts
-    : parseFloat((numberOfContracts / effectiveChunks).toFixed(2));
-  const lastChunkSize = effectiveChunks === 1
-    ? numberOfContracts
-    : Math.max(0, parseFloat((numberOfContracts - chunkSize * (effectiveChunks - 1)).toFixed(2)));
+  // Single unified order execution (chunking completely eliminated)
+  const chunkSize = numberOfContracts;
+  const lastChunkSize = numberOfContracts;
 
   return {
     b,

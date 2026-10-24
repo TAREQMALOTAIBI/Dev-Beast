@@ -24,10 +24,10 @@ const DEFAULT_CONFIG: BotConfig = {
   zScoreLower: -2.0,
   zScoreLowerEntry: -1.9,
   maxPriceCents: 0.2, // 20 cents and below
-  maxRiskPercent: 0.05,
+  maxRiskPercent: 0.05, // Strictly capped at 5% maximum
   orderType: 'FAK', // Fill-And-Kill
-  fractionChunks: 1, // 1 instant single order for FAK execution
-  chunkDelayMs: 500,
+  fractionChunks: 1, // 1 unified single direct order (chunking eliminated)
+  chunkDelayMs: 0,
   winProbability: 0.55,
   initialBalance: 1000,
   binanceRestUrl: 'https://api.binance.com/api/v3/klines',
@@ -72,16 +72,19 @@ export function useTradingBot() {
         if (parsed.zScoreLowerEntry === undefined) {
           parsed.zScoreLowerEntry = -1.9;
         }
-        // Migrate orderType to FAK and fractionChunks to 1
+        // Force orderType to FAK
         if (!parsed.orderType || parsed.orderType === 'GTC') {
           parsed.orderType = 'FAK';
         }
         if (parsed.maxPriceCents === undefined || parsed.maxPriceCents > 0.2) {
           parsed.maxPriceCents = 0.2;
         }
-        if (parsed.fractionChunks === 4 || !parsed.fractionChunks) {
-          parsed.fractionChunks = 1;
-        }
+        // Strictly eliminate chunking: set to 1 instant single order
+        parsed.fractionChunks = 1;
+        parsed.chunkDelayMs = 0;
+        // Strictly cap maxRiskPercent at 5% (0.05)
+        parsed.maxRiskPercent = 0.05;
+
         // Auto-inject env secrets if persisted config has empty credentials
         if (!parsed.limitlessTokenId && DEFAULT_CONFIG.limitlessTokenId) {
           parsed.limitlessTokenId = DEFAULT_CONFIG.limitlessTokenId;
@@ -374,22 +377,22 @@ export function useTradingBot() {
 
     try {
       console.log(
-        `[LIVE EXECUTION - ${direction}] Sending ${effectiveContracts} contracts in ${cfg.fractionChunks} chunks to Limitless (${resolvedMarketSlug} - ${outcome} / ${
+        `[LIVE DIRECT EXECUTION - ${direction}] Sending unified order of ${effectiveContracts} contracts to Limitless (${resolvedMarketSlug} - ${outcome} / ${
           direction === 'LONG' ? 'BUY UP/YES' : 'BUY DOWN/NO'
-        })...`
+        }) [5% Max Risk - No Chunking]...`
       );
 
       limitlessService.logDirect(
         'OUTGOING',
-        `🚀 [بدء تنفيذ صفقة] إرسال ${effectiveContracts} عقود ${outcome} (${direction}) بسعر ${cfg.maxPriceCents}$ إلى سوق ${resolvedMarketSlug}...`
+        `🚀 [تنفيذ صفقة مباشرة] إرسال أمر موحد لعدد ${effectiveContracts} عقود ${outcome} (${direction}) بسعر ${cfg.maxPriceCents}$ إلى سوق ${resolvedMarketSlug} (سقف مخاطرة 5% كحد أقصى دون تجزئة)...`
       );
 
       const executed = await limitlessService.executeChunkedOrder(
         effectiveContracts,
         cfg.maxPriceCents,
-        cfg.fractionChunks,
+        1,
         cfg.orderType,
-        cfg.chunkDelayMs,
+        0,
         (updatedChunk) => {
           setCurrentChunks((prev) => {
             const filtered = prev.filter((c) => c.chunkId !== updatedChunk.chunkId);
@@ -430,7 +433,7 @@ export function useTradingBot() {
       setCurrentBalance((prev) => Math.max(0, prev - invested));
       currentBalanceRef.current = Math.max(0, currentBalanceRef.current - invested);
 
-      const successNotice = `✅ تم إرسال الصفقة بنجاح: شراء ${outcome} (${direction}) لعدد ${effectiveContracts} عقد بقيمة $${invested.toFixed(2)} على سوق ${resolvedMarketSlug}`;
+      const successNotice = `✅ تم إرسال الصفقة بنجاح: أمر موحد لشراء ${outcome} (${direction}) لعدد ${effectiveContracts} عقد بقيمة $${invested.toFixed(2)} (سقف مخاطرة 5% دون تجزئة) على سوق ${resolvedMarketSlug}`;
       limitlessService.logDirect('SYSTEM', successNotice);
       setExecutionNotice({
         type: 'SUCCESS',
@@ -438,7 +441,7 @@ export function useTradingBot() {
         timestamp: Date.now(),
       });
     } catch (err: any) {
-      console.error('[LIVE ORDER ERROR] Failed to transmit chunks:', err);
+      console.error('[LIVE ORDER ERROR] Failed to transmit direct order:', err);
       const errMsg = err?.message || String(err);
       limitlessService.logDirect('SYSTEM', `❌ فشل تنفيذ الصفقة: ${errMsg}`);
       setActiveTrade((prev) => (prev ? { ...prev, status: 'REJECTED' } : null));

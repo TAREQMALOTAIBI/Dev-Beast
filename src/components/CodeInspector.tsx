@@ -39,10 +39,9 @@ const CONFIG = {
     Z_SCORE_LOWER: ${(config.zScoreLower ?? -2.0).toFixed(2)},
     Z_SCORE_LOWER_ENTRY: ${(config.zScoreLowerEntry ?? -1.9).toFixed(2)},
     MAX_PRICE_CENTS: ${config.maxPriceCents.toFixed(2)}, // أقصى سعر للدخول (${Math.round(config.maxPriceCents * 100)} سنت)
-    MAX_RISK_PERCENT: ${config.maxRiskPercent.toFixed(2)}, // الحد الأقصى للمخاطرة ${(config.maxRiskPercent * 100).toFixed(0)}%
+    MAX_RISK_PERCENT: 0.05, // الحد الأقصى للمخاطرة 5% كحد أقصى لحماية رأس المال
     ORDER_TYPE: '${config.orderType}',
-    FRACTION_CHUNKS: ${config.fractionChunks}, // عدد الأجزاء لتجزئة العقد
-    CHUNK_DELAY_MS: ${config.chunkDelayMs},
+    EXECUTION_MODE: 'DIRECT_UNIFIED', // أمر موحد مباشر (تم إلغاء التجزئة)
     
     // عناوين البيانات الحية الرسمية
     BINANCE_REST_URL: '${config.binanceRestUrl}', 
@@ -334,7 +333,7 @@ class LimitlessTradingBot {
     }
 
     // ==========================================
-    // 8. تنفيذ وتوقيع الأوامر (EIP-712 Order Signing & Chunking)
+    // 8. تنفيذ وتوقيع الأوامر (Direct EIP-712 Order Execution - No Chunking)
     // ==========================================
     private async executeTrade(direction: 'SHORT' | 'LONG' = 'SHORT') {
         const totalInvestment = this.calculatePositionSize();
@@ -346,59 +345,47 @@ class LimitlessTradingBot {
         }
 
         const outcome = direction === 'LONG' ? 'UP' : 'DOWN';
-        console.log(\`🛒 Preparing to execute \${numberOfContracts} contracts for \${outcome} (\${direction}) via EIP-712 Signing...\`);
+        console.log(\`🛒 Executing \${numberOfContracts} contracts for \${outcome} (\${direction}) via Direct EIP-712 Signing [5% Max Risk - No Chunking]...\`);
 
-        const chunkSize = Math.floor(numberOfContracts / CONFIG.FRACTION_CHUNKS);
-        let remainingContracts = numberOfContracts;
+        try {
+            // توقيع وتنفيذ العقد كاملاً دفعة واحدة وفق معيار EIP-712 دون أي تجزئة
+            if (this.orderClient) {
+                const marketFetcher = new MarketFetcher(this.httpClient!);
+                const market = await marketFetcher.getMarket(CONFIG.LIMITLESS_MARKET_SLUG);
+                const tokenId = direction === 'LONG' ? market.tokens?.yes : market.tokens?.no;
 
-        for (let i = 0; i < CONFIG.FRACTION_CHUNKS; i++) {
-            const contractsToBuy = (i === CONFIG.FRACTION_CHUNKS - 1) ? remainingContracts : chunkSize;
-            remainingContracts -= contractsToBuy;
-            if (contractsToBuy <= 0) continue;
-
-            const chunkIndex = i + 1;
-            setTimeout(async () => {
-                try {
-                    // في حال توفر OrderClient والمحفظة، يتم توقيع العقد فورياً وفق معيار EIP-712
-                    if (this.orderClient) {
-                        const marketFetcher = new MarketFetcher(this.httpClient!);
-                        const market = await marketFetcher.getMarket(CONFIG.LIMITLESS_MARKET_SLUG);
-                        const tokenId = direction === 'LONG' ? market.tokens?.yes : market.tokens?.no;
-
-                        if (tokenId) {
-                            const signedOrder = await this.orderClient.createOrder({
-                                marketSlug: CONFIG.LIMITLESS_MARKET_SLUG,
-                                tokenId: String(tokenId),
-                                side: Side.BUY,
-                                orderType: CONFIG.ORDER_TYPE === 'GTC' ? OrderType.GTC : OrderType.FAK,
-                                price: CONFIG.MAX_PRICE_CENTS,
-                                size: contractsToBuy
-                            });
-                            console.log(\`✅ Chunk \${chunkIndex}/\${CONFIG.FRACTION_CHUNKS} EIP-712 Order Executed! ID: \${signedOrder.id}\`);
-                            return;
-                        }
-                    }
-
-                    // بث أمر التجزئة المباشر عبر WebSocket
-                    const orderPayload = {
-                        action: 'PLACE_ORDER',
-                        market: CONFIG.LIMITLESS_MARKET_SLUG,
-                        side: 'BUY',
-                        direction,
-                        outcome,
-                        type: CONFIG.ORDER_TYPE,
+                if (tokenId) {
+                    const signedOrder = await this.orderClient.createOrder({
+                        marketSlug: CONFIG.LIMITLESS_MARKET_SLUG,
+                        tokenId: String(tokenId),
+                        side: Side.BUY,
+                        orderType: CONFIG.ORDER_TYPE === 'GTC' ? OrderType.GTC : OrderType.FAK,
                         price: CONFIG.MAX_PRICE_CENTS,
-                        size: contractsToBuy,
-                        chunkId: chunkIndex
-                    };
-                    if ((this.limitlessWs as any).socket) {
-                        (this.limitlessWs as any).socket.emit('order', orderPayload);
-                    }
-                    console.log(\`🚀 Chunk \${chunkIndex}/\${CONFIG.FRACTION_CHUNKS} [\${direction}] dispatched via stream: \${contractsToBuy} contracts\`);
-                } catch (err: any) {
-                    console.error(\`❌ Chunk \${chunkIndex} failed:\`, err.message);
+                        size: numberOfContracts
+                    });
+                    console.log(\`✅ Direct Unified Order Executed! ID: \${signedOrder.id}\`);
+                    return;
                 }
-            }, i * CONFIG.CHUNK_DELAY_MS);
+            }
+
+            // بث الأمر المباشر الموحد
+            const orderPayload = {
+                action: 'PLACE_ORDER',
+                market: CONFIG.LIMITLESS_MARKET_SLUG,
+                side: 'BUY',
+                direction,
+                outcome,
+                type: CONFIG.ORDER_TYPE,
+                price: CONFIG.MAX_PRICE_CENTS,
+                size: numberOfContracts,
+                chunkId: 1
+            };
+            if ((this.limitlessWs as any).socket) {
+                (this.limitlessWs as any).socket.emit('order', orderPayload);
+                console.log(\`🚀 Direct Order dispatched via stream: \${numberOfContracts} contracts @ $\${CONFIG.MAX_PRICE_CENTS}\`);
+            }
+        } catch (err: any) {
+            console.error('❌ Order execution failed:', err.message);
         }
     }
 }

@@ -415,9 +415,9 @@ export default function App() {
                       </span>
                     </div>
                     <div className="flex justify-between text-slate-400">
-                      <span>{isAr ? 'تجزئة الأوامر (4 أجزاء):' : 'Chunk Split:'}</span>
-                      <span className="text-purple-400">
-                        3 × {kelly.chunkSize} + 1 × {kelly.lastChunkSize} contracts
+                      <span>{isAr ? 'نمط التنفيذ المعتمد:' : 'Execution Mode:'}</span>
+                      <span className="text-emerald-400 font-bold">
+                        {isAr ? 'أمر موحد مباشر (بدون تجزئة)' : 'Direct Order (No Chunks)'}
                       </span>
                     </div>
                     <div className="flex justify-between items-center text-slate-400 pt-1.5 border-t border-slate-800/80 text-[11px]">

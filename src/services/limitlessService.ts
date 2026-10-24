@@ -429,84 +429,67 @@ export class LimitlessService {
     }
 
     const executedChunks: ExecutedChunk[] = [];
-    const effectiveChunks = totalContracts < 1 ? 1 : Math.min(Math.max(1, Math.floor(totalContracts)), chunksCount);
-    const chunkSize = effectiveChunks === 1
-      ? totalContracts
-      : parseFloat((totalContracts / effectiveChunks).toFixed(2));
-    let remainingContracts = totalContracts;
+    const outcome = direction === 'LONG' ? 'UP' : 'DOWN';
+    const contractsToBuy = totalContracts;
 
-    for (let i = 0; i < effectiveChunks; i++) {
-      const contractsToBuy = i === effectiveChunks - 1
-        ? parseFloat(remainingContracts.toFixed(2))
-        : chunkSize;
-      remainingContracts = parseFloat((remainingContracts - contractsToBuy).toFixed(2));
-      if (contractsToBuy <= 0) continue;
+    const orderPayload = {
+      action: 'PLACE_ORDER',
+      market: resolvedSlug,
+      side: 'BUY',
+      direction,
+      outcome,
+      type: orderType, // FAK or GTC
+      price: priceCents,
+      size: contractsToBuy,
+      chunkId: 1,
+      privateKey: credentials?.privateKey,
+      tokenId: credentials?.tokenId,
+      secret: credentials?.secret,
+    };
 
-      const chunkId = i + 1;
-      const outcome = direction === 'LONG' ? 'UP' : 'DOWN';
-      const orderPayload = {
-        action: 'PLACE_ORDER',
-        market: resolvedSlug,
-        side: 'BUY',
-        direction,
-        outcome,
-        type: orderType, // FAK or GTC
-        price: priceCents,
-        size: contractsToBuy,
-        chunkId,
-        privateKey: credentials?.privateKey,
-        tokenId: credentials?.tokenId,
-        secret: credentials?.secret,
-      };
+    const chunkState: ExecutedChunk = {
+      chunkId: 1,
+      totalChunks: 1,
+      contracts: contractsToBuy,
+      price: priceCents,
+      direction,
+      status: 'QUEUED',
+      delayMs: 0,
+      timestamp: Date.now(),
+      payload: orderPayload,
+    };
 
-      const chunkState: ExecutedChunk = {
-        chunkId,
-        totalChunks: chunksCount,
-        contracts: contractsToBuy,
-        price: priceCents,
-        direction,
-        status: 'QUEUED',
-        delayMs: i * delayMs,
-        timestamp: Date.now(),
-        payload: orderPayload,
-      };
+    executedChunks.push(chunkState);
+    onChunkUpdate({ ...chunkState });
 
-      executedChunks.push(chunkState);
-      onChunkUpdate({ ...chunkState });
+    chunkState.status = 'SENDING';
+    onChunkUpdate({ ...chunkState });
 
-      if (i > 0) {
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
+    this.log('OUTGOING', orderPayload);
+
+    // Transmit to exchange via backend execution route in one single direct call
+    try {
+      const orderRes = await fetch('/api/limitless/order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(orderPayload),
+      });
+      const orderResult = await orderRes.json().catch(() => null);
+      if (!orderRes.ok || (orderResult && orderResult.success === false)) {
+        throw new Error(orderResult?.error || 'Order execution rejected by exchange');
       }
 
-      chunkState.status = 'SENDING';
+      chunkState.status = 'SENT';
+      chunkState.timestamp = Date.now();
       onChunkUpdate({ ...chunkState });
-
-      this.log('OUTGOING', orderPayload);
-
-      // Transmit to exchange via backend execution route
-      try {
-        const orderRes = await fetch('/api/limitless/order', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(orderPayload),
-        });
-        const orderResult = await orderRes.json().catch(() => null);
-        if (!orderRes.ok || (orderResult && orderResult.success === false)) {
-          throw new Error(orderResult?.error || 'Order execution rejected by exchange');
-        }
-
-        chunkState.status = 'SENT';
-        chunkState.timestamp = Date.now();
-        onChunkUpdate({ ...chunkState });
-        soundController.playChunkExecuted(i);
-        console.log(
-          `🚀 Live Order Chunk ${chunkId}/${chunksCount} transmitted to Limitless: ${contractsToBuy} contracts @ $${priceCents} (${orderType})`
-        );
-      } catch (err) {
-        chunkState.status = 'FAILED';
-        onChunkUpdate({ ...chunkState });
-        throw err;
-      }
+      soundController.playChunkExecuted(0);
+      console.log(
+        `🚀 Live Direct Order transmitted to Limitless: ${contractsToBuy} contracts @ $${priceCents} (${orderType}) [5% Max Risk - No Chunking]`
+      );
+    } catch (err) {
+      chunkState.status = 'FAILED';
+      onChunkUpdate({ ...chunkState });
+      throw err;
     }
 
     return executedChunks;

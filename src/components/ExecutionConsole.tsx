@@ -97,9 +97,7 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              {isAr
-                ? (chunksCount === 1 ? 'أمر التنفيذ المباشر (FAK)' : `تجزئة العقود (${chunksCount})`)
-                : (chunksCount === 1 ? 'Direct Execution (FAK)' : `Live Chunks (${chunksCount})`)}
+              {isAr ? 'أمر التنفيذ المباشر (بدون تجزئة)' : 'Direct Order (No Chunks)'}
             </button>
             <button
               onClick={() => setActiveTab('orderbook')}
@@ -189,13 +187,9 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
                   <div className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
                     <span>
-                      {effectiveChunks === 1
-                        ? (isAr
-                            ? 'تنفيذ فوري مباشر للأمر كاملاً دفعة واحدة بنوع FAK دون أي تأخير زمني (0ms)'
-                            : 'Direct instant execution for full order via FAK with zero delay (0ms)')
-                        : (isAr
-                            ? `تجزئة العقد إلى ${effectiveChunks} أجزاء متتالية مع فارق زمني 500ms لتفادي قيود سرعة المنصة (Rate Limit)`
-                            : `Live fractionalization into ${effectiveChunks} chunks with 500ms spacing to prevent exchange rate limits`)}
+                      {isAr
+                        ? 'تنفيذ فوري مباشر للأمر كاملاً دفعة واحدة بنوع FAK دون أي تجزئة (سقف مخاطرة 5% كحد أقصى)'
+                        : 'Direct instant execution for full order via FAK with 5% max risk cap (No chunking)'}
                     </span>
                   </div>
                   {activeTrade && (
@@ -207,9 +201,9 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
                   )}
                 </div>
 
-                <div className={`grid grid-cols-1 ${effectiveChunks === 1 ? 'max-w-md' : effectiveChunks === 2 ? 'sm:grid-cols-2 max-w-xl' : 'sm:grid-cols-2 lg:grid-cols-4'} gap-3`}>
-                  {chunkIndices.map((chunkIndex) => {
-                    const chunk = currentChunks.find((c) => c.chunkId === chunkIndex);
+                <div className="grid grid-cols-1 max-w-md gap-3">
+                  {chunkIndices.slice(0, 1).map((chunkIndex) => {
+                    const chunk = currentChunks.find((c) => c.chunkId === chunkIndex) || currentChunks[0];
                     const isSent = chunk?.status === 'SENT';
                     const isSending = chunk?.status === 'SENDING';
                     const isQueued = chunk?.status === 'QUEUED';
@@ -218,7 +212,7 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
                     return (
                       <div
                         key={chunkIndex}
-                        className={`p-3 rounded-lg border transition-all ${
+                        className={`p-3.5 rounded-xl border transition-all ${
                           isSent
                             ? 'bg-emerald-950/20 border-emerald-800/50'
                             : isSending
@@ -232,10 +226,8 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
                       >
                         <div className="flex items-center justify-between text-xs mb-2">
                           <div className="flex items-center gap-1.5">
-                            <span className="font-bold text-slate-300">
-                              {effectiveChunks === 1
-                                ? (isAr ? 'الأمر الفوري المباشر (FAK)' : 'Direct Instant Order (FAK)')
-                                : (isAr ? `الجزء ${chunkIndex} من ${effectiveChunks}` : `Chunk ${chunkIndex} of ${effectiveChunks}`)}
+                            <span className="font-bold text-slate-200">
+                              {isAr ? 'الأمر الفوري المباشر (FAK - بدون تجزئة)' : 'Direct Order (FAK - No Chunks)'}
                             </span>
                             {chunk?.direction && (
                               <span

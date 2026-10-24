@@ -308,12 +308,12 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
             </div>
           </div>
 
-          {/* Section 4: Risk Sizing & Chunks */}
+          {/* Section 4: Risk Sizing & Direct Order Execution */}
           <div className="border-t border-slate-800 pt-4">
             <h3 className="font-semibold text-slate-100 uppercase tracking-wider text-[11px] mb-3 text-sky-400">
-              {isAr ? 'إدارة المخاطر وتجزئة الأوامر' : 'Execution & Kelly Risk Sizing'}
+              {isAr ? 'إدارة المخاطر والتنفيذ المباشر (سقف 5% أقصى)' : 'Risk Management & Direct Execution (5% Max Cap)'}
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block text-slate-400 mb-1">
                   {isAr ? 'نوع الأمر (Order Type)' : 'Order Type'}
@@ -345,42 +345,30 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
 
               <div>
                 <label className="block text-slate-400 mb-1">
-                  {isAr ? 'عدد الأجزاء (Chunks)' : 'Chunks (FRACTION_CHUNKS)'}
+                  {isAr ? 'سقف المخاطرة المعتمد (5% كحد أقصى)' : 'Enforced Risk Cap (5% Max)'}
                 </label>
                 <input
                   type="number"
-                  min="1"
-                  max="10"
-                  value={draft.fractionChunks}
-                  onChange={(e) => setDraft({ ...draft, fractionChunks: parseInt(e.target.value) || 4 })}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-400 mb-1">
-                  {isAr ? 'سقف المخاطرة (5% Max)' : 'Max Risk Cap (0.05)'}
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={draft.maxRiskPercent}
-                  onChange={(e) => setDraft({ ...draft, maxRiskPercent: parseFloat(e.target.value) || 0.05 })}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
+                  step="0.005"
+                  min="0.01"
+                  max="0.05"
+                  value={Math.min(draft.maxRiskPercent || 0.05, 0.05)}
+                  onChange={(e) => setDraft({ ...draft, maxRiskPercent: Math.min(parseFloat(e.target.value) || 0.05, 0.05) })}
+                  className="w-full bg-slate-950 border border-emerald-500/60 rounded-lg px-3 py-2 text-emerald-300 font-mono font-bold"
                 />
               </div>
             </div>
 
-            <div className="mt-2.5 p-2 rounded-lg bg-emerald-950/30 border border-emerald-700/40 text-[11px] text-emerald-300 space-y-1">
-              <div>
+            <div className="mt-2.5 p-2.5 rounded-lg bg-emerald-950/40 border border-emerald-700/50 text-[11px] text-emerald-300 space-y-1.5">
+              <div className="font-semibold text-emerald-200">
                 {isAr
-                  ? '⚡ أمر FAK (Fill-And-Kill): يتم تنفيذه فورياً على العقود المعروضة بسعر 20 سنت أو أقل، ويتم إلغاء (Kill) أي جزء متبقٍ في الحال دون تركه معلقاً.'
-                  : '⚡ FAK (Fill-And-Kill): Executes immediately against asks at $0.20 or lower, and instantly kills (cancels) any unfilled remainder.'}
+                  ? '✓ تم إلغاء تجزئة العقود: يتم تنفيذ الصفقة مباشرة كأمر موحد كامل دفعة واحدة بنوع FAK دون تقسيم.'
+                  : '✓ Contract Chunking Removed: Trade is executed directly as a single unified order via FAK without chunk splits.'}
               </div>
               <div className="text-sky-300">
                 {isAr
-                  ? '✨ شراء أجزاء من العقد مفعّل: الروبوت يشتري أجزاء العقود بدقة (مثل 0.1 أو 0.25 أو 0.5 عقد) دون فرض حد أدنى 1 عقد كامل لحماية رأس المال وفق نموذج كيلي.'
-                  : '✨ Fractional contracts enabled: The bot calculates and executes fractional contract sizes without forcing a minimum of 1 full contract.'}
+                  ? '🛡️ سقف المخاطرة محدد ومعتمد بنسبة 5% كحد أقصى من رصيد المحفظة لحماية رأس المال وفق نموذج كيلي الحذر.'
+                  : '🛡️ Risk cap is locked at 5% maximum of account balance for capital preservation under the Kelly Criterion.'}
               </div>
             </div>
           </div>
