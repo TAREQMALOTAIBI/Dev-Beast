@@ -244,9 +244,17 @@ async function initLimitlessSdkWebSocket() {
       broadcastSse('tx', data);
     });
 
+    ws.on('system', (data: any) => {
+      broadcastSse('system', data);
+    });
+
     ws.on('disconnect', (reason: string) => {
-      currentWsStatus = 'DISCONNECTED';
-      broadcastSse('status', { status: 'DISCONNECTED', reason });
+      currentWsStatus = 'CONNECTING';
+      broadcastSse('status', { status: 'CONNECTING', reason });
+      // As documented by Limitless Exchange:
+      // Automatic reconnect replays stale handshake signatures (> 30s), causing
+      // 'Invalid HMAC authentication'. To survive a drop, clean up, re-connect afresh,
+      // and re-issue subscriptions with freshly signed HMAC credentials.
       setTimeout(async () => {
         try {
           if (limitlessWsInstance) {
@@ -254,9 +262,9 @@ async function initLimitlessSdkWebSocket() {
           }
           await initLimitlessSdkWebSocket();
         } catch {
-          // Reconnect attempt failed, will retry
+          // Retry on next cycle
         }
-      }, 3000);
+      }, 1500);
     });
 
     await ws.connect();
@@ -275,10 +283,12 @@ function setupApiMiddlewares(middlewares: any) {
   }
   middlewares.use('/api/limitless/live-stream', (req: any, res: any) => {
     res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders?.();
 
+    // Send immediate snapshot upon connection
     res.write(`event: status\ndata: ${JSON.stringify({ status: currentWsStatus })}\n\n`);
     if (latestOrderbookData) {
       res.write(`event: orderbookUpdate\ndata: ${JSON.stringify(latestOrderbookData)}\n\n`);
@@ -290,9 +300,42 @@ function setupApiMiddlewares(middlewares: any) {
       res.write(`event: positions\ndata: ${JSON.stringify(latestPositionsData)}\n\n`);
     }
 
+    // Keepalive ping every 10 seconds to prevent proxy drops
+    const pingTimer = setInterval(() => {
+      try {
+        res.write(`: ping\n\n`);
+      } catch {
+        clearInterval(pingTimer);
+      }
+    }, 10000);
+
     sseClients.add(res);
     req.on('close', () => {
+      clearInterval(pingTimer);
       sseClients.delete(res);
+    });
+  });
+
+  middlewares.use('/api/limitless/subscribe', async (req: any, res: any) => {
+    res.setHeader('Content-Type', 'application/json');
+    if (req.method !== 'POST') {
+      res.statusCode = 405;
+      return res.end(JSON.stringify({ error: 'Method not allowed' }));
+    }
+    let body = '';
+    req.on('data', (c: any) => { body += c; });
+    req.on('end', async () => {
+      try {
+        const { marketSlug } = body ? JSON.parse(body) : {};
+        if (marketSlug && limitlessWsInstance && is15MinBtcMarket({ slug: marketSlug })) {
+          await limitlessWsInstance.subscribe('subscribe_market_prices', {
+            marketSlugs: [marketSlug],
+          });
+        }
+        res.end(JSON.stringify({ success: true, subscribed: marketSlug }));
+      } catch (err: any) {
+        res.end(JSON.stringify({ success: false, error: err.message }));
+      }
     });
   });
 

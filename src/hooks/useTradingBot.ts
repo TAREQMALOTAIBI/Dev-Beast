@@ -467,11 +467,17 @@ export function useTradingBot() {
     };
   }, [
     config.limitlessWsUrl,
-    config.limitlessMarketSlug,
     config.limitlessApiKey,
     config.limitlessTokenId,
     config.limitlessTokenSecret,
   ]);
+
+  // When active market slug changes, smoothly subscribe without disconnecting
+  useEffect(() => {
+    if (config.limitlessMarketSlug) {
+      limitlessService.subscribeMarket(config.limitlessMarketSlug);
+    }
+  }, [config.limitlessMarketSlug]);
 
   // Load real Binance Historical Data & Live WebSocket
   useEffect(() => {

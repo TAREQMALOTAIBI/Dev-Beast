@@ -1,4 +1,3 @@
-import { io, Socket } from 'socket.io-client';
 import {
   ExecutedChunk,
   WsMessageLog,
@@ -13,7 +12,6 @@ import { soundController } from '../utils/audio';
 export type LimitlessStatus = 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED' | 'AUTHENTICATED' | 'ERROR';
 
 export class LimitlessService {
-  private socket: Socket | null = null;
   private eventSource: EventSource | null = null;
   private status: LimitlessStatus = 'DISCONNECTED';
   private listeners: ((status: LimitlessStatus) => void)[] = [];
@@ -120,8 +118,7 @@ export class LimitlessService {
   }
 
   /**
-   * Connect to Limitless Exchange Socket.IO gateway
-   * Endpoint: https://ws.limitless.exchange/markets
+   * Connect to Limitless Exchange live stream via official backend SDK WebSocket gateway
    */
   public connect(
     url: string = 'wss://ws.limitless.exchange',
@@ -134,135 +131,22 @@ export class LimitlessService {
     this.credentials = credentials;
     this.activeMarketSlug = marketSlug || 'btc-up-or-down-15-min';
 
-    const targetEndpoint = this.normalizeSocketUrl(url);
-    this.log('SYSTEM', `[LIMITLESS STREAM] Initializing connection to: ${targetEndpoint}`);
-
-    try {
-      const socket = io(targetEndpoint, {
-        transports: ['websocket', 'polling'],
-        reconnection: true,
-        reconnectionDelay: 1000,
-        reconnectionDelayMax: 8000,
-        timeout: 10000,
-      });
-
-      this.socket = socket;
-
-      socket.on('connect', () => {
-        const hasAuth = Boolean(this.credentials?.tokenId || this.credentials?.apiKey);
-        this.setStatus(hasAuth ? 'AUTHENTICATED' : 'CONNECTED');
-        this.stopOrderbookPolling();
-        this.log(
-          'SYSTEM',
-          `[LIMITLESS STREAM] Connected successfully (Socket ID: ${socket.id}). Mode: ${
-            hasAuth ? 'AUTHENTICATED' : 'PUBLIC STREAM'
-          }`
-        );
-
-        // 1. Subscribe to configured market
-        this.subscribeMarket(this.activeMarketSlug);
-
-        // 2. Discover and subscribe to active BTC 15m prediction market
-        this.discoverAndSubscribeActiveBtcMarket();
-
-        // 3. Authenticated subscriptions if credentials provided
-        if (hasAuth) {
-          this.log('OUTGOING', {
-            action: 'subscribe_authenticated',
-            channels: ['positions', 'order_events', 'transactions'],
-          });
-          socket.emit('subscribe_positions', { marketSlugs: [this.activeMarketSlug] });
-          socket.emit('subscribe_order_events');
-          socket.emit('subscribe_transactions');
-        }
-      });
-
-      // Streamed Orderbook updates
-      socket.on('orderbookUpdate', (data: OrderbookUpdate) => {
-        this.currentOrderbook = data;
-        this.orderbookListeners.forEach((l) => l(data));
-        this.log('INCOMING', {
-          event: 'orderbookUpdate',
-          marketSlug: data.marketSlug,
-          bids: data.orderbook?.bids?.length || 0,
-          asks: data.orderbook?.asks?.length || 0,
-          midpoint: data.orderbook?.adjustedMidpoint,
-        });
-      });
-
-      // Streamed Oracle price data
-      socket.on('oraclePriceData', (data: OraclePriceData) => {
-        this.currentOracle = data;
-        this.oracleListeners.forEach((l) => l(data));
-        this.log('INCOMING', {
-          event: 'oraclePriceData',
-          marketSlug: data.marketSlug,
-          value: data.value,
-          timestamp: data.timestamp,
-        });
-      });
-
-      // Positions
-      socket.on('positions', (data: unknown) => {
-        this.log('INCOMING', { event: 'positions', data });
-        if (
-          data &&
-          typeof data === 'object' &&
-          'positions' in data &&
-          Array.isArray((data as { positions: PositionItem[] }).positions)
-        ) {
-          this.currentPositions = (data as { positions: PositionItem[] }).positions;
-          this.positionListeners.forEach((l) => l(this.currentPositions));
-        }
-      });
-
-      // Order lifecycle events
-      socket.on('orderEvent', (event: OrderEvent) => {
-        this.log('INCOMING', { event: 'orderEvent', source: event.source, type: event.type, orderId: event.orderId });
-        this.orderEventListeners.forEach((l) => l(event));
-      });
-
-      // Transaction events
-      socket.on('tx', (data: TransactionEvent) => {
-        this.log('INCOMING', { event: 'tx', txHash: data.txHash, status: data.status });
-      });
-
-      // AMM prices
-      socket.on('newPriceData', (data: unknown) => {
-        this.log('INCOMING', { event: 'newPriceData', data });
-      });
-
-      // Disconnect handling
-      socket.on('disconnect', (reason: string) => {
-        this.log('SYSTEM', `[LIMITLESS STREAM] Disconnected: ${reason}`);
-        if (!this.isExplicitlyClosed) {
-          this.setStatus('CONNECTING');
-          this.startOrderbookPolling(this.activeMarketSlug);
-        } else {
-          this.setStatus('DISCONNECTED');
-        }
-      });
-
-      // Error handling
-      socket.on('connect_error', (err: Error) => {
-        this.log('SYSTEM', `[LIMITLESS STREAM ERROR] Connection notice: ${err.message}. Activating orderbook polling fallback.`);
-        this.startOrderbookPolling(this.activeMarketSlug);
-      });
-    } catch (err) {
-      this.setStatus('ERROR');
-      const msg = err instanceof Error ? err.message : String(err);
-      this.log('SYSTEM', `[LIMITLESS CONNECTION FAILED] ${msg}. Using REST polling fallback.`);
-      this.startOrderbookPolling(this.activeMarketSlug);
-    }
-
-    // Immediately fetch initial snapshot so orderbook is populated with zero delay
-    this.fetchInitialOrderbook(this.activeMarketSlug);
+    this.log('SYSTEM', `[LIMITLESS STREAM] Initializing live connection to Limitless Exchange Gateway...`);
 
     // Connect to official Limitless WebSocketClient SSE stream provided by backend server
     try {
       if (typeof window !== 'undefined' && 'EventSource' in window) {
         const es = new EventSource('/api/limitless/live-stream');
         this.eventSource = es;
+
+        es.onopen = () => {
+          this.log('SYSTEM', '[LIMITLESS STREAM] Live stream connection established successfully.');
+          const hasAuth = Boolean(this.credentials?.tokenId || this.credentials?.apiKey);
+          this.setStatus(hasAuth ? 'AUTHENTICATED' : 'CONNECTED');
+          this.stopOrderbookPolling();
+          this.subscribeMarket(this.activeMarketSlug);
+          this.discoverAndSubscribeActiveBtcMarket();
+        };
 
         es.addEventListener('status', (e: MessageEvent) => {
           try {
@@ -281,6 +165,10 @@ export class LimitlessService {
             const data = JSON.parse(e.data);
             this.currentOrderbook = data;
             this.orderbookListeners.forEach((l) => l(data));
+            if (this.status === 'CONNECTING') {
+              const hasAuth = Boolean(this.credentials?.tokenId || this.credentials?.apiKey);
+              this.setStatus(hasAuth ? 'AUTHENTICATED' : 'CONNECTED');
+            }
             this.stopOrderbookPolling();
           } catch {}
         });
@@ -317,10 +205,32 @@ export class LimitlessService {
             this.log('INCOMING', { event: 'tx', txHash: data.txHash, status: data.status });
           } catch {}
         });
+
+        es.addEventListener('system', (e: MessageEvent) => {
+          try {
+            const data = JSON.parse(e.data);
+            this.log('SYSTEM', data);
+          } catch {}
+        });
+
+        es.onerror = () => {
+          // EventSource automatically attempts to reconnect on transient drops.
+          // Only change status if connection was completely terminated.
+          if (es.readyState === EventSource.CLOSED && !this.isExplicitlyClosed) {
+            this.setStatus('CONNECTING');
+            this.startOrderbookPolling(this.activeMarketSlug);
+          }
+        };
       }
-    } catch {
-      // Fallback to socket/polling
+    } catch (err) {
+      this.setStatus('ERROR');
+      const msg = err instanceof Error ? err.message : String(err);
+      this.log('SYSTEM', `[LIMITLESS CONNECTION NOTICE] ${msg}. Using REST polling fallback.`);
+      this.startOrderbookPolling(this.activeMarketSlug);
     }
+
+    // Immediately fetch initial snapshot so orderbook is populated with zero delay
+    this.fetchInitialOrderbook(this.activeMarketSlug);
   }
 
   /**
@@ -329,10 +239,13 @@ export class LimitlessService {
   public subscribeMarket(slug: string) {
     if (!slug) return;
     this.activeMarketSlug = slug;
-    if (this.socket && this.socket.connected) {
-      this.socket.emit('subscribe_market_prices', { marketSlugs: [slug] });
-      this.log('OUTGOING', { action: 'subscribe_market_prices', marketSlugs: [slug] });
-    }
+    // Notify official backend SDK WebSocket to subscribe
+    fetch('/api/limitless/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ marketSlug: slug }),
+    }).catch(() => {});
+    this.log('OUTGOING', { action: 'subscribe_market_prices', marketSlugs: [slug] });
     this.fetchInitialOrderbook(slug);
   }
 
@@ -396,9 +309,6 @@ export class LimitlessService {
           };
           this.currentOrderbook = update;
           this.orderbookListeners.forEach((l) => l(update));
-          if (this.status === 'CONNECTING' || this.status === 'DISCONNECTED') {
-            this.setStatus('CONNECTED');
-          }
         }
       }
     } catch {
@@ -407,12 +317,12 @@ export class LimitlessService {
   }
 
   /**
-   * Starts periodic REST polling if WebSocket is disconnected or recovering
+   * Starts periodic REST polling if live stream is disconnected or recovering
    */
   private startOrderbookPolling(slug: string) {
     if (this.pollingTimer) return;
     this.pollingTimer = window.setInterval(() => {
-      if (this.socket && this.socket.connected) {
+      if (this.eventSource && this.eventSource.readyState === EventSource.OPEN) {
         this.stopOrderbookPolling();
         return;
       }
@@ -435,14 +345,6 @@ export class LimitlessService {
         this.eventSource.close();
       } catch {}
       this.eventSource = null;
-    }
-    if (this.socket) {
-      try {
-        this.socket.disconnect();
-      } catch {
-        // Safe disconnect
-      }
-      this.socket = null;
     }
     this.setStatus('DISCONNECTED');
   }
@@ -523,20 +425,17 @@ export class LimitlessService {
 
       this.log('OUTGOING', orderPayload);
 
-      // Transmit to exchange via socket or server proxy
+      // Transmit to exchange via backend execution route
       try {
-        if (this.socket && this.socket.connected) {
-          this.socket.emit('order', orderPayload);
-        }
-
-        // Also notify backend execution route
-        fetch('/api/limitless/order', {
+        const orderRes = await fetch('/api/limitless/order', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(orderPayload),
-        }).catch(() => {
-          // Socket transmission is primary
         });
+        const orderResult = await orderRes.json().catch(() => null);
+        if (!orderRes.ok || (orderResult && orderResult.success === false)) {
+          throw new Error(orderResult?.error || 'Order execution rejected by exchange');
+        }
 
         chunkState.status = 'SENT';
         chunkState.timestamp = Date.now();
