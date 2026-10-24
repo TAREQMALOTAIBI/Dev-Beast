@@ -129,7 +129,7 @@ export function useTradingBot() {
     } catch {
       // Safe fallback
     }
-    return true; // Default to active so live signals execute automatically
+    return false; // Reverted: Default to paused/stopped - works only when manually started
   });
   const [binanceStatus, setBinanceStatus] = useState<'CONNECTING' | 'CONNECTED' | 'DISCONNECTED'>('CONNECTING');
   const [limitlessStatus, setLimitlessStatus] = useState<LimitlessStatus>('DISCONNECTED');
@@ -157,12 +157,14 @@ export function useTradingBot() {
   const isExecutingRef = useRef<boolean>(false);
   const lastExecutedCandleTimeRef = useRef<number>(0);
   const activeLimitlessMarketRef = useRef<LimitlessMarketDetails | null>(null);
+  const metricsRef = useRef<ZScoreMetric[]>([]);
 
   configRef.current = config;
   botActiveRef.current = botActive;
   currentBalanceRef.current = currentBalance;
   crossedUpperThresholdRef.current = crossedUpperThreshold;
   crossedLowerThresholdRef.current = crossedLowerThreshold;
+  metricsRef.current = metrics;
 
   const toggleSound = () => {
     const next = !soundEnabled;
@@ -292,7 +294,14 @@ export function useTradingBot() {
     candleTime?: number
   ) => {
     const cfg = configRef.current;
-    const balance = currentBalanceRef.current;
+    let balance = currentBalanceRef.current;
+
+    // If memory balance is zero but liveUsdcBalance has a real value, synchronize immediately
+    if (balance <= 0 && liveUsdcBalance > 0) {
+      balance = liveUsdcBalance;
+      currentBalanceRef.current = liveUsdcBalance;
+      setCurrentBalance(liveUsdcBalance);
+    }
 
     const kelly = calculateKellySizing(balance, {
       maxPriceCents: cfg.maxPriceCents,
@@ -304,7 +313,9 @@ export function useTradingBot() {
     const effectiveContracts = kelly.numberOfContracts;
 
     if (effectiveContracts <= 0) {
-      const warnMsg = `⚠️ تعذر إرسال الصفقة: رصيد المحفظة الحالي (${balance.toFixed(2)} USDC) غير كافٍ لشراء عقد واحد بسعر ${cfg.maxPriceCents}$ (الحد الأدنى المطلوب وفق إدارة المخاطر 5% هو ${(cfg.maxPriceCents / 0.05).toFixed(2)}$ USDC). يرجى شحن المحفظة بـ USDC على شبكة Base للمتابعة.`;
+      const warnMsg = balance <= 0
+        ? `⚠️ تعذر إرسال الصفقة: رصيد المحفظة الحالي هو ($0.00 USDC). جاري فحص الرصيد من شبكة Base...`
+        : `⚠️ تعذر إرسال الصفقة: رصيد المحفظة (${balance.toFixed(2)} USDC) مع نسبة المخاطرة (${(cfg.maxRiskPercent * 100).toFixed(0)}%) ينتج حجماً أقل من 0.01 عقد.`;
       console.warn(warnMsg);
       limitlessService.logDirect('SYSTEM', warnMsg);
       setExecutionNotice({
@@ -386,7 +397,13 @@ export function useTradingBot() {
           });
         },
         direction,
-        resolvedMarketSlug
+        resolvedMarketSlug,
+        {
+          privateKey: cfg.privateKey,
+          tokenId: cfg.limitlessTokenId,
+          secret: cfg.limitlessTokenSecret,
+          apiKey: cfg.limitlessApiKey,
+        }
       );
 
       const completedTrade: TradeOrder = {
@@ -452,6 +469,10 @@ export function useTradingBot() {
       const { zScore } = calculateZScore(prices, cfg.zScoreUpper, cfg.zScoreEntry, lowerThresh, lowerEntryThresh);
       setCurrentZScore(zScore);
 
+      // Determine arming: either triggered in live session or within the recent 3 candles
+      const recentOverbought = metricsRef.current.slice(-3).some((m) => m.zScore >= cfg.zScoreUpper);
+      const recentOversold = metricsRef.current.slice(-3).some((m) => m.zScore <= lowerThresh);
+
       // ================= DIRECTION 1: OVERBOUGHT (Short / Down) =================
       if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'SHORT_ONLY') {
         // Arm Upper: Price diverges above upper threshold
@@ -465,8 +486,10 @@ export function useTradingBot() {
           }
         }
 
+        const isArmedUpper = crossedUpperThresholdRef.current || recentOverbought;
+
         // Trigger Short: Reversion back below or equal to entry threshold in the same candle
-        if (crossedUpperThresholdRef.current && zScore <= cfg.zScoreEntry) {
+        if (isArmedUpper && zScore <= cfg.zScoreEntry) {
           if (!botActiveRef.current) {
             // Bot is stopped: warn user why trade was not executed
             const pauseWarn = `⚠️ تحققت إشارة ارتداد هبوط (Z=${zScore.toFixed(2)}σ) ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
@@ -503,8 +526,10 @@ export function useTradingBot() {
           }
         }
 
+        const isArmedLower = crossedLowerThresholdRef.current || recentOversold;
+
         // Trigger Long: Rebound back above or equal to lower entry threshold in the same candle
-        if (crossedLowerThresholdRef.current && zScore >= lowerEntryThresh) {
+        if (isArmedLower && zScore >= lowerEntryThresh) {
           if (!botActiveRef.current) {
             // Bot is stopped: warn user why trade was not executed
             const pauseWarn = `⚠️ تحققت إشارة ارتداد صعود (Z=${zScore.toFixed(2)}σ) ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
@@ -679,7 +704,9 @@ export function useTradingBot() {
   const refreshLiveBalance = useCallback(async () => {
     setIsFetchingBalance(true);
     try {
-      const res = await fetch('/api/balance');
+      const cfg = configRef.current;
+      const addrQuery = cfg.walletAddress ? `?address=${encodeURIComponent(cfg.walletAddress)}` : '';
+      const res = await fetch(`/api/balance${addrQuery}`);
       if (!res.ok) return;
       const data = await res.json();
       if (data && data.success && data.isLive) {
@@ -736,17 +763,21 @@ export function useTradingBot() {
         // Fallback to define
       });
 
-    // Auto-discover active Limitless BTC prediction market
+    // Keep active Limitless BTC prediction market synchronized
     refreshActiveMarket();
     const marketInterval = setInterval(() => {
       refreshActiveMarket();
     }, 15000);
 
-    // Fetch initial balance once on load; subsequent updates only happen when the user clicks refresh
+    // Fetch initial balance and poll periodically so live wallet balance is continuously updated
     refreshLiveBalance();
+    const balanceInterval = setInterval(() => {
+      refreshLiveBalance();
+    }, 12000);
 
     return () => {
       clearInterval(marketInterval);
+      clearInterval(balanceInterval);
     };
   }, [refreshLiveBalance, refreshActiveMarket]);
 
@@ -758,6 +789,10 @@ export function useTradingBot() {
         localStorage.setItem('limitless_bot_active_state', String(next));
       } catch {
         // Safe localStorage
+      }
+      if (next) {
+        // Immediate balance update when bot is turned on
+        refreshLiveBalance();
       }
       return next;
     });

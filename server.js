@@ -70,8 +70,8 @@ function broadcastSse(eventType, payload) {
 async function initLimitlessSdkWebSocket() {
   try {
     const sdk = await import('@limitless-exchange/sdk');
-    const tokenId = process.env.LMTS_TOKEN_ID?.trim();
-    const secret = process.env.LMTS_TOKEN_SECRET?.trim();
+    const tokenId = (process.env.LMTS_TOKEN_ID || '').trim();
+    const secret = (process.env.LMTS_TOKEN_SECRET || process.env['.MTS_TOKEN_SECRET'] || '').trim();
     const hasAuth = Boolean(tokenId && secret);
 
     const wsConfig = {
@@ -317,10 +317,10 @@ app.get('/api/limitless/orderbook', async (req, res) => {
 // Dedicated EIP-712 Order Execution Endpoint according to Limitless specification
 app.post('/api/limitless/order', async (req, res) => {
   try {
-    const { market, direction, outcome, type, price, size, chunkId } = req.body || {};
-    const pk = process.env.PRIVATE_KEY?.trim();
-    const tokenId = process.env.LMTS_TOKEN_ID?.trim();
-    const secret = process.env.LMTS_TOKEN_SECRET?.trim();
+    const { market, direction, outcome, type, price, size, chunkId, privateKey, tokenId: bodyTokenId, secret: bodySecret } = req.body || {};
+    const pk = (privateKey || process.env.PRIVATE_KEY || '').trim();
+    const tokenId = (bodyTokenId || process.env.LMTS_TOKEN_ID || '').trim();
+    const secret = (bodySecret || process.env.LMTS_TOKEN_SECRET || process.env['.MTS_TOKEN_SECRET'] || '').trim();
 
     // Check if live credentials are provided for on-chain EIP-712 signing
     const hasLiveAuth = Boolean(pk && tokenId && secret);
@@ -355,7 +355,8 @@ app.post('/api/limitless/order', async (req, res) => {
       : (marketData?.tokens?.no || '40162699974295487791837260294296186163581478509542482654947866172365777902927');
 
     const normalizedPrice = Number(price) > 1 ? Number(price) / 100 : (Number(price) || 0.50);
-    const contractCount = Math.max(1, Math.round(Number(size) || 1));
+    // Allow fractional contracts (e.g. 0.1, 0.25, 0.5, 1.25)
+    const contractCount = Math.max(0.01, parseFloat(Number(size || 0.01).toFixed(4)));
 
     if (hasLiveAuth) {
       const { ethers } = await import('ethers');
@@ -488,8 +489,8 @@ app.all('/api/limitless/*', async (req, res) => {
   }
 });
 
-async function fetchLiveWalletAndBalance() {
-  let address = '';
+async function fetchLiveWalletAndBalance(customAddress = '') {
+  let address = (customAddress || process.env.WALLET_ADDRESS || '').trim();
   const pk = process.env.PRIVATE_KEY?.trim();
   if (pk) {
     try {
@@ -503,14 +504,17 @@ async function fetchLiveWalletAndBalance() {
   }
 
   let profileData = null;
-  if (process.env.LMTS_TOKEN_ID && process.env.LMTS_TOKEN_SECRET) {
+  const tokenId = (process.env.LMTS_TOKEN_ID || '').trim();
+  const tokenSecret = (process.env.LMTS_TOKEN_SECRET || process.env['.MTS_TOKEN_SECRET'] || '').trim();
+
+  if (tokenId && tokenSecret) {
     try {
       const sdk = await import('@limitless-exchange/sdk');
       const client = new sdk.HttpClient({
         baseURL: sdk.DEFAULT_API_URL,
         hmacCredentials: {
-          tokenId: process.env.LMTS_TOKEN_ID,
-          secret: process.env.LMTS_TOKEN_SECRET,
+          tokenId,
+          secret: tokenSecret,
         },
       });
       const pf = new sdk.PortfolioFetcher(client);
@@ -528,7 +532,9 @@ async function fetchLiveWalletAndBalance() {
 
   if (address) {
     const { ethers } = await import('ethers');
+    const customRpc = process.env.BASE_RPC_URL?.trim();
     const rpcs = [
+      ...(customRpc ? [customRpc] : []),
       'https://mainnet.base.org',
       'https://base.llamarpc.com',
       'https://base-rpc.publicnode.com',
@@ -568,9 +574,10 @@ async function fetchLiveWalletAndBalance() {
   };
 }
 
-app.get('/api/balance', async (_req, res) => {
+app.get('/api/balance', async (req, res) => {
   try {
-    const data = await fetchLiveWalletAndBalance();
+    const customAddress = req.query.address || req.query.wallet;
+    const data = await fetchLiveWalletAndBalance(customAddress);
     res.json({ success: true, ...data });
   } catch (err) {
     res.status(500).json({ success: false, error: String(err) });
@@ -580,18 +587,68 @@ app.get('/api/balance', async (_req, res) => {
 app.get('/api/credentials', async (_req, res) => {
   try {
     const walletData = await fetchLiveWalletAndBalance();
+    const resolvedSecret = process.env.LMTS_TOKEN_SECRET || process.env['.MTS_TOKEN_SECRET'] || '';
     res.json({
       hasLmtsTokenId: Boolean(process.env.LMTS_TOKEN_ID),
-      hasLmtsTokenSecret: Boolean(process.env.LMTS_TOKEN_SECRET),
+      hasLmtsTokenSecret: Boolean(resolvedSecret),
       hasPrivateKey: Boolean(process.env.PRIVATE_KEY),
       hasGeminiKey: Boolean(process.env.GEMINI_API_KEY),
       hasApiKey: Boolean(process.env.LIMITLESS_API_KEY),
+      hasBaseRpc: Boolean(process.env.BASE_RPC_URL),
       limitlessTokenId: process.env.LMTS_TOKEN_ID || '',
-      limitlessTokenSecret: process.env.LMTS_TOKEN_SECRET || '',
+      limitlessTokenSecret: resolvedSecret,
       limitlessApiKey: process.env.LIMITLESS_API_KEY || '',
       walletAddress: walletData.address,
       liveUsdcBalance: walletData.usdcBalance,
+      ethBalance: walletData.ethBalance,
       username: walletData.profile?.username,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: String(err) });
+  }
+});
+
+// Save credentials directly from UI to server environment and .env file
+app.post('/api/config/save-credentials', async (req, res) => {
+  try {
+    const {
+      privateKey,
+      limitlessTokenId,
+      limitlessTokenSecret,
+      limitlessApiKey,
+      walletAddress,
+    } = req.body || {};
+
+    if (privateKey !== undefined) process.env.PRIVATE_KEY = String(privateKey).trim();
+    if (limitlessTokenId !== undefined) process.env.LMTS_TOKEN_ID = String(limitlessTokenId).trim();
+    if (limitlessTokenSecret !== undefined) process.env.LMTS_TOKEN_SECRET = String(limitlessTokenSecret).trim();
+    if (limitlessApiKey !== undefined) process.env.LIMITLESS_API_KEY = String(limitlessApiKey).trim();
+    if (walletAddress !== undefined) process.env.WALLET_ADDRESS = String(walletAddress).trim();
+
+    // Persist to .env file in root
+    try {
+      const envLines = [
+        `LIMITLESS_API_KEY=${process.env.LIMITLESS_API_KEY || ''}`,
+        `LMTS_TOKEN_ID=${process.env.LMTS_TOKEN_ID || ''}`,
+        `LMTS_TOKEN_SECRET=${process.env.LMTS_TOKEN_SECRET || ''}`,
+        `PRIVATE_KEY=${process.env.PRIVATE_KEY || ''}`,
+        `WALLET_ADDRESS=${process.env.WALLET_ADDRESS || ''}`,
+      ];
+      fs.writeFileSync(path.join(__dirname, '.env'), envLines.join('\n'), 'utf8');
+    } catch (fsErr) {
+      console.warn('[CONFIG] Could not write .env file:', fsErr.message);
+    }
+
+    // Refresh Limitless SDK WebSocket if credentials changed
+    initLimitlessSdkWebSocket().catch(() => {});
+
+    // Fetch updated wallet and balance
+    const walletData = await fetchLiveWalletAndBalance();
+
+    res.json({
+      success: true,
+      message: 'Credentials updated and saved successfully',
+      wallet: walletData,
     });
   } catch (err) {
     res.status(500).json({ success: false, error: String(err) });

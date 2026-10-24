@@ -67,10 +67,10 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
             <Radio className="w-5 h-5 text-emerald-400 animate-pulse" />
             <div>
               <h2 className="text-base font-bold text-slate-100">
-                {isAr ? 'إعدادات التداول الحي الحقيقي (LIVE TRADING)' : 'Live Trading Configuration'}
+                {isAr ? 'إعدادات استراتيجية التداول (15 Min BTC)' : 'Trading Strategy Configuration (15m BTC)'}
               </h2>
               <div className="text-[11px] text-slate-400">
-                {isAr ? 'تخصيص بيانات الربط الفعلي ومفاتيح API' : 'Direct Exchange Endpoints & API Authentication'}
+                {isAr ? 'ضبط معايير Z-Score ونموذج كيلي للأحجام الجزئية وسوق العقود' : 'Z-Score Thresholds, Fractional Kelly Sizing & Market Settings'}
               </div>
             </div>
           </div>
@@ -84,108 +84,73 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
 
         {/* Form Body */}
         <div className="p-6 overflow-y-auto space-y-5 text-xs text-slate-300">
-          {liveWallet && (
-            <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-600/50 flex flex-wrap items-center justify-between gap-3 shadow-sm">
-              <div className="flex items-center gap-2.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                <div>
-                  <div className="font-bold text-slate-100 flex items-center gap-2">
-                    <span>{liveWallet.username || 'On-Chain Wallet'}</span>
-                    <span className="font-mono text-[11px] text-slate-300">
-                      ({liveWallet.address.slice(0, 6)}...{liveWallet.address.slice(-4)})
-                    </span>
-                  </div>
-                  <div className="text-[10px] text-emerald-400 mt-0.5">
-                    {liveWallet.network} · {liveWallet.ethBalance.toFixed(4)} ETH for gas
-                  </div>
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="text-[10px] text-slate-400">{isAr ? 'الرصيد الحي الحقيقي (Base)' : 'Live Balance'}</div>
-                <div className="text-base font-bold font-mono text-emerald-300">${liveWallet.usdcBalance.toFixed(2)} USDC</div>
-              </div>
-            </div>
-          )}
-          {/* Section 1: Authentication & Endpoints */}
+          {/* Live Wallet & Secrets Status Banner */}
           <div className="p-3.5 rounded-xl bg-slate-950/80 border border-emerald-800/40 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 font-bold text-emerald-400 text-xs uppercase tracking-wider">
-                <KeyRound className="w-4 h-4" />
-                <span>{isAr ? 'بيانات توثيق Limitless SDK (HMAC / API)' : 'Limitless SDK & HMAC Credentials'}</span>
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                <span>{isAr ? 'حالة المحفظة وبيانات التوثيق (Environment Secrets)' : 'Wallet & Environment Secrets Status'}</span>
               </div>
-              {hasEnvCredentials && (
-                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-600/60 shadow-sm">
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                  {isAr ? 'تم التحميل تلقائياً من ملف البيئة (.env)' : 'Active from environment (.env)'}
-                </span>
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-600/60 shadow-sm">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                {isAr ? 'المفاتيح مربوطة ومؤمنة' : 'Connected via Secrets'}
+              </span>
+            </div>
+
+            <div className="text-[11px] text-slate-300 leading-relaxed bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
+              {isAr ? (
+                <>
+                  <p className="text-emerald-300 font-semibold mb-1">
+                    ✓ الربط المباشر مؤمن بالكامل من بيئة النظام (Google AI Studio Secrets):
+                  </p>
+                  <p className="text-slate-400">
+                    تم إخفاء وتأمين حقول المفاتيح الخاصة. الخادم يقرأ تلقائياً مفتاحك الخاص <code>PRIVATE_KEY</code> ومفاتيح <code>LMTS_TOKEN_ID</code> و <code>LMTS_TOKEN_SECRET</code> ورابط <code>BASE_RPC_URL</code> دون الحاجة لإدخالها في المتصفح.
+                  </p>
+                </>
+              ) : (
+                <p className="text-slate-300">
+                  Wallet and API credentials are automatically read from the platform Environment Secrets. No sensitive private keys are exposed or required in the UI.
+                </p>
               )}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-slate-300 mb-1 font-semibold">
-                  HMAC Token ID (LMTS_TOKEN_ID):
-                </label>
-                <input
-                  type="text"
-                  placeholder="token_..."
-                  value={draft.limitlessTokenId}
-                  onChange={(e) => setDraft({ ...draft, limitlessTokenId: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono focus:outline-none focus:border-emerald-500"
-                />
+            {liveWallet && (
+              <div className="p-3 rounded-lg bg-emerald-950/30 border border-emerald-700/30 flex flex-wrap items-center justify-between gap-3 shadow-sm">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+                  <div>
+                    <div className="font-bold text-slate-100 flex items-center gap-2">
+                      <span>{liveWallet.username || 'On-Chain Wallet'}</span>
+                      <span className="font-mono text-[11px] text-emerald-300">
+                        {liveWallet.address ? `${liveWallet.address.slice(0, 8)}...${liveWallet.address.slice(-6)}` : 'Detecting...'}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-emerald-400 mt-0.5">
+                      {liveWallet.network} · {liveWallet.ethBalance.toFixed(4)} ETH for gas
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[10px] text-slate-400">{isAr ? 'الرصيد الحي المتاح حالياً' : 'Live Balance'}</div>
+                  <div className="text-base font-bold font-mono text-emerald-300">${liveWallet.usdcBalance.toFixed(2)} USDC</div>
+                </div>
               </div>
-
-              <div>
-                <label className="block text-slate-300 mb-1 font-semibold">
-                  HMAC Secret (LMTS_TOKEN_SECRET):
-                </label>
-                <input
-                  type="password"
-                  placeholder="secret_..."
-                  value={draft.limitlessTokenSecret}
-                  onChange={(e) => setDraft({ ...draft, limitlessTokenSecret: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-slate-400 mb-1">
-                  {isAr ? 'رمز سوق التوقع (15 دقيقة حصراً):' : 'Prediction Market Slug (15m Only):'}
-                </label>
-                <input
-                  type="text"
-                  placeholder="btc-up-or-down-15-min"
-                  value={draft.limitlessMarketSlug}
-                  onChange={(e) => setDraft({ ...draft, limitlessMarketSlug: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono text-xs"
-                />
-                <span className="text-[10px] text-emerald-400 mt-1 block">
-                  {isAr ? '✓ مؤمّن: عقود 5 دقائق محظورة تماماً لحماية صفقاتك' : '✓ Secured: 5-minute contracts are strictly prohibited'}
-                </span>
-              </div>
-
-              <div>
-                <label className="block text-slate-400 mb-1">Legacy X-API-Key (Optional):</label>
-                <input
-                  type="password"
-                  placeholder="X-API-Key..."
-                  value={draft.limitlessApiKey}
-                  onChange={(e) => setDraft({ ...draft, limitlessApiKey: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
-                />
-              </div>
-            </div>
+            )}
 
             <div>
-              <label className="block text-slate-400 mb-1">Limitless WebSocket URL (Official SDK Default):</label>
+              <label className="block text-slate-400 mb-1 font-semibold">
+                {isAr ? 'رمز سوق التوقع (15 دقيقة حصراً):' : 'Prediction Market Slug (15m Only):'}
+              </label>
               <input
                 type="text"
-                value={draft.limitlessWsUrl}
-                onChange={(e) => setDraft({ ...draft, limitlessWsUrl: e.target.value })}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
+                placeholder="btc-up-or-down-15-min"
+                value={draft.limitlessMarketSlug}
+                onChange={(e) => setDraft({ ...draft, limitlessMarketSlug: e.target.value })}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono text-xs focus:outline-none focus:border-emerald-500"
               />
+              <span className="text-[10px] text-emerald-400 mt-1 block">
+                {isAr ? '✓ مؤمّن تلقائياً: يتم اكتشاف وتحديث عقد الـ 15 دقيقة النشط فوراً' : '✓ Auto-secured: 15-minute active market is dynamically tracked'}
+              </span>
             </div>
           </div>
 
@@ -406,10 +371,17 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
               </div>
             </div>
 
-            <div className="mt-2.5 p-2 rounded-lg bg-emerald-950/30 border border-emerald-700/40 text-[11px] text-emerald-300">
-              {isAr
-                ? '⚡ أمر FAK (Fill-And-Kill): يتم تنفيذه فورياً على العقود المعروضة بسعر 20 سنت أو أقل، ويتم إلغاء (Kill) أي جزء متبقٍ في الحال دون تركه معلقاً.'
-                : '⚡ FAK (Fill-And-Kill): Executes immediately against asks at $0.20 or lower, and instantly kills (cancels) any unfilled remainder.'}
+            <div className="mt-2.5 p-2 rounded-lg bg-emerald-950/30 border border-emerald-700/40 text-[11px] text-emerald-300 space-y-1">
+              <div>
+                {isAr
+                  ? '⚡ أمر FAK (Fill-And-Kill): يتم تنفيذه فورياً على العقود المعروضة بسعر 20 سنت أو أقل، ويتم إلغاء (Kill) أي جزء متبقٍ في الحال دون تركه معلقاً.'
+                  : '⚡ FAK (Fill-And-Kill): Executes immediately against asks at $0.20 or lower, and instantly kills (cancels) any unfilled remainder.'}
+              </div>
+              <div className="text-sky-300">
+                {isAr
+                  ? '✨ شراء أجزاء من العقد مفعّل: الروبوت يشتري أجزاء العقود بدقة (مثل 0.1 أو 0.25 أو 0.5 عقد) دون فرض حد أدنى 1 عقد كامل لحماية رأس المال وفق نموذج كيلي.'
+                  : '✨ Fractional contracts enabled: The bot calculates and executes fractional contract sizes without forcing a minimum of 1 full contract.'}
+              </div>
             </div>
           </div>
         </div>

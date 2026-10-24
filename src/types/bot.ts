@@ -22,6 +22,7 @@ export interface BotConfig {
   limitlessTokenId: string;
   limitlessTokenSecret: string;
   walletAddress?: string;
+  privateKey?: string;
 }
 
 export interface LimitlessMarketDetails {

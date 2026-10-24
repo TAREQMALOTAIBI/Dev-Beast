@@ -85,11 +85,20 @@ export function calculateKellySizing(
   const kellyFraction = (b * p - q) / b;
   const riskToTake = Math.min(Math.max(kellyFraction, 0), maxRiskPercent);
   const positionSizeUsd = balance * riskToTake;
-  const numberOfContracts = Math.floor(positionSizeUsd / price);
+
+  // Fractional contract calculation: Allows purchasing partial/fractional contracts
+  // (e.g. 0.1, 0.25, 0.5, 1.25) preserving exact Kelly risk without forced minimum 1 contract
+  const numberOfContracts = positionSizeUsd > 0 && price > 0
+    ? parseFloat((positionSizeUsd / price).toFixed(2))
+    : 0;
 
   const effectiveChunks = Math.max(1, fractionChunks || 1);
-  const chunkSize = effectiveChunks === 1 ? numberOfContracts : Math.floor(numberOfContracts / effectiveChunks);
-  const lastChunkSize = effectiveChunks === 1 ? numberOfContracts : Math.max(0, numberOfContracts - chunkSize * (effectiveChunks - 1));
+  const chunkSize = effectiveChunks === 1
+    ? numberOfContracts
+    : parseFloat((numberOfContracts / effectiveChunks).toFixed(2));
+  const lastChunkSize = effectiveChunks === 1
+    ? numberOfContracts
+    : Math.max(0, parseFloat((numberOfContracts - chunkSize * (effectiveChunks - 1)).toFixed(2)));
 
   return {
     b,

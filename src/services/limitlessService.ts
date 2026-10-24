@@ -412,7 +412,8 @@ export class LimitlessService {
     delayMs: number,
     onChunkUpdate: (chunk: ExecutedChunk) => void,
     direction: 'SHORT' | 'LONG' = 'SHORT',
-    targetMarketSlug?: string
+    targetMarketSlug?: string,
+    credentials?: { privateKey?: string; tokenId?: string; secret?: string; apiKey?: string }
   ): Promise<ExecutedChunk[]> {
     if (this.status !== 'CONNECTED' && this.status !== 'AUTHENTICATED') {
       this.log('SYSTEM', `[ORDER DISPATCH] WebSocket status is ${this.status}. Transmitting order via Limitless HTTP REST order execution proxy...`);
@@ -428,13 +429,17 @@ export class LimitlessService {
     }
 
     const executedChunks: ExecutedChunk[] = [];
-    const effectiveChunks = Math.min(Math.max(1, totalContracts), chunksCount);
-    const chunkSize = Math.floor(totalContracts / effectiveChunks);
+    const effectiveChunks = totalContracts < 1 ? 1 : Math.min(Math.max(1, Math.floor(totalContracts)), chunksCount);
+    const chunkSize = effectiveChunks === 1
+      ? totalContracts
+      : parseFloat((totalContracts / effectiveChunks).toFixed(2));
     let remainingContracts = totalContracts;
 
     for (let i = 0; i < effectiveChunks; i++) {
-      const contractsToBuy = i === effectiveChunks - 1 ? remainingContracts : chunkSize;
-      remainingContracts -= contractsToBuy;
+      const contractsToBuy = i === effectiveChunks - 1
+        ? parseFloat(remainingContracts.toFixed(2))
+        : chunkSize;
+      remainingContracts = parseFloat((remainingContracts - contractsToBuy).toFixed(2));
       if (contractsToBuy <= 0) continue;
 
       const chunkId = i + 1;
@@ -449,6 +454,9 @@ export class LimitlessService {
         price: priceCents,
         size: contractsToBuy,
         chunkId,
+        privateKey: credentials?.privateKey,
+        tokenId: credentials?.tokenId,
+        secret: credentials?.secret,
       };
 
       const chunkState: ExecutedChunk = {
