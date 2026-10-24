@@ -30,11 +30,23 @@ app.get('/api/binance/*', async (req, res) => {
 let cachedActiveBtc = null;
 let lastBtcFetchTime = 0;
 
+function is15MinBtcMarket(m) {
+  if (!m) return false;
+  const slug = (m.slug || '').toLowerCase();
+  const title = (m.title || '').toLowerCase();
+  const isBtc = slug.includes('btc') || title.includes('btc') || title.includes('bitcoin');
+  if (!isBtc) return false;
+  const is15 = /(^|[^0-9])15-min/i.test(slug) || /15\s*min/i.test(title) || /(^|[^0-9])15m/i.test(slug);
+  const is5 = /(^|[^0-9])5-min/i.test(slug) || /(^|[^0-9])5\s*min/i.test(title);
+  if (slug.includes('hourly') || slug.includes('daily')) return false;
+  return is15 && !is5;
+}
+
 // Discover active BTC 15-minute prediction market on Limitless
 app.get('/api/limitless/active-btc', async (_req, res) => {
   try {
     const now = Date.now();
-    if (cachedActiveBtc && now - lastBtcFetchTime < 15000) {
+    if (cachedActiveBtc && is15MinBtcMarket(cachedActiveBtc) && now - lastBtcFetchTime < 15000) {
       return res.json({ success: true, ...cachedActiveBtc });
     }
 
@@ -42,11 +54,8 @@ app.get('/api/limitless/active-btc', async (_req, res) => {
     const json = await response.json();
     const markets = json?.data || [];
 
-    // Match 15-min BTC prediction market, fallback to 5-min or any active BTC market
-    const btcMarket =
-      markets.find((m) => m.slug?.toLowerCase().includes('btc') && m.slug?.includes('15-min')) ||
-      markets.find((m) => m.slug?.toLowerCase().includes('btc') && m.slug?.includes('5-min')) ||
-      markets.find((m) => m.slug?.toLowerCase().includes('btc'));
+    // STRICT FILTER: Match exclusively 15-minute BTC prediction markets
+    const btcMarket = markets.find((m) => is15MinBtcMarket(m));
 
     if (btcMarket) {
       cachedActiveBtc = {
@@ -116,8 +125,8 @@ async function initLimitlessSdkWebSocket() {
       console.log(`[Limitless WS] Connected. Status: ${currentWsStatus}`);
       broadcastSse('status', { status: currentWsStatus });
 
-      // Determine active market slug
-      const activeSlug = cachedActiveBtc?.slug || 'btc-100k-weekly';
+      // Determine active 15m market slug
+      const activeSlug = cachedActiveBtcServer?.slug || cachedActiveBtc?.slug || 'btc-up-or-down-15-min';
       try {
         await ws.subscribe('subscribe_market_prices', {
           marketSlugs: [activeSlug],
@@ -172,12 +181,16 @@ async function initLimitlessSdkWebSocket() {
       broadcastSse('tx', data);
     });
 
-    // Disconnect handling per Limitless SDK 1.1.0 specifications:
+    ws.on('system', (data) => {
+      broadcastSse('system', data);
+    });
+
+    // Disconnect handling per Limitless SDK specifications:
     // "To survive a drop, listen for disconnect, call await ws.disconnect(); await ws.connect(); and re-issue your subscribe() calls."
     ws.on('disconnect', (reason) => {
-      currentWsStatus = 'DISCONNECTED';
+      currentWsStatus = 'CONNECTING';
       console.log(`[Limitless WS] Disconnected (${reason}). Re-initiating connection with fresh handshake...`);
-      broadcastSse('status', { status: 'DISCONNECTED', reason });
+      broadcastSse('status', { status: 'CONNECTING', reason });
       setTimeout(async () => {
         try {
           if (limitlessWsInstance) {
@@ -187,7 +200,7 @@ async function initLimitlessSdkWebSocket() {
         } catch (e) {
           console.error('[Limitless WS] Reconnection error:', e?.message || e);
         }
-      }, 3000);
+      }, 1500);
     });
 
     ws.on('error', (err) => {
@@ -210,8 +223,9 @@ initLimitlessSdkWebSocket().catch((err) => {
 // Server-Sent Events (SSE) live stream to deliver zero-latency updates to frontend
 app.get('/api/limitless/live-stream', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders?.();
 
   // Send initial state snapshots immediately
@@ -226,11 +240,35 @@ app.get('/api/limitless/live-stream', (req, res) => {
     res.write(`event: positions\ndata: ${JSON.stringify(latestPositionsData)}\n\n`);
   }
 
+  // Keepalive ping every 10 seconds to prevent proxy drops
+  const pingTimer = setInterval(() => {
+    try {
+      res.write(`: ping\n\n`);
+    } catch {
+      clearInterval(pingTimer);
+    }
+  }, 10000);
+
   sseClients.add(res);
 
   req.on('close', () => {
+    clearInterval(pingTimer);
     sseClients.delete(res);
   });
+});
+
+app.post('/api/limitless/subscribe', async (req, res) => {
+  try {
+    const { marketSlug } = req.body || {};
+    if (marketSlug && limitlessWsInstance) {
+      await limitlessWsInstance.subscribe('subscribe_market_prices', {
+        marketSlugs: [marketSlug],
+      });
+    }
+    res.json({ success: true, subscribed: marketSlug });
+  } catch (err) {
+    res.json({ success: false, error: err.message });
+  }
 });
 
 // Snapshot endpoint for polling or quick state recovery
@@ -251,7 +289,7 @@ let lastBtcFetchTimeServer = 0;
 app.get('/api/limitless/active-btc', async (_req, res) => {
   try {
     const now = Date.now();
-    if (cachedActiveBtcServer && now - lastBtcFetchTimeServer < 15000) {
+    if (cachedActiveBtcServer && is15MinBtcMarket(cachedActiveBtcServer) && now - lastBtcFetchTimeServer < 15000) {
       return res.json({ success: true, ...cachedActiveBtcServer });
     }
 
@@ -259,8 +297,7 @@ app.get('/api/limitless/active-btc', async (_req, res) => {
     const json = await response.json();
     const markets = json?.data || [];
 
-    const btc15m = markets.find((m) => m.slug?.toLowerCase().includes('btc') && m.slug?.includes('15-min'));
-    const btcMarket = btc15m || markets.find((m) => m.slug?.toLowerCase().includes('btc') && m.slug?.includes('5-min')) || markets.find((m) => m.slug?.toLowerCase().includes('btc'));
+    const btcMarket = markets.find((m) => is15MinBtcMarket(m));
 
     if (btcMarket) {
       cachedActiveBtcServer = {
@@ -282,7 +319,7 @@ app.get('/api/limitless/active-btc', async (_req, res) => {
       return res.json({ success: true, ...cachedActiveBtcServer });
     }
 
-    res.json({ success: false, message: 'No active BTC prediction market found' });
+    res.json({ success: false, message: 'No active 15-minute BTC prediction market found' });
   } catch (err) {
     res.status(500).json({ success: false, error: String(err) });
   }

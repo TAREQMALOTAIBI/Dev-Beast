@@ -28,7 +28,53 @@ export class LimitlessService {
   private isExplicitlyClosed = false;
   private activeMarketSlug = 'btc-up-or-down-15-min';
   private pollingTimer: number | null = null;
+  private liveStateTimer: number | null = null;
   private credentials?: { apiKey?: string; tokenId?: string; secret?: string };
+
+  /**
+   * Continuous high-reliability sync via /api/limitless/live-state
+   * Ensures uninterrupted data flow even when browser proxy interrupts or buffers SSE.
+   */
+  private startLiveStateSync() {
+    this.stopLiveStateSync();
+    const fetchState = async () => {
+      if (this.isExplicitlyClosed) return;
+      try {
+        const res = await fetch('/api/limitless/live-state');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data) {
+          if (data.status && data.status !== 'DISCONNECTED') {
+            this.setStatus(data.status);
+          }
+          if (data.orderbook && data.orderbook.orderbook) {
+            this.currentOrderbook = data.orderbook;
+            this.orderbookListeners.forEach((l) => l(data.orderbook));
+          }
+          if (data.oracle) {
+            this.currentOracle = data.oracle;
+            this.oracleListeners.forEach((l) => l(data.oracle));
+          }
+          if (data.positions && Array.isArray(data.positions.positions)) {
+            this.currentPositions = data.positions.positions;
+            this.positionListeners.forEach((l) => l(this.currentPositions));
+          }
+        }
+      } catch {
+        // Safe continuation
+      }
+    };
+
+    fetchState();
+    this.liveStateTimer = window.setInterval(fetchState, 1500);
+  }
+
+  private stopLiveStateSync() {
+    if (this.liveStateTimer) {
+      clearInterval(this.liveStateTimer);
+      this.liveStateTimer = null;
+    }
+  }
 
   public subscribeStatus(listener: (status: LimitlessStatus) => void) {
     this.listeners.push(listener);
@@ -132,6 +178,7 @@ export class LimitlessService {
     this.activeMarketSlug = marketSlug || 'btc-up-or-down-15-min';
 
     this.log('SYSTEM', `[LIMITLESS STREAM] Initializing live connection to Limitless Exchange Gateway...`);
+    this.startLiveStateSync();
 
     // Connect to official Limitless WebSocketClient SSE stream provided by backend server
     try {
@@ -340,6 +387,7 @@ export class LimitlessService {
   public disconnect() {
     this.isExplicitlyClosed = true;
     this.stopOrderbookPolling();
+    this.stopLiveStateSync();
     if (this.eventSource) {
       try {
         this.eventSource.close();
