@@ -49,7 +49,7 @@ function is15MinBtcMarket(m) {
 let limitlessWsInstance = null;
 let currentWsStatus = 'DISCONNECTED';
 let latestOrderbookData = null;
-let latestOrderbookVersion = 0;
+const orderbookVersions = new Map();
 let latestOracleData = null;
 let latestPositionsData = null;
 let recentOrderEvents = [];
@@ -115,11 +115,32 @@ async function initLimitlessSdkWebSocket() {
 
     // CLOB Orderbook updates
     ws.on('orderbookUpdate', (data) => {
-      if (data?.version && data.version <= latestOrderbookVersion) {
+      const slug = data?.marketSlug;
+      const lastVer = slug ? orderbookVersions.get(slug) || 0 : 0;
+      if (data?.version && data.version <= lastVer) {
         return; // Drop frames with version <= last seen (per docs)
       }
-      if (data?.version) latestOrderbookVersion = data.version;
+      if (data?.version && slug) {
+        orderbookVersions.set(slug, data.version);
+      }
       latestOrderbookData = data;
+
+      // Extract real-time live contract price from orderbook update and sync with cached active market
+      const ob = data?.orderbook;
+      const liveMidpoint = ob?.adjustedMidpoint ?? (
+        ob?.bids?.[0]?.price && ob?.asks?.[0]?.price
+          ? (ob.bids[0].price + ob.asks[0].price) / 2
+          : null
+      );
+
+      if (liveMidpoint && liveMidpoint > 0) {
+        const p0 = parseFloat(Number(liveMidpoint).toFixed(4));
+        const p1 = parseFloat((1 - p0).toFixed(4));
+        if (cachedActiveBtcServer) cachedActiveBtcServer.prices = [p0, p1];
+        if (cachedActiveBtc) cachedActiveBtc.prices = [p0, p1];
+        broadcastSse('priceUpdate', { marketSlug: slug, prices: [p0, p1] });
+      }
+
       broadcastSse('orderbookUpdate', data);
     });
 
@@ -201,6 +222,9 @@ app.get('/api/limitless/live-stream', (req, res) => {
   if (latestOrderbookData) {
     res.write(`event: orderbookUpdate\ndata: ${JSON.stringify(latestOrderbookData)}\n\n`);
   }
+  if (cachedActiveBtcServer?.prices) {
+    res.write(`event: priceUpdate\ndata: ${JSON.stringify({ marketSlug: cachedActiveBtcServer.slug, prices: cachedActiveBtcServer.prices })}\n\n`);
+  }
   if (latestOracleData) {
     res.write(`event: oraclePriceData\ndata: ${JSON.stringify(latestOracleData)}\n\n`);
   }
@@ -246,6 +270,7 @@ app.get('/api/limitless/live-state', (_req, res) => {
     orderbook: latestOrderbookData,
     oracle: latestOracleData,
     positions: latestPositionsData,
+    market: cachedActiveBtcServer,
     recentOrderEvents: recentOrderEvents.slice(0, 10),
     recentTxEvents: recentTxEvents.slice(0, 10),
   });

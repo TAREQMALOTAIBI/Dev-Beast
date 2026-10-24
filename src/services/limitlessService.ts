@@ -21,6 +21,8 @@ export class LimitlessService {
   private oracleListeners: ((oracle: OraclePriceData) => void)[] = [];
   private positionListeners: ((positions: PositionItem[]) => void)[] = [];
   private orderEventListeners: ((event: OrderEvent) => void)[] = [];
+  private priceListeners: ((data: { marketSlug: string; prices: [number, number] }) => void)[] = [];
+  private marketChangeListeners: ((market: any) => void)[] = [];
 
   private currentOrderbook: OrderbookUpdate | null = null;
   private currentOracle: OraclePriceData | null = null;
@@ -58,6 +60,14 @@ export class LimitlessService {
           if (data.positions && Array.isArray(data.positions.positions)) {
             this.currentPositions = data.positions.positions;
             this.positionListeners.forEach((l) => l(this.currentPositions));
+          }
+          if (data.market) {
+            if (data.market.prices && Array.isArray(data.market.prices)) {
+              this.priceListeners.forEach((l) =>
+                l({ marketSlug: data.market.slug || this.activeMarketSlug, prices: data.market.prices })
+              );
+            }
+            this.marketChangeListeners.forEach((l) => l(data.market));
           }
         }
       } catch {
@@ -126,6 +136,20 @@ export class LimitlessService {
     this.orderEventListeners.push(listener);
     return () => {
       this.orderEventListeners = this.orderEventListeners.filter((l) => l !== listener);
+    };
+  }
+
+  public subscribePriceUpdate(listener: (data: { marketSlug: string; prices: [number, number] }) => void) {
+    this.priceListeners.push(listener);
+    return () => {
+      this.priceListeners = this.priceListeners.filter((l) => l !== listener);
+    };
+  }
+
+  public subscribeMarketChange(listener: (market: any) => void) {
+    this.marketChangeListeners.push(listener);
+    return () => {
+      this.marketChangeListeners = this.marketChangeListeners.filter((l) => l !== listener);
     };
   }
 
@@ -221,6 +245,24 @@ export class LimitlessService {
               this.setStatus(hasAuth ? 'AUTHENTICATED' : 'CONNECTED');
             }
             this.stopOrderbookPolling();
+          } catch {}
+        });
+
+        es.addEventListener('priceUpdate', (e: MessageEvent) => {
+          try {
+            const data = JSON.parse(e.data);
+            if (data?.prices && Array.isArray(data.prices)) {
+              this.priceListeners.forEach((l) => l(data));
+            }
+          } catch {}
+        });
+
+        es.addEventListener('marketChange', (e: MessageEvent) => {
+          try {
+            const data = JSON.parse(e.data);
+            if (data) {
+              this.marketChangeListeners.forEach((l) => l(data));
+            }
           } catch {}
         });
 

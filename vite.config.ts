@@ -117,7 +117,11 @@ async function fetchLive15MinBtcMarket(): Promise<any> {
     if (!res.ok) return null;
     const json = await res.json();
     const list = json?.data || [];
-    const btc15 = list.find((m: any) => is15MinBtcMarket(m));
+    const now = Date.now();
+    // Prioritize active, funded 15-minute BTC market that has NOT yet expired
+    const btc15 = list.find((m: any) => is15MinBtcMarket(m) && m.status === 'FUNDED' && (!m.expirationTimestamp || m.expirationTimestamp > now))
+      || list.find((m: any) => is15MinBtcMarket(m) && (!m.expirationTimestamp || m.expirationTimestamp > now))
+      || list.find((m: any) => is15MinBtcMarket(m));
     return btc15 || null;
   } catch {
     return null;
@@ -127,7 +131,7 @@ async function fetchLive15MinBtcMarket(): Promise<any> {
 let limitlessWsInstance: any = null;
 let currentWsStatus: string = 'DISCONNECTED';
 let latestOrderbookData: any = null;
-let latestOrderbookVersion: number = 0;
+const orderbookVersions = new Map<string, number>();
 let latestOracleData: any = null;
 let latestPositionsData: any = null;
 const recentOrderEvents: any[] = [];
@@ -171,25 +175,24 @@ async function initLimitlessSdkWebSocket() {
       broadcastSse('status', { status: currentWsStatus });
 
       try {
-        if (!cachedActiveBtc || !is15MinBtcMarket(cachedActiveBtc)) {
-          const btc15 = await fetchLive15MinBtcMarket();
-          if (btc15) {
-            cachedActiveBtc = {
-              slug: btc15.slug,
-              title: btc15.title,
-              status: btc15.status,
-              prices: btc15.prices,
-              tradePrices: btc15.tradePrices,
-              address: btc15.address,
-              expirationTimestamp: btc15.expirationTimestamp,
-              startAt: btc15.startAt,
-              openPrice: btc15.metadata?.openPrice,
-              tokens: btc15.tokens,
-              venueExchange: btc15.venue?.exchange,
-              volumeFormatted: btc15.volumeFormatted,
-              oracleSource: btc15.priceOracleMetadata?.name || 'Chainlink BTC 60s TWAP',
-            };
-          }
+        const btc15 = await fetchLive15MinBtcMarket();
+        if (btc15) {
+          cachedActiveBtc = {
+            slug: btc15.slug,
+            title: btc15.title,
+            status: btc15.status,
+            prices: btc15.prices,
+            tradePrices: btc15.tradePrices,
+            address: btc15.address,
+            expirationTimestamp: btc15.expirationTimestamp,
+            startAt: btc15.startAt,
+            openPrice: btc15.metadata?.openPrice,
+            tokens: btc15.tokens,
+            venueExchange: btc15.venue?.exchange,
+            volumeFormatted: btc15.volumeFormatted,
+            oracleSource: btc15.priceOracleMetadata?.name || 'Chainlink BTC 60s TWAP',
+          };
+          lastBtcFetchTime = Date.now();
         }
       } catch {
         // safe continuation
@@ -214,11 +217,31 @@ async function initLimitlessSdkWebSocket() {
     });
 
     ws.on('orderbookUpdate', (data: any) => {
-      if (data?.version && data.version <= latestOrderbookVersion) {
-        return; // drop frames with version <= last seen
+      const slug = data?.marketSlug;
+      const lastVer = slug ? orderbookVersions.get(slug) || 0 : 0;
+      if (data?.version && data.version <= lastVer) {
+        return; // drop frames with version <= last seen for this slug
       }
-      if (data?.version) latestOrderbookVersion = data.version;
+      if (data?.version && slug) {
+        orderbookVersions.set(slug, data.version);
+      }
       latestOrderbookData = data;
+
+      // Extract real-time live contract price from orderbook update and sync with cachedActiveBtc
+      const ob = data?.orderbook;
+      const liveMidpoint = ob?.adjustedMidpoint ?? (
+        ob?.bids?.[0]?.price && ob?.asks?.[0]?.price
+          ? (ob.bids[0].price + ob.asks[0].price) / 2
+          : null
+      );
+
+      if (liveMidpoint && liveMidpoint > 0 && cachedActiveBtc && (slug === cachedActiveBtc.slug || !slug)) {
+        const p0 = parseFloat(Number(liveMidpoint).toFixed(4));
+        const p1 = parseFloat((1 - p0).toFixed(4));
+        cachedActiveBtc.prices = [p0, p1];
+        broadcastSse('priceUpdate', { marketSlug: slug || cachedActiveBtc.slug, prices: [p0, p1] });
+      }
+
       broadcastSse('orderbookUpdate', data);
     });
 
@@ -293,6 +316,9 @@ function setupApiMiddlewares(middlewares: any) {
     if (latestOrderbookData) {
       res.write(`event: orderbookUpdate\ndata: ${JSON.stringify(latestOrderbookData)}\n\n`);
     }
+    if (cachedActiveBtc?.prices) {
+      res.write(`event: priceUpdate\ndata: ${JSON.stringify({ marketSlug: cachedActiveBtc.slug, prices: cachedActiveBtc.prices })}\n\n`);
+    }
     if (latestOracleData) {
       res.write(`event: oraclePriceData\ndata: ${JSON.stringify(latestOracleData)}\n\n`);
     }
@@ -346,6 +372,7 @@ function setupApiMiddlewares(middlewares: any) {
       orderbook: latestOrderbookData,
       oracle: latestOracleData,
       positions: latestPositionsData,
+      market: cachedActiveBtc,
       recentOrderEvents: recentOrderEvents.slice(0, 10),
       recentTxEvents: recentTxEvents.slice(0, 10),
     }));
@@ -355,7 +382,8 @@ function setupApiMiddlewares(middlewares: any) {
     res.setHeader('Content-Type', 'application/json');
     try {
       const now = Date.now();
-      if (cachedActiveBtc && is15MinBtcMarket(cachedActiveBtc) && now - lastBtcFetchTime < 15000) {
+      const isExpired = cachedActiveBtc?.expirationTimestamp && cachedActiveBtc.expirationTimestamp <= now;
+      if (!isExpired && cachedActiveBtc && is15MinBtcMarket(cachedActiveBtc) && now - lastBtcFetchTime < 10000) {
         return res.end(JSON.stringify({ success: true, ...cachedActiveBtc }));
       }
 
@@ -363,11 +391,14 @@ function setupApiMiddlewares(middlewares: any) {
       const json = await response.json();
       const markets = json?.data || [];
 
-      // STRICT FILTER: Only 15-minute BTC markets. Zero fallback to 5-min or other intervals.
-      const btc15Market = markets.find((m: any) => is15MinBtcMarket(m));
+      // STRICT FILTER: Active, funded 15-minute BTC market that has not expired
+      const btc15Market = markets.find((m: any) => is15MinBtcMarket(m) && m.status === 'FUNDED' && (!m.expirationTimestamp || m.expirationTimestamp > now))
+        || markets.find((m: any) => is15MinBtcMarket(m) && (!m.expirationTimestamp || m.expirationTimestamp > now))
+        || markets.find((m: any) => is15MinBtcMarket(m));
 
       if (btc15Market) {
         const previousSlug = cachedActiveBtc?.slug;
+        const slugChanged = previousSlug !== btc15Market.slug;
         cachedActiveBtc = {
           slug: btc15Market.slug,
           title: btc15Market.title,
@@ -385,10 +416,14 @@ function setupApiMiddlewares(middlewares: any) {
         };
         lastBtcFetchTime = now;
 
-        if (limitlessWsInstance && previousSlug !== btc15Market.slug) {
-          limitlessWsInstance.subscribe('subscribe_market_prices', {
-            marketSlugs: [btc15Market.slug],
-          }).catch(() => {});
+        if (slugChanged) {
+          latestOrderbookData = null;
+          broadcastSse('marketChange', cachedActiveBtc);
+          if (limitlessWsInstance) {
+            limitlessWsInstance.subscribe('subscribe_market_prices', {
+              marketSlugs: [btc15Market.slug],
+            }).catch(() => {});
+          }
         }
 
         return res.end(JSON.stringify({ success: true, ...cachedActiveBtc }));

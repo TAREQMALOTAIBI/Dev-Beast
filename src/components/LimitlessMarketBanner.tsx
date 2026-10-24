@@ -84,9 +84,43 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
   const title = market?.title || (isAr ? 'سوق البيتكوين صعود أم هبوط - 15 دقيقة' : 'BTC Up or Down - 15 Min');
   const marketUrl = `https://limitless.exchange/markets/${encodeURIComponent(slug)}`;
 
-  // Parse prices from market or orderbook
-  const yesPrice = market?.prices?.[0] !== undefined ? market.prices[0] : 0.65;
-  const noPrice = market?.prices?.[1] !== undefined ? market.prices[1] : 0.35;
+  // Real best bid / ask from orderbook
+  const bestBid = orderbook?.orderbook?.bids?.[0];
+  const bestAsk = orderbook?.orderbook?.asks?.[0];
+
+  // Dynamic live price calculation prioritizing live orderbook midpoint and bid/ask spread
+  const bookMidpoint = orderbook?.orderbook?.adjustedMidpoint && orderbook.orderbook.adjustedMidpoint > 0
+    ? orderbook.orderbook.adjustedMidpoint
+    : (bestBid && bestAsk && bestBid.price > 0 && bestAsk.price > 0)
+      ? (bestBid.price + bestAsk.price) / 2
+      : null;
+
+  const rawYes = bookMidpoint !== null
+    ? bookMidpoint
+    : (market?.prices?.[0] !== undefined ? market.prices[0] : 0.65);
+
+  const yesPrice = Math.max(0.01, Math.min(0.99, rawYes));
+  const noPrice = Math.max(0.01, Math.min(0.99, 1.0 - yesPrice));
+
+  const [lastTick, setLastTick] = useState<{ direction: 'up' | 'down' | null; delta: number; time: number }>({
+    direction: null,
+    delta: 0,
+    time: 0,
+  });
+  const prevYesPriceRef = React.useRef<number>(yesPrice);
+
+  useEffect(() => {
+    if (prevYesPriceRef.current !== undefined && Math.abs(prevYesPriceRef.current - yesPrice) >= 0.0005) {
+      const diff = yesPrice - prevYesPriceRef.current;
+      const dir = diff > 0 ? 'up' : 'down';
+      setLastTick({ direction: dir, delta: Math.abs(diff * 100), time: Date.now() });
+      prevYesPriceRef.current = yesPrice;
+      const timer = setTimeout(() => {
+        setLastTick((prev) => ({ ...prev, direction: null }));
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [yesPrice]);
 
   const yesPayoutMultiplier = yesPrice > 0 ? (1 / yesPrice).toFixed(2) : '1.00';
   const noPayoutMultiplier = noPrice > 0 ? (1 / noPrice).toFixed(2) : '1.00';
@@ -100,10 +134,6 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
   const priceDifference = priceToBeat && activeCurrentPrice ? activeCurrentPrice - priceToBeat : null;
   const priceDifferencePct = priceToBeat && priceDifference ? (priceDifference / priceToBeat) * 100 : null;
   const isCurrentlyUp = priceDifference !== null ? priceDifference >= 0 : true;
-
-  // Real best bid / ask from orderbook
-  const bestBid = orderbook?.orderbook?.bids?.[0];
-  const bestAsk = orderbook?.orderbook?.asks?.[0];
 
   return (
     <div className="rounded-2xl border border-emerald-500/30 bg-gradient-to-b from-slate-900 via-slate-900/95 to-[#0b1120] shadow-xl shadow-emerald-950/20 overflow-hidden mb-6">
@@ -220,84 +250,119 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
         </div>
 
         {/* Column 2: UP (YES) & DOWN (NO) Contracts Cards (5 cols) */}
-        <div className="md:col-span-5 grid grid-cols-2 gap-3">
-          
-          {/* Card: UP / YES Contract */}
-          <div className={`p-3.5 rounded-xl border transition-all ${
-            isCurrentlyUp
-              ? 'bg-emerald-950/40 border-emerald-500/60 ring-1 ring-emerald-500/30'
-              : 'bg-slate-950/50 border-slate-800'
-          }`}>
-            <div className="flex items-center justify-between text-xs mb-1.5">
-              <span className="font-extrabold text-emerald-400 flex items-center gap-1">
-                <TrendingUp className="w-3.5 h-3.5" />
-                <span>{isAr ? 'عقد صعود (UP)' : 'UP / YES'}</span>
+        <div className="md:col-span-5 flex flex-col justify-between space-y-2">
+          {/* Live Streaming Price Header */}
+          <div className="flex items-center justify-between text-[11px] px-1">
+            <span className="flex items-center gap-1.5 text-slate-300 font-semibold">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
-              <span className="text-[10px] text-slate-400 font-mono">
-                {yesPayoutMultiplier}x Payout
+              <span>{isAr ? 'أسعار العقود اللحظية (بث مباشر CLOB)' : 'Live Contract Prices (CLOB Stream)'}</span>
+            </span>
+            {lastTick.direction ? (
+              <span
+                className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded animate-pulse flex items-center gap-0.5 ${
+                  lastTick.direction === 'up'
+                    ? 'bg-emerald-950 text-emerald-300 border border-emerald-500/60'
+                    : 'bg-rose-950 text-rose-300 border border-rose-500/60'
+                }`}
+              >
+                {lastTick.direction === 'up' ? `▲ +${lastTick.delta.toFixed(2)}¢` : `▼ -${lastTick.delta.toFixed(2)}¢`}
               </span>
-            </div>
-
-            <div className="flex items-baseline justify-between mb-1">
-              <span className="text-xl md:text-2xl font-black font-mono text-emerald-300">
-                {(yesPrice * 100).toFixed(1)}¢
+            ) : (
+              <span className="text-[10px] text-emerald-400/80 font-mono flex items-center gap-1">
+                <Zap className="w-3 h-3" />
+                <span>{isAr ? 'محدث لحظياً' : 'Live Ticks'}</span>
               </span>
-              <span className="text-xs text-slate-400 font-mono">
-                ${yesPrice.toFixed(3)}
-              </span>
-            </div>
-
-            <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden my-2">
-              <div
-                className="bg-emerald-400 h-1.5 rounded-full transition-all duration-500"
-                style={{ width: `${Math.min(100, Math.max(0, yesPrice * 100))}%` }}
-              ></div>
-            </div>
-
-            <div className="text-[10px] text-slate-400 flex justify-between">
-              <span>{isAr ? 'احتمال السوق:' : 'Market Implied:'}</span>
-              <span className="font-bold text-emerald-400 font-mono">{(yesPrice * 100).toFixed(1)}%</span>
-            </div>
+            )}
           </div>
 
-          {/* Card: DOWN / NO Contract */}
-          <div className={`p-3.5 rounded-xl border transition-all ${
-            !isCurrentlyUp
-              ? 'bg-rose-950/40 border-rose-500/60 ring-1 ring-rose-500/30'
-              : 'bg-slate-950/50 border-slate-800'
-          }`}>
-            <div className="flex items-center justify-between text-xs mb-1.5">
-              <span className="font-extrabold text-rose-400 flex items-center gap-1">
-                <TrendingDown className="w-3.5 h-3.5" />
-                <span>{isAr ? 'عقد هبوط (DOWN)' : 'DOWN / NO'}</span>
-              </span>
-              <span className="text-[10px] text-purple-300 font-mono font-bold bg-purple-950/60 px-1 py-0.5 rounded border border-purple-500/40">
-                {noPayoutMultiplier}x Payout
-              </span>
+          <div className="grid grid-cols-2 gap-3">
+            {/* Card: UP / YES Contract */}
+            <div
+              className={`p-3.5 rounded-xl border transition-all duration-300 ${
+                lastTick.direction === 'up'
+                  ? 'bg-emerald-950/60 border-emerald-400 ring-2 ring-emerald-400/50 shadow-lg shadow-emerald-500/20'
+                  : isCurrentlyUp
+                  ? 'bg-emerald-950/40 border-emerald-500/60 ring-1 ring-emerald-500/30'
+                  : 'bg-slate-950/50 border-slate-800'
+              }`}
+            >
+              <div className="flex items-center justify-between text-xs mb-1.5">
+                <span className="font-extrabold text-emerald-400 flex items-center gap-1">
+                  <TrendingUp className="w-3.5 h-3.5" />
+                  <span>{isAr ? 'عقد صعود (UP)' : 'UP / YES'}</span>
+                </span>
+                <span className="text-[10px] text-slate-400 font-mono">
+                  {yesPayoutMultiplier}x Payout
+                </span>
+              </div>
+
+              <div className="flex items-baseline justify-between mb-1">
+                <span className="text-xl md:text-2xl font-black font-mono text-emerald-300">
+                  {(yesPrice * 100).toFixed(1)}¢
+                </span>
+                <span className="text-xs text-slate-400 font-mono">
+                  ${yesPrice.toFixed(3)}
+                </span>
+              </div>
+
+              <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden my-2">
+                <div
+                  className="bg-emerald-400 h-1.5 rounded-full transition-all duration-500"
+                  style={{ width: `${Math.min(100, Math.max(0, yesPrice * 100))}%` }}
+                ></div>
+              </div>
+
+              <div className="text-[10px] text-slate-400 flex justify-between">
+                <span>{isAr ? 'احتمال السوق:' : 'Market Implied:'}</span>
+                <span className="font-bold text-emerald-400 font-mono">{(yesPrice * 100).toFixed(1)}%</span>
+              </div>
             </div>
 
-            <div className="flex items-baseline justify-between mb-1">
-              <span className="text-xl md:text-2xl font-black font-mono text-rose-300">
-                {(noPrice * 100).toFixed(1)}¢
-              </span>
-              <span className="text-xs text-slate-400 font-mono">
-                ${noPrice.toFixed(3)}
-              </span>
-            </div>
+            {/* Card: DOWN / NO Contract */}
+            <div
+              className={`p-3.5 rounded-xl border transition-all duration-300 ${
+                lastTick.direction === 'down'
+                  ? 'bg-rose-950/60 border-rose-400 ring-2 ring-rose-400/50 shadow-lg shadow-rose-500/20'
+                  : !isCurrentlyUp
+                  ? 'bg-rose-950/40 border-rose-500/60 ring-1 ring-rose-500/30'
+                  : 'bg-slate-950/50 border-slate-800'
+              }`}
+            >
+              <div className="flex items-center justify-between text-xs mb-1.5">
+                <span className="font-extrabold text-rose-400 flex items-center gap-1">
+                  <TrendingDown className="w-3.5 h-3.5" />
+                  <span>{isAr ? 'عقد هبوط (DOWN)' : 'DOWN / NO'}</span>
+                </span>
+                <span className="text-[10px] text-purple-300 font-mono font-bold bg-purple-950/60 px-1 py-0.5 rounded border border-purple-500/40">
+                  {noPayoutMultiplier}x Payout
+                </span>
+              </div>
 
-            <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden my-2">
-              <div
-                className="bg-rose-400 h-1.5 rounded-full transition-all duration-500"
-                style={{ width: `${Math.min(100, Math.max(0, noPrice * 100))}%` }}
-              ></div>
-            </div>
+              <div className="flex items-baseline justify-between mb-1">
+                <span className="text-xl md:text-2xl font-black font-mono text-rose-300">
+                  {(noPrice * 100).toFixed(1)}¢
+                </span>
+                <span className="text-xs text-slate-400 font-mono">
+                  ${noPrice.toFixed(3)}
+                </span>
+              </div>
 
-            <div className="text-[10px] text-slate-400 flex justify-between">
-              <span>{isAr ? 'احتمال السوق:' : 'Market Implied:'}</span>
-              <span className="font-bold text-rose-400 font-mono">{(noPrice * 100).toFixed(1)}%</span>
+              <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden my-2">
+                <div
+                  className="bg-rose-400 h-1.5 rounded-full transition-all duration-500"
+                  style={{ width: `${Math.min(100, Math.max(0, noPrice * 100))}%` }}
+                ></div>
+              </div>
+
+              <div className="text-[10px] text-slate-400 flex justify-between">
+                <span>{isAr ? 'احتمال السوق:' : 'Market Implied:'}</span>
+                <span className="font-bold text-rose-400 font-mono">{(noPrice * 100).toFixed(1)}%</span>
+              </div>
             </div>
           </div>
-
         </div>
 
         {/* Column 3: 15-Minute Expiration Countdown & CLOB Health (3 cols) */}

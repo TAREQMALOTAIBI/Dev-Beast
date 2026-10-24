@@ -568,7 +568,52 @@ export function useTradingBot() {
     const unsubBalance = limitlessService.subscribeBalance((bal) => {
       console.log(`[EXCHANGE NOTICE] WebSocket balance notice: $${bal}`);
     });
-    const unsubOrderbook = limitlessService.subscribeOrderbook((ob) => setOrderbook(ob));
+    const unsubOrderbook = limitlessService.subscribeOrderbook((ob) => {
+      setOrderbook(ob);
+      if (ob?.orderbook?.adjustedMidpoint && ob.orderbook.adjustedMidpoint > 0) {
+        const liveYes = parseFloat(Number(ob.orderbook.adjustedMidpoint).toFixed(4));
+        const liveNo = parseFloat((1 - liveYes).toFixed(4));
+        setActiveLimitlessMarket((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            prices: [liveYes, liveNo],
+          };
+        });
+      }
+    });
+    const unsubPrices = limitlessService.subscribePriceUpdate((data) => {
+      if (data && data.prices && data.prices.length >= 2) {
+        setActiveLimitlessMarket((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            prices: [data.prices[0], data.prices[1]],
+          };
+        });
+      }
+    });
+    const unsubMarketChange = limitlessService.subscribeMarketChange((newMarket) => {
+      if (
+        newMarket &&
+        newMarket.slug &&
+        (/(^|[^0-9])15-min/i.test(newMarket.slug) || /15\s*min/i.test(newMarket.title || '')) &&
+        !/(^|[^0-9])5-min/i.test(newMarket.slug)
+      ) {
+        setActiveLimitlessMarket(newMarket);
+        activeLimitlessMarketRef.current = newMarket;
+        setConfig((prev) => {
+          if (prev.limitlessMarketSlug !== newMarket.slug) {
+            const updated = { ...prev, limitlessMarketSlug: newMarket.slug };
+            try {
+              localStorage.setItem('limitless_live_bot_config', JSON.stringify(updated));
+            } catch {}
+            return updated;
+          }
+          return prev;
+        });
+      }
+    });
     const unsubOracle = limitlessService.subscribeOracle((orc) => setOracle(orc));
     const unsubPositions = limitlessService.subscribePositions((pos) => setPositions(pos));
 
@@ -583,6 +628,8 @@ export function useTradingBot() {
       unsubLogs();
       unsubBalance();
       unsubOrderbook();
+      unsubPrices();
+      unsubMarketChange();
       unsubOracle();
       unsubPositions();
       limitlessService.disconnect();
