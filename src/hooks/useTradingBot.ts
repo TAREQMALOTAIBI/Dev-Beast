@@ -7,6 +7,7 @@ import {
   TradeOrder,
   WsMessageLog,
   LiveWalletInfo,
+  LimitlessMarketDetails,
 } from '../types/bot';
 import { binanceService } from '../services/binanceService';
 import { limitlessService, LimitlessStatus } from '../services/limitlessService';
@@ -507,6 +508,35 @@ export function useTradingBot() {
   const [liveWallet, setLiveWallet] = useState<LiveWalletInfo | null>(null);
   const [isLiveBalance, setIsLiveBalance] = useState<boolean>(false);
   const [isFetchingBalance, setIsFetchingBalance] = useState<boolean>(false);
+  const [activeLimitlessMarket, setActiveLimitlessMarket] = useState<LimitlessMarketDetails | null>(null);
+  const [isRefreshingMarket, setIsRefreshingMarket] = useState<boolean>(false);
+
+  const refreshActiveMarket = useCallback(async () => {
+    setIsRefreshingMarket(true);
+    try {
+      const res = await fetch('/api/limitless/active-btc');
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.success && data.slug) {
+          setActiveLimitlessMarket(data);
+          setConfig((prev) => {
+            if (prev.limitlessMarketSlug !== data.slug) {
+              const updated = { ...prev, limitlessMarketSlug: data.slug };
+              try {
+                localStorage.setItem('limitless_live_bot_config', JSON.stringify(updated));
+              } catch {}
+              return updated;
+            }
+            return prev;
+          });
+        }
+      }
+    } catch {
+      // safe continuation
+    } finally {
+      setIsRefreshingMarket(false);
+    }
+  }, []);
 
   const refreshLiveBalance = useCallback(async () => {
     setIsFetchingBalance(true);
@@ -567,31 +597,18 @@ export function useTradingBot() {
       });
 
     // Auto-discover active Limitless BTC prediction market
-    fetch('/api/limitless/active-btc')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data && data.success && data.slug) {
-          setConfig((prev) => {
-            if (!prev.limitlessMarketSlug || prev.limitlessMarketSlug === 'btc-100k-weekly') {
-              const updated = { ...prev, limitlessMarketSlug: data.slug };
-              try {
-                localStorage.setItem('limitless_live_bot_config', JSON.stringify(updated));
-              } catch {
-                // Ignore
-              }
-              return updated;
-            }
-            return prev;
-          });
-        }
-      })
-      .catch(() => {
-        // Silent fallback
-      });
+    refreshActiveMarket();
+    const marketInterval = setInterval(() => {
+      refreshActiveMarket();
+    }, 15000);
 
     // Fetch initial balance once on load; subsequent updates only happen when the user clicks refresh
     refreshLiveBalance();
-  }, [refreshLiveBalance]);
+
+    return () => {
+      clearInterval(marketInterval);
+    };
+  }, [refreshLiveBalance, refreshActiveMarket]);
 
   const toggleBot = () => {
     setBotActive((prev) => {
@@ -659,5 +676,8 @@ export function useTradingBot() {
     oracle,
     positions,
     hasEnvCredentials,
+    activeLimitlessMarket,
+    isRefreshingMarket,
+    refreshActiveMarket,
   };
 }

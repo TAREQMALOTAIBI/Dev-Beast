@@ -149,9 +149,13 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             <span className="font-bold text-slate-100 text-sm tracking-wide">{symbol}</span>
-            <span className="text-slate-400 font-mono">{timeframe}</span>
+            <span className="text-sky-400 font-mono bg-sky-950/70 border border-sky-500/40 px-1.5 py-0.5 rounded text-[11px] font-semibold">{timeframe} Spot Radar</span>
           </div>
           <span className="text-slate-600">·</span>
+          <span className="text-emerald-400 text-[11px] font-medium hidden sm:inline">
+            → إشارات التداول الفورية لعقد Limitless (15 Min)
+          </span>
+          <span className="text-slate-600 hidden sm:inline">·</span>
           <div className="text-slate-400">
             Z-Score Window: <span className="font-mono text-slate-200">{periods} Periods</span>
           </div>

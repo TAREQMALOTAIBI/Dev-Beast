@@ -66,10 +66,237 @@ app.get('/api/limitless/active-btc', async (_req, res) => {
   }
 });
 
+// ============================================================================
+// Limitless Official WebSocketClient Streaming Manager (per official docs)
+// ============================================================================
+let limitlessWsInstance = null;
+let currentWsStatus = 'DISCONNECTED';
+let latestOrderbookData = null;
+let latestOrderbookVersion = 0;
+let latestOracleData = null;
+let latestPositionsData = null;
+let recentOrderEvents = [];
+let recentTxEvents = [];
+const sseClients = new Set();
+
+function broadcastSse(eventType, payload) {
+  const msg = `event: ${eventType}\ndata: ${JSON.stringify(payload)}\n\n`;
+  for (const client of sseClients) {
+    try {
+      client.write(msg);
+    } catch {
+      sseClients.delete(client);
+    }
+  }
+}
+
+async function initLimitlessSdkWebSocket() {
+  try {
+    const sdk = await import('@limitless-exchange/sdk');
+    const tokenId = process.env.LMTS_TOKEN_ID?.trim();
+    const secret = process.env.LMTS_TOKEN_SECRET?.trim();
+    const hasAuth = Boolean(tokenId && secret);
+
+    const wsConfig = {
+      url: 'wss://ws.limitless.exchange',
+      autoReconnect: true,
+      timeout: 10000,
+    };
+    if (hasAuth) {
+      wsConfig.hmacCredentials = { tokenId, secret };
+    }
+
+    const ws = new sdk.WebSocketClient(wsConfig);
+    limitlessWsInstance = ws;
+    currentWsStatus = 'CONNECTING';
+    broadcastSse('status', { status: 'CONNECTING' });
+
+    ws.on('connect', async () => {
+      currentWsStatus = hasAuth ? 'AUTHENTICATED' : 'CONNECTED';
+      console.log(`[Limitless WS] Connected. Status: ${currentWsStatus}`);
+      broadcastSse('status', { status: currentWsStatus });
+
+      // Determine active market slug
+      const activeSlug = cachedActiveBtc?.slug || 'btc-100k-weekly';
+      try {
+        await ws.subscribe('subscribe_market_prices', {
+          marketSlugs: [activeSlug],
+        });
+        console.log(`[Limitless WS] Subscribed to market prices for: ${activeSlug}`);
+
+        if (hasAuth) {
+          // Per Limitless docs: subscribe immediately after connect() to ensure fresh HMAC signature
+          await ws.subscribe('subscribe_positions', { marketSlugs: [activeSlug] });
+          await ws.subscribe('subscribe_order_events');
+          await ws.subscribe('subscribe_transactions');
+          console.log('[Limitless WS] Subscribed to authenticated positions, order events & tx');
+        }
+      } catch (err) {
+        console.warn('[Limitless WS] Subscribe notice:', err?.message || err);
+      }
+    });
+
+    // CLOB Orderbook updates
+    ws.on('orderbookUpdate', (data) => {
+      if (data?.version && data.version <= latestOrderbookVersion) {
+        return; // Drop frames with version <= last seen (per docs)
+      }
+      if (data?.version) latestOrderbookVersion = data.version;
+      latestOrderbookData = data;
+      broadcastSse('orderbookUpdate', data);
+    });
+
+    // Oracle price updates (Chainlink / Pyth)
+    ws.on('oraclePriceData', (data) => {
+      latestOracleData = data;
+      broadcastSse('oraclePriceData', data);
+    });
+
+    // Account positions
+    ws.on('positions', (data) => {
+      latestPositionsData = data;
+      broadcastSse('positions', data);
+    });
+
+    // Order lifecycle & settlement events
+    ws.on('orderEvent', (event) => {
+      recentOrderEvents.unshift(event);
+      if (recentOrderEvents.length > 50) recentOrderEvents.pop();
+      broadcastSse('orderEvent', event);
+    });
+
+    // Transaction events
+    ws.on('tx', (data) => {
+      recentTxEvents.unshift(data);
+      if (recentTxEvents.length > 50) recentTxEvents.pop();
+      broadcastSse('tx', data);
+    });
+
+    // Disconnect handling per Limitless SDK 1.1.0 specifications:
+    // "To survive a drop, listen for disconnect, call await ws.disconnect(); await ws.connect(); and re-issue your subscribe() calls."
+    ws.on('disconnect', (reason) => {
+      currentWsStatus = 'DISCONNECTED';
+      console.log(`[Limitless WS] Disconnected (${reason}). Re-initiating connection with fresh handshake...`);
+      broadcastSse('status', { status: 'DISCONNECTED', reason });
+      setTimeout(async () => {
+        try {
+          if (limitlessWsInstance) {
+            await limitlessWsInstance.disconnect().catch(() => {});
+          }
+          await initLimitlessSdkWebSocket();
+        } catch (e) {
+          console.error('[Limitless WS] Reconnection error:', e?.message || e);
+        }
+      }, 3000);
+    });
+
+    ws.on('error', (err) => {
+      console.warn('[Limitless WS] Event error notice:', err?.message || err);
+    });
+
+    await ws.connect();
+  } catch (err) {
+    console.error('[Limitless WS] Connection failed:', err?.message || err);
+    currentWsStatus = 'ERROR';
+    broadcastSse('status', { status: 'ERROR', message: err?.message || String(err) });
+  }
+}
+
+// Start WebSocket connection in background
+initLimitlessSdkWebSocket().catch((err) => {
+  console.warn('[Limitless WS] Background init error:', err?.message);
+});
+
+// Server-Sent Events (SSE) live stream to deliver zero-latency updates to frontend
+app.get('/api/limitless/live-stream', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  // Send initial state snapshots immediately
+  res.write(`event: status\ndata: ${JSON.stringify({ status: currentWsStatus })}\n\n`);
+  if (latestOrderbookData) {
+    res.write(`event: orderbookUpdate\ndata: ${JSON.stringify(latestOrderbookData)}\n\n`);
+  }
+  if (latestOracleData) {
+    res.write(`event: oraclePriceData\ndata: ${JSON.stringify(latestOracleData)}\n\n`);
+  }
+  if (latestPositionsData) {
+    res.write(`event: positions\ndata: ${JSON.stringify(latestPositionsData)}\n\n`);
+  }
+
+  sseClients.add(res);
+
+  req.on('close', () => {
+    sseClients.delete(res);
+  });
+});
+
+// Snapshot endpoint for polling or quick state recovery
+app.get('/api/limitless/live-state', (_req, res) => {
+  res.json({
+    status: currentWsStatus,
+    orderbook: latestOrderbookData,
+    oracle: latestOracleData,
+    positions: latestPositionsData,
+    recentOrderEvents: recentOrderEvents.slice(0, 10),
+    recentTxEvents: recentTxEvents.slice(0, 10),
+  });
+});
+
+let cachedActiveBtcServer = null;
+let lastBtcFetchTimeServer = 0;
+
+app.get('/api/limitless/active-btc', async (_req, res) => {
+  try {
+    const now = Date.now();
+    if (cachedActiveBtcServer && now - lastBtcFetchTimeServer < 15000) {
+      return res.json({ success: true, ...cachedActiveBtcServer });
+    }
+
+    const response = await fetch('https://api.limitless.exchange/markets/active');
+    const json = await response.json();
+    const markets = json?.data || [];
+
+    const btc15m = markets.find((m) => m.slug?.toLowerCase().includes('btc') && m.slug?.includes('15-min'));
+    const btcMarket = btc15m || markets.find((m) => m.slug?.toLowerCase().includes('btc') && m.slug?.includes('5-min')) || markets.find((m) => m.slug?.toLowerCase().includes('btc'));
+
+    if (btcMarket) {
+      cachedActiveBtcServer = {
+        slug: btcMarket.slug,
+        title: btcMarket.title,
+        status: btcMarket.status,
+        prices: btcMarket.prices,
+        tradePrices: btcMarket.tradePrices,
+        address: btcMarket.address,
+        expirationTimestamp: btcMarket.expirationTimestamp,
+        startAt: btcMarket.startAt,
+        openPrice: btcMarket.metadata?.openPrice,
+        tokens: btcMarket.tokens,
+        venueExchange: btcMarket.venue?.exchange,
+        volumeFormatted: btcMarket.volumeFormatted,
+        oracleSource: btcMarket.priceOracleMetadata?.name || 'Chainlink BTC 60s TWAP',
+      };
+      lastBtcFetchTimeServer = now;
+      return res.json({ success: true, ...cachedActiveBtcServer });
+    }
+
+    res.json({ success: false, message: 'No active BTC prediction market found' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: String(err) });
+  }
+});
+
 // Orderbook endpoint for specific market slug
 app.get('/api/limitless/orderbook', async (req, res) => {
   try {
+    // If we already have the latest live orderbook from WebSocket for this slug, return it
     const slug = req.query.slug || 'btc-up-or-down-15-min';
+    if (latestOrderbookData && latestOrderbookData.marketSlug === slug) {
+      return res.json(latestOrderbookData.orderbook || latestOrderbookData);
+    }
+
     const targetUrl = `https://api.limitless.exchange/markets/${encodeURIComponent(slug)}/orderbook`;
     const response = await fetch(targetUrl);
     if (!response.ok) {

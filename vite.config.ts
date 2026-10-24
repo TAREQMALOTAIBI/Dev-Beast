@@ -87,7 +87,189 @@ async function fetchLiveWalletAndBalance() {
 let cachedActiveBtc: any = null;
 let lastBtcFetchTime = 0;
 
+// ============================================================================
+// Limitless WebSocket Streaming Manager (Official TypeScript SDK)
+// ============================================================================
+let limitlessWsInstance: any = null;
+let currentWsStatus: string = 'DISCONNECTED';
+let latestOrderbookData: any = null;
+let latestOrderbookVersion: number = 0;
+let latestOracleData: any = null;
+let latestPositionsData: any = null;
+const recentOrderEvents: any[] = [];
+const recentTxEvents: any[] = [];
+const sseClients = new Set<any>();
+
+function broadcastSse(eventType: string, payload: any) {
+  const msg = `event: ${eventType}\ndata: ${JSON.stringify(payload)}\n\n`;
+  for (const client of sseClients) {
+    try {
+      client.write(msg);
+    } catch {
+      sseClients.delete(client);
+    }
+  }
+}
+
+async function initLimitlessSdkWebSocket() {
+  try {
+    const sdk = await import('@limitless-exchange/sdk');
+    const tokenId = process.env.LMTS_TOKEN_ID?.trim();
+    const secret = process.env.LMTS_TOKEN_SECRET?.trim();
+    const hasAuth = Boolean(tokenId && secret);
+
+    const wsConfig: any = {
+      url: 'wss://ws.limitless.exchange',
+      autoReconnect: true,
+      timeout: 10000,
+    };
+    if (hasAuth && tokenId && secret) {
+      wsConfig.hmacCredentials = { tokenId, secret };
+    }
+
+    const ws = new sdk.WebSocketClient(wsConfig);
+    limitlessWsInstance = ws;
+    currentWsStatus = 'CONNECTING';
+    broadcastSse('status', { status: 'CONNECTING' });
+
+    ws.on('connect', async () => {
+      currentWsStatus = hasAuth ? 'AUTHENTICATED' : 'CONNECTED';
+      broadcastSse('status', { status: currentWsStatus });
+
+      try {
+        if (!cachedActiveBtc) {
+          const res = await fetch('https://api.limitless.exchange/markets/active');
+          if (res.ok) {
+            const json = await res.json();
+            const list = json?.data || [];
+            const btc = list.find((m: any) => m.slug?.toLowerCase().includes('btc') && m.slug?.includes('15-min')) ||
+                        list.find((m: any) => m.slug?.toLowerCase().includes('btc'));
+            if (btc) {
+              cachedActiveBtc = {
+                slug: btc.slug,
+                title: btc.title,
+                status: btc.status,
+                prices: btc.prices,
+                address: btc.address,
+              };
+            }
+          }
+        }
+      } catch {
+        // safe continuation
+      }
+
+      const activeSlug = cachedActiveBtc?.slug || 'btc-100k-weekly';
+      try {
+        await ws.subscribe('subscribe_market_prices', {
+          marketSlugs: [activeSlug],
+        });
+
+        if (hasAuth) {
+          await ws.subscribe('subscribe_positions', { marketSlugs: [activeSlug] });
+          await ws.subscribe('subscribe_order_events');
+          await ws.subscribe('subscribe_transactions');
+        }
+      } catch (err: any) {
+        // Safe continuation
+      }
+    });
+
+    ws.on('orderbookUpdate', (data: any) => {
+      if (data?.version && data.version <= latestOrderbookVersion) {
+        return; // drop frames with version <= last seen
+      }
+      if (data?.version) latestOrderbookVersion = data.version;
+      latestOrderbookData = data;
+      broadcastSse('orderbookUpdate', data);
+    });
+
+    ws.on('oraclePriceData', (data: any) => {
+      latestOracleData = data;
+      broadcastSse('oraclePriceData', data);
+    });
+
+    ws.on('positions', (data: any) => {
+      latestPositionsData = data;
+      broadcastSse('positions', data);
+    });
+
+    ws.on('orderEvent', (event: any) => {
+      recentOrderEvents.unshift(event);
+      if (recentOrderEvents.length > 50) recentOrderEvents.pop();
+      broadcastSse('orderEvent', event);
+    });
+
+    ws.on('tx', (data: any) => {
+      recentTxEvents.unshift(data);
+      if (recentTxEvents.length > 50) recentTxEvents.pop();
+      broadcastSse('tx', data);
+    });
+
+    ws.on('disconnect', (reason: string) => {
+      currentWsStatus = 'DISCONNECTED';
+      broadcastSse('status', { status: 'DISCONNECTED', reason });
+      setTimeout(async () => {
+        try {
+          if (limitlessWsInstance) {
+            await limitlessWsInstance.disconnect().catch(() => {});
+          }
+          await initLimitlessSdkWebSocket();
+        } catch {
+          // Reconnect attempt failed, will retry
+        }
+      }, 3000);
+    });
+
+    await ws.connect();
+  } catch (err: any) {
+    currentWsStatus = 'ERROR';
+    broadcastSse('status', { status: 'ERROR', message: err.message || String(err) });
+  }
+}
+
+let isWsStarted = false;
+
 function setupApiMiddlewares(middlewares: any) {
+  if (!isWsStarted) {
+    isWsStarted = true;
+    initLimitlessSdkWebSocket().catch(() => {});
+  }
+  middlewares.use('/api/limitless/live-stream', (req: any, res: any) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders?.();
+
+    res.write(`event: status\ndata: ${JSON.stringify({ status: currentWsStatus })}\n\n`);
+    if (latestOrderbookData) {
+      res.write(`event: orderbookUpdate\ndata: ${JSON.stringify(latestOrderbookData)}\n\n`);
+    }
+    if (latestOracleData) {
+      res.write(`event: oraclePriceData\ndata: ${JSON.stringify(latestOracleData)}\n\n`);
+    }
+    if (latestPositionsData) {
+      res.write(`event: positions\ndata: ${JSON.stringify(latestPositionsData)}\n\n`);
+    }
+
+    sseClients.add(res);
+    req.on('close', () => {
+      sseClients.delete(res);
+    });
+  });
+
+  middlewares.use('/api/limitless/live-state', (_req: any, res: any) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({
+      status: currentWsStatus,
+      orderbook: latestOrderbookData,
+      oracle: latestOracleData,
+      positions: latestPositionsData,
+      recentOrderEvents: recentOrderEvents.slice(0, 10),
+      recentTxEvents: recentTxEvents.slice(0, 10),
+    }));
+  });
+
   middlewares.use('/api/limitless/active-btc', async (_req: any, res: any) => {
     res.setHeader('Content-Type', 'application/json');
     try {
@@ -106,14 +288,30 @@ function setupApiMiddlewares(middlewares: any) {
         markets.find((m: any) => m.slug?.toLowerCase().includes('btc'));
 
       if (btcMarket) {
+        const previousSlug = cachedActiveBtc?.slug;
         cachedActiveBtc = {
           slug: btcMarket.slug,
           title: btcMarket.title,
           status: btcMarket.status,
           prices: btcMarket.prices,
+          tradePrices: btcMarket.tradePrices,
           address: btcMarket.address,
+          expirationTimestamp: btcMarket.expirationTimestamp,
+          startAt: btcMarket.startAt,
+          openPrice: btcMarket.metadata?.openPrice,
+          tokens: btcMarket.tokens,
+          venueExchange: btcMarket.venue?.exchange,
+          volumeFormatted: btcMarket.volumeFormatted,
+          oracleSource: btcMarket.priceOracleMetadata?.name || 'Chainlink BTC 60s TWAP',
         };
         lastBtcFetchTime = now;
+
+        if (limitlessWsInstance && previousSlug !== btcMarket.slug) {
+          limitlessWsInstance.subscribe('subscribe_market_prices', {
+            marketSlugs: [btcMarket.slug],
+          }).catch(() => {});
+        }
+
         return res.end(JSON.stringify({ success: true, ...cachedActiveBtc }));
       }
 
@@ -172,7 +370,7 @@ function setupApiMiddlewares(middlewares: any) {
         const normalizedPrice = Number(price) > 1 ? Number(price) / 100 : (Number(price) || 0.50);
         const contractCount = Math.max(1, Math.round(Number(size) || 1));
 
-        if (hasLiveAuth) {
+        if (hasLiveAuth && pk && tokenId && secret) {
           const { ethers } = await import('ethers');
           const sdk = await import('@limitless-exchange/sdk');
           const formattedPk = pk.startsWith('0x') ? pk : `0x${pk}`;
@@ -198,7 +396,7 @@ function setupApiMiddlewares(middlewares: any) {
           });
 
           const orderTypeEnum = type === 'GTC' ? sdk.OrderType.GTC : sdk.OrderType.FAK;
-          const result = await orderClient.createOrder({
+          const result: any = await orderClient.createOrder({
             marketSlug: activeMarketSlug,
             tokenId: String(targetTokenId),
             side: sdk.Side.BUY,

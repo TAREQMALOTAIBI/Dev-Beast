@@ -14,6 +14,7 @@ export type LimitlessStatus = 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED' | 'AUT
 
 export class LimitlessService {
   private socket: Socket | null = null;
+  private eventSource: EventSource | null = null;
   private status: LimitlessStatus = 'DISCONNECTED';
   private listeners: ((status: LimitlessStatus) => void)[] = [];
   private logListeners: ((log: WsMessageLog) => void)[] = [];
@@ -256,6 +257,70 @@ export class LimitlessService {
 
     // Immediately fetch initial snapshot so orderbook is populated with zero delay
     this.fetchInitialOrderbook(this.activeMarketSlug);
+
+    // Connect to official Limitless WebSocketClient SSE stream provided by backend server
+    try {
+      if (typeof window !== 'undefined' && 'EventSource' in window) {
+        const es = new EventSource('/api/limitless/live-stream');
+        this.eventSource = es;
+
+        es.addEventListener('status', (e: MessageEvent) => {
+          try {
+            const data = JSON.parse(e.data);
+            if (data?.status === 'AUTHENTICATED' || data?.status === 'CONNECTED') {
+              this.setStatus(data.status);
+              this.stopOrderbookPolling();
+            } else if (data?.status === 'CONNECTING') {
+              this.setStatus('CONNECTING');
+            }
+          } catch {}
+        });
+
+        es.addEventListener('orderbookUpdate', (e: MessageEvent) => {
+          try {
+            const data = JSON.parse(e.data);
+            this.currentOrderbook = data;
+            this.orderbookListeners.forEach((l) => l(data));
+            this.stopOrderbookPolling();
+          } catch {}
+        });
+
+        es.addEventListener('oraclePriceData', (e: MessageEvent) => {
+          try {
+            const data = JSON.parse(e.data);
+            this.currentOracle = data;
+            this.oracleListeners.forEach((l) => l(data));
+          } catch {}
+        });
+
+        es.addEventListener('positions', (e: MessageEvent) => {
+          try {
+            const data = JSON.parse(e.data);
+            if (data && typeof data === 'object' && 'positions' in data && Array.isArray(data.positions)) {
+              this.currentPositions = data.positions;
+              this.positionListeners.forEach((l) => l(this.currentPositions));
+            }
+          } catch {}
+        });
+
+        es.addEventListener('orderEvent', (e: MessageEvent) => {
+          try {
+            const event = JSON.parse(e.data);
+            this.log('INCOMING', { event: 'orderEvent', source: event.source, type: event.type, orderId: event.orderId });
+            this.orderEventListeners.forEach((l) => l(event));
+          } catch {}
+        });
+
+        es.addEventListener('tx', (e: MessageEvent) => {
+          try {
+            const data = JSON.parse(e.data);
+            this.log('INCOMING', { event: 'tx', txHash: data.txHash, status: data.status });
+          } catch {}
+        });
+      }
+    } catch {
+      // Fallback to socket/polling
+    }
   }
 
   /**
@@ -362,6 +427,12 @@ export class LimitlessService {
   public disconnect() {
     this.isExplicitlyClosed = true;
     this.stopOrderbookPolling();
+    if (this.eventSource) {
+      try {
+        this.eventSource.close();
+      } catch {}
+      this.eventSource = null;
+    }
     if (this.socket) {
       try {
         this.socket.disconnect();

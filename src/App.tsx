@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useTradingBot } from './hooks/useTradingBot';
 import { TerminalChart } from './components/TerminalChart';
 import { StrategyStatusCard } from './components/StrategyStatusCard';
+import { LimitlessMarketBanner } from './components/LimitlessMarketBanner';
 import { KellyLab } from './components/KellyLab';
 import { ExecutionConsole } from './components/ExecutionConsole';
 import { CodeInspector } from './components/CodeInspector';
@@ -62,6 +63,9 @@ export default function App() {
     oracle,
     positions,
     hasEnvCredentials,
+    activeLimitlessMarket,
+    isRefreshingMarket,
+    refreshActiveMarket,
   } = useTradingBot();
 
   const isAr = lang === 'ar';
@@ -325,6 +329,18 @@ export default function App() {
         {/* VIEW 1: LIVE TERMINAL */}
         {activeTab === 'terminal' && (
           <div className="space-y-6">
+            {/* Limitless 15-Minute Live Market Showcase Banner */}
+            <LimitlessMarketBanner
+              market={activeLimitlessMarket}
+              limitlessStatus={limitlessStatus}
+              currentBinancePrice={latestCandle?.close}
+              orderbook={orderbook}
+              oracle={oracle}
+              isRefreshing={isRefreshingMarket}
+              onRefresh={refreshActiveMarket}
+              lang={lang}
+            />
+
             {/* Top Row: Dual Visualizer Chart & State Machine */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
               {/* Left 2 Cols: Main Candlestick & Z-Score Chart */}

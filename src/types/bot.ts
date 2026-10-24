@@ -24,6 +24,25 @@ export interface BotConfig {
   walletAddress?: string;
 }
 
+export interface LimitlessMarketDetails {
+  slug: string;
+  title: string;
+  status: string;
+  prices?: [number, number]; // [yesPrice, noPrice]
+  tradePrices?: {
+    buy?: { market?: [number, number]; limit?: [number, number] };
+    sell?: { market?: [number, number]; limit?: [number, number] };
+  };
+  address?: string;
+  expirationTimestamp?: number;
+  startAt?: string;
+  openPrice?: string | number; // "Price to Beat"
+  tokens?: { yes: string; no: string };
+  venueExchange?: string;
+  volumeFormatted?: string;
+  oracleSource?: string;
+}
+
 export interface LiveWalletInfo {
   isLive: boolean;
   address: string;
