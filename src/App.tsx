@@ -70,6 +70,8 @@ export default function App() {
     activeLimitlessMarket,
     isRefreshingMarket,
     refreshActiveMarket,
+    contractLockInfo,
+    clearTradeLock,
   } = useTradingBot();
 
   const isAr = lang === 'ar';
@@ -394,6 +396,8 @@ export default function App() {
                   metric={latestMetric}
                   executionNotice={executionNotice}
                   onClearNotice={() => setExecutionNotice(null)}
+                  contractLockInfo={contractLockInfo}
+                  onClearTradeLock={clearTradeLock}
                 />
 
                 {/* Sizing & Position Allocation Card */}

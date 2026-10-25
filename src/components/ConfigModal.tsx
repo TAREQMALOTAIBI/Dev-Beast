@@ -47,10 +47,12 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
       binanceRestUrl: 'https://api.binance.com/api/v3/klines',
       binanceWsUrl: 'wss://stream.binance.com/ws/btcusdt@kline_15m',
       limitlessWsUrl: 'wss://ws.limitless.exchange',
-      limitlessMarketSlug: 'btc-100k-weekly',
+      limitlessMarketSlug: 'btc-up-or-down-15-min',
       limitlessApiKey: '',
       limitlessTokenId: '',
       limitlessTokenSecret: '',
+      singleTradePerContract: true,
+      cooldownMinutes: 15,
     });
   };
 
@@ -438,6 +440,64 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 {isAr
                   ? '🛡️ سقف المخاطرة محدد ومعتمد بنسبة 5% كحد أقصى من رصيد المحفظة لحماية رأس المال وفق نموذج كيلي الحذر.'
                   : '🛡️ Risk cap is locked at 5% maximum of account balance for capital preservation under the Kelly Criterion.'}
+              </div>
+            </div>
+          </div>
+
+          {/* Section 5: Anti-Duplicate & Cooldown Protection */}
+          <div className="border-t border-slate-800 pt-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-slate-100 uppercase tracking-wider text-[11px] text-amber-400 flex items-center gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+                <span>{isAr ? 'حماية منع تكرار الصفقات وقفل العقد (Anti-Duplicate Guard)' : 'Anti-Duplicate & Single-Trade Lock'}</span>
+              </h3>
+              <span className="text-[10px] text-emerald-400 font-bold bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/40">
+                {isAr ? '🔒 حماية المحفظة' : '🔒 Capital Shield'}
+              </span>
+            </div>
+
+            <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-3">
+              <div className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  id="singleTradeToggle"
+                  checked={draft.singleTradePerContract !== false}
+                  onChange={(e) => setDraft({ ...draft, singleTradePerContract: e.target.checked })}
+                  className="mt-1 w-4 h-4 text-emerald-500 rounded bg-slate-900 border-slate-700 focus:ring-emerald-500 cursor-pointer"
+                />
+                <label htmlFor="singleTradeToggle" className="cursor-pointer">
+                  <div className="font-bold text-slate-100 text-xs">
+                    {isAr
+                      ? 'قفل العقد: صفقة واحدة فقط كحد أقصى لكل عقد 15 دقيقة (موصى به)'
+                      : 'Lock Contract: Maximum 1 Trade Per 15-Minute Contract (Recommended)'}
+                  </div>
+                  <div className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                    {isAr
+                      ? 'يمنع الروبوت تماماً من فتح صفقة ثانية على نفس العقد حتى لو استمرت إشارة Z-Score أو تم تحديث الصفحة (Refresh). ينتظر الروبوت انتهاء الـ 15 دقيقة وبدء العقد التالي.'
+                      : 'Strictly blocks opening duplicate trades on the active contract even across page reloads. The bot waits for the 15-minute expiration before considering new setups.'}
+                  </div>
+                </label>
+              </div>
+
+              <div className="pt-2.5 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-2 gap-2 items-center">
+                <div>
+                  <label className="block text-slate-400 text-[11px] mb-1 font-semibold">
+                    {isAr ? 'فترة التهدئة الإجبارية بين الصفقات (دقائق):' : 'Mandatory Cooldown Period (Minutes):'}
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="60"
+                    value={draft.cooldownMinutes ?? 15}
+                    onChange={(e) => setDraft({ ...draft, cooldownMinutes: Math.max(1, parseInt(e.target.value) || 15) })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-100 font-mono text-xs focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div className="text-[10px] text-slate-400 leading-normal">
+                  {isAr
+                    ? '💡 القيمة الافتراضية 15 دقيقة مطابقة لزمن شمعة التوقع لمنع تراكم الصفقات المتزامنة.'
+                    : '💡 Default 15m matches the candle duration to prevent over-trading in prediction markets.'}
+                </div>
               </div>
             </div>
           </div>

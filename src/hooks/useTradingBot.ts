@@ -37,6 +37,8 @@ const DEFAULT_CONFIG: BotConfig = {
   limitlessApiKey: (typeof process !== 'undefined' && process.env?.LIMITLESS_API_KEY) || '',
   limitlessTokenId: (typeof process !== 'undefined' && process.env?.LMTS_TOKEN_ID) || '',
   limitlessTokenSecret: (typeof process !== 'undefined' && process.env?.LMTS_TOKEN_SECRET) || '',
+  singleTradePerContract: true, // Strictly max 1 trade per 15-minute contract
+  cooldownMinutes: 15, // 15-minute cooldown guard between trades
 };
 
 export function useTradingBot() {
@@ -84,6 +86,13 @@ export function useTradingBot() {
         parsed.chunkDelayMs = 0;
         // Strictly cap maxRiskPercent at 5% (0.05)
         parsed.maxRiskPercent = 0.05;
+        // Ensure single trade per 15-minute contract is active
+        if (parsed.singleTradePerContract === undefined) {
+          parsed.singleTradePerContract = true;
+        }
+        if (parsed.cooldownMinutes === undefined || parsed.cooldownMinutes < 1) {
+          parsed.cooldownMinutes = 15;
+        }
 
         // Auto-inject env secrets if persisted config has empty credentials
         if (!parsed.limitlessTokenId && DEFAULT_CONFIG.limitlessTokenId) {
@@ -150,7 +159,7 @@ export function useTradingBot() {
   const [soundEnabled, setSoundEnabled] = useState<boolean>(false); // Completely muted by default per user request
   const [lastSignalTime, setLastSignalTime] = useState<number | null>(null);
 
-  // References for live closures
+  // References for live closures and duplicate prevention
   const closePricesRef = useRef<number[]>([]);
   const crossedUpperThresholdRef = useRef<boolean>(false);
   const crossedLowerThresholdRef = useRef<boolean>(false);
@@ -159,8 +168,31 @@ export function useTradingBot() {
   const currentBalanceRef = useRef<number>(currentBalance);
   const isExecutingRef = useRef<boolean>(false);
   const lastExecutedCandleTimeRef = useRef<number>(0);
+  const lastExecutedMarketSlugRef = useRef<string>('');
+  const lastExecutedTimestampRef = useRef<number>(0);
   const activeLimitlessMarketRef = useRef<LimitlessMarketDetails | null>(null);
   const metricsRef = useRef<ZScoreMetric[]>([]);
+
+  // Persistent trade lock status
+  const [contractLockInfo, setContractLockInfo] = useState<{
+    isLocked: boolean;
+    reason?: string;
+    cooldownRemainingMinutes?: number;
+    lastTradedSlug?: string;
+  }>({ isLocked: false });
+
+  // Load persistent trade guard on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('limitless_last_trade_guard');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.marketSlug) lastExecutedMarketSlugRef.current = parsed.marketSlug;
+        if (parsed.timestamp) lastExecutedTimestampRef.current = Number(parsed.timestamp);
+        if (parsed.candleTime) lastExecutedCandleTimeRef.current = Number(parsed.candleTime);
+      }
+    } catch {}
+  }, []);
 
   configRef.current = config;
   botActiveRef.current = botActive;
@@ -443,9 +475,22 @@ export function useTradingBot() {
         return next;
       });
 
-      if (candleTime) {
-        lastExecutedCandleTimeRef.current = candleTime;
-      }
+      const now = Date.now();
+      lastExecutedCandleTimeRef.current = candleTime || now;
+      lastExecutedMarketSlugRef.current = resolvedMarketSlug;
+      lastExecutedTimestampRef.current = now;
+      try {
+        localStorage.setItem(
+          'limitless_last_trade_guard',
+          JSON.stringify({
+            marketSlug: resolvedMarketSlug,
+            candleTime: candleTime || now,
+            timestamp: now,
+            direction,
+            outcome,
+          })
+        );
+      } catch {}
 
       // Deduct invested funds
       const invested = completedTrade.totalInvestmentUsd;
@@ -477,7 +522,100 @@ export function useTradingBot() {
         setActiveSignal(null);
       }, 4000);
     }
+  }, [liveUsdcBalance]);
+
+  // Anti-Duplicate & Cooldown Guard Checker
+  const checkTradeLock = useCallback((targetSlug: string, cTime?: number): { locked: boolean; reason?: string } => {
+    const cfg = configRef.current;
+    const now = Date.now();
+    const cooldownMs = (cfg.cooldownMinutes ?? 15) * 60 * 1000;
+
+    let persistedGuard: any = null;
+    try {
+      const raw = localStorage.getItem('limitless_last_trade_guard');
+      if (raw) persistedGuard = JSON.parse(raw);
+    } catch {}
+
+    const lastSlug = lastExecutedMarketSlugRef.current || persistedGuard?.marketSlug;
+    const lastTime = Math.max(lastExecutedTimestampRef.current || 0, persistedGuard?.timestamp || 0);
+    const lastCandle = Math.max(lastExecutedCandleTimeRef.current || 0, persistedGuard?.candleTime || 0);
+
+    // Rule 1: Single Trade per 15-minute Contract (Anti-duplicate)
+    if (cfg.singleTradePerContract !== false && targetSlug && lastSlug && targetSlug === lastSlug) {
+      return {
+        locked: true,
+        reason: `🔒 تم تنفيذ صفقة بالفعل على هذا العقد (${targetSlug}). بانتظار انتهاء الـ 15 دقيقة وبدء العقد القادم لمنع التكرار وحماية المحفظة.`,
+      };
+    }
+
+    // Rule 2: Minimum Cooldown Period between automated trades
+    if (lastTime > 0 && (now - lastTime) < cooldownMs) {
+      const remainingMins = Math.ceil((cooldownMs - (now - lastTime)) / 60000);
+      return {
+        locked: true,
+        reason: `⏳ فترة التهدئة نشطة (متبقي ${remainingMins} دقيقة قبل فتح صفقة آلية جديدة).`,
+      };
+    }
+
+    // Rule 3: Single trade per candle timestamp
+    if (cTime && lastCandle > 0 && cTime === lastCandle) {
+      return {
+        locked: true,
+        reason: `🔒 تم تنفيذ صفقة في نفس شمعة الـ 15 دقيقة الحالية بالفعل.`,
+      };
+    }
+
+    return { locked: false };
   }, []);
+
+  const clearTradeLock = useCallback(() => {
+    lastExecutedMarketSlugRef.current = '';
+    lastExecutedTimestampRef.current = 0;
+    lastExecutedCandleTimeRef.current = 0;
+    try {
+      localStorage.removeItem('limitless_last_trade_guard');
+    } catch {}
+    setContractLockInfo({ isLocked: false });
+    const unMsg = '🔓 تم إلغاء قفل العقد وفترة التهدئة بنجاح. الروبوت مستعد لفتح صفقة جديدة فور تحقق الشروط.';
+    console.log(unMsg);
+    limitlessService.logDirect('SYSTEM', unMsg);
+    setExecutionNotice({
+      type: 'SUCCESS',
+      message: unMsg,
+      timestamp: Date.now(),
+    });
+  }, []);
+
+  // Synchronize lock info periodically
+  useEffect(() => {
+    const updateLockState = () => {
+      const slug = activeLimitlessMarketRef.current?.slug || configRef.current.limitlessMarketSlug || 'btc-up-or-down-15-min';
+      const check = checkTradeLock(slug);
+      let cooldownRemainingMinutes = 0;
+      if (check.locked) {
+        const now = Date.now();
+        const cooldownMs = (configRef.current.cooldownMinutes ?? 15) * 60 * 1000;
+        let lastTime = lastExecutedTimestampRef.current || 0;
+        try {
+          const raw = localStorage.getItem('limitless_last_trade_guard');
+          if (raw) lastTime = Math.max(lastTime, JSON.parse(raw).timestamp || 0);
+        } catch {}
+        if (lastTime > 0 && (now - lastTime) < cooldownMs) {
+          cooldownRemainingMinutes = Math.ceil((cooldownMs - (now - lastTime)) / 60000);
+        }
+      }
+      setContractLockInfo({
+        isLocked: check.locked,
+        reason: check.reason,
+        cooldownRemainingMinutes,
+        lastTradedSlug: lastExecutedMarketSlugRef.current,
+      });
+    };
+
+    updateLockState();
+    const lockTimer = setInterval(updateLockState, 4000);
+    return () => clearInterval(lockTimer);
+  }, [checkTradeLock]);
 
   // Real Market Strategy Evaluation (Evaluates on every tick for immediate same-candle entry)
   const evaluateLiveStrategy = useCallback(
@@ -491,9 +629,7 @@ export function useTradingBot() {
       const { zScore } = calculateZScore(prices, cfg.zScoreUpper, cfg.zScoreEntry, lowerThresh, lowerEntryThresh);
       setCurrentZScore(zScore);
 
-      // Determine arming: either triggered in live session or within the recent 3 candles
-      const recentOverbought = metricsRef.current.slice(-3).some((m) => m.zScore >= cfg.zScoreUpper);
-      const recentOversold = metricsRef.current.slice(-3).some((m) => m.zScore <= lowerThresh);
+      const targetMarketSlug = activeLimitlessMarketRef.current?.slug || cfg.limitlessMarketSlug || 'btc-up-or-down-15-min';
 
       // ================= DIRECTION 1: UPPER / RISE (Short / Down) =================
       // شرط الدخول: فقط عند تجاوز العتبة 2 في الصعود (Z >= +2.0σ)
@@ -518,8 +654,16 @@ export function useTradingBot() {
             return;
           }
 
-          if (!isExecutingRef.current && (!candleTime || lastExecutedCandleTimeRef.current !== candleTime)) {
-            if (candleTime) lastExecutedCandleTimeRef.current = candleTime;
+          // Check if market or cooldown is locked
+          const lock = checkTradeLock(targetMarketSlug, candleTime);
+          if (lock.locked) {
+            return;
+          }
+
+          if (!isExecutingRef.current) {
+            lastExecutedCandleTimeRef.current = candleTime || Date.now();
+            lastExecutedMarketSlugRef.current = targetMarketSlug;
+            lastExecutedTimestampRef.current = Date.now();
             console.log(`🎯 تنفيذ فوري لصفقة هبوط! تجاوز Z-Score عتبة +${cfg.zScoreUpper}σ (${zScore.toFixed(2)}σ). جاري إرسال أمر DOWN!`);
             limitlessService.logDirect(
               'SYSTEM',
@@ -558,8 +702,16 @@ export function useTradingBot() {
             return;
           }
 
-          if (!isExecutingRef.current && (!candleTime || lastExecutedCandleTimeRef.current !== candleTime)) {
-            if (candleTime) lastExecutedCandleTimeRef.current = candleTime;
+          // Check if market or cooldown is locked
+          const lock = checkTradeLock(targetMarketSlug, candleTime);
+          if (lock.locked) {
+            return;
+          }
+
+          if (!isExecutingRef.current) {
+            lastExecutedCandleTimeRef.current = candleTime || Date.now();
+            lastExecutedMarketSlugRef.current = targetMarketSlug;
+            lastExecutedTimestampRef.current = Date.now();
             console.log(`🎯 تنفيذ فوري لصفقة صعود! تجاوز Z-Score عتبة ${lowerThresh}σ (${zScore.toFixed(2)}σ). جاري إرسال أمر UP!`);
             limitlessService.logDirect(
               'SYSTEM',
@@ -575,7 +727,7 @@ export function useTradingBot() {
         }
       }
     },
-    [executeLiveTrade]
+    [executeLiveTrade, checkTradeLock]
   );
 
   // Subscribe to Limitless WebSocket Gateway using official SDK
@@ -899,5 +1051,7 @@ export function useTradingBot() {
     activeLimitlessMarket,
     isRefreshingMarket,
     refreshActiveMarket,
+    contractLockInfo,
+    clearTradeLock,
   };
 }

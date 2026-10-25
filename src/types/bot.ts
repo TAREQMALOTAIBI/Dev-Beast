@@ -23,6 +23,8 @@ export interface BotConfig {
   limitlessTokenSecret: string;
   walletAddress?: string;
   privateKey?: string;
+  singleTradePerContract?: boolean; // Strictly max 1 trade per 15-minute contract
+  cooldownMinutes?: number; // Minimum cooldown period between trades in minutes
 }
 
 export interface LimitlessMarketDetails {

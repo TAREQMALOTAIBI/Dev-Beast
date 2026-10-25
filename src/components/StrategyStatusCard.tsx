@@ -37,6 +37,13 @@ interface StrategyStatusCardProps {
     action?: 'START_BOT' | 'TRIGGER_TRADE';
   } | null;
   onClearNotice?: () => void;
+  contractLockInfo?: {
+    isLocked: boolean;
+    reason?: string;
+    cooldownRemainingMinutes?: number;
+    lastTradedSlug?: string;
+  };
+  onClearTradeLock?: () => void;
 }
 
 export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
@@ -57,6 +64,8 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
   metric,
   executionNotice,
   onClearNotice,
+  contractLockInfo,
+  onClearTradeLock,
 }) => {
   const isAr = lang === 'ar';
 
@@ -235,14 +244,45 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
           )}
         </button>
 
-        {/* Automated Execution Status Info */}
-        <div className="mt-2.5 pt-2 border-t border-slate-800/80 text-[11px] text-slate-400 text-center">
-          <span>
-            {isAr
-              ? (botActive ? '⚡ محرك التداول الآلي يعمل بنشاط: تنفيذ الصفقات يتم تلقائياً بالكامل عند ارتداد السعر وتحقق إشارات Z-Score' : 'التنفيذ التلقائي متوقف حالياً. اضغط الزر أعلاه لتشغيل الروبوت.')
-              : (botActive ? '⚡ Automated engine active: Real-time execution triggers automatically on Z-Score reversal signals.' : 'Automated execution is paused. Click above to start.')}
-          </span>
-        </div>
+        {/* Anti-Duplicate Contract Lock Status */}
+        {contractLockInfo?.isLocked ? (
+          <div className="mt-2.5 p-2.5 rounded-lg bg-amber-950/40 border border-amber-600/50 flex items-center justify-between gap-2 text-xs text-amber-200">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0"></span>
+              <div className="min-w-0">
+                <div className="font-bold text-amber-300 flex items-center gap-1.5 flex-wrap">
+                  <span>🔒 {isAr ? 'تم تأمين العقد الحالي (حظر التكرار نشط)' : 'Contract Locked (Anti-Duplicate Active)'}</span>
+                  {contractLockInfo.cooldownRemainingMinutes ? (
+                    <span className="text-[10px] bg-amber-900/70 text-amber-200 px-1.5 py-0.5 rounded font-mono font-bold">
+                      {isAr ? `متبقي ${contractLockInfo.cooldownRemainingMinutes} دقيقة` : `${contractLockInfo.cooldownRemainingMinutes}m left`}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="text-[10px] text-amber-200/80 mt-0.5 truncate">
+                  {contractLockInfo.reason || (isAr ? 'تم فتح صفقة بالفعل على هذا العقد' : 'Trade already executed')}
+                </div>
+              </div>
+            </div>
+            {onClearTradeLock && (
+              <button
+                onClick={onClearTradeLock}
+                className="shrink-0 text-[10px] font-bold px-2 py-1 bg-amber-600/30 hover:bg-amber-600/60 text-amber-100 rounded border border-amber-500/40 cursor-pointer transition-colors"
+                title={isAr ? 'إلغاء قفل العقد يدوياً للسماح بصفقة فورية' : 'Manually unlock contract'}
+              >
+                {isAr ? 'إلغاء القفل' : 'Unlock'}
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="mt-2.5 pt-2 border-t border-slate-800/80 text-[11px] text-slate-400 text-center flex items-center justify-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+            <span>
+              {isAr
+                ? (botActive ? '⚡ محرك التداول الآلي يعمل بنشاط: جاهز لتنفيذ الصفقة القادمة تلقائياً عند تحقق إشارات Z-Score' : 'التنفيذ التلقائي متوقف حالياً. اضغط الزر أعلاه لتشغيل الروبوت.')
+                : (botActive ? '⚡ Automated engine active: Ready for next trade on Z-Score reversal.' : 'Automated execution is paused. Click above to start.')}
+            </span>
+          </div>
+        )}
 
         {/* Instant Trade Testing Buttons */}
         {onTriggerManualTrade && (
