@@ -187,7 +187,7 @@ async function initLimitlessSdkWebSocket() {
 
     const wsConfig = {
       url: 'wss://ws.limitless.exchange',
-      autoReconnect: true,
+      autoReconnect: false, // Per Limitless docs: manual reconnect ensures fresh handshake signature & avoids Invalid HMAC
       timeout: 10000,
     };
     if (hasAuth) {
@@ -902,4 +902,20 @@ if (fs.existsSync(distPath)) {
 
 app.listen(port, host, () => {
   console.log(`[Limitless Quant Bot] Server running at http://${host}:${port}`);
+});
+
+process.on('SIGINT', async () => {
+  console.log('[Limitless Quant Bot] Gracefully shutting down WebSocket and server...');
+  if (limitlessWsInstance) {
+    try { await limitlessWsInstance.disconnect(); } catch {}
+  }
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  console.log('[Limitless Quant Bot] SIGTERM received. Gracefully shutting down...');
+  if (limitlessWsInstance) {
+    try { await limitlessWsInstance.disconnect(); } catch {}
+  }
+  process.exit(0);
 });

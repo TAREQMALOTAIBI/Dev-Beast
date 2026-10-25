@@ -159,7 +159,7 @@ async function initLimitlessSdkWebSocket() {
 
     const wsConfig: any = {
       url: 'wss://ws.limitless.exchange',
-      autoReconnect: true,
+      autoReconnect: false,
       timeout: 10000,
     };
     if (hasAuth && tokenId && secret) {
