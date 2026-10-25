@@ -460,40 +460,43 @@ function setupApiMiddlewares(middlewares: any) {
         // ====================================================================
         // STRICT SAFETY GUARD: 15-MINUTE BTC ONLY
         // ====================================================================
-        // If incoming slug is not 15-min or is a 5-min contract, find the live 15-min market
-        if (!activeMarketSlug || !is15MinBtcMarket({ slug: activeMarketSlug })) {
-          const live15 = (cachedActiveBtc && is15MinBtcMarket(cachedActiveBtc))
-            ? cachedActiveBtc
-            : await fetchLive15MinBtcMarket();
-
-          if (!live15 || !is15MinBtcMarket(live15)) {
-            res.statusCode = 400;
-            return res.end(JSON.stringify({
-              success: false,
-              error: `Safety Guard Blocked: Market '${activeMarketSlug}' is not a 15-minute BTC contract, and no active 15-minute market was found. Order aborted.`,
-            }));
-          }
-
-          console.log(`[SAFETY SHIELD] Non-15m market '${activeMarketSlug}' intercepted. Redirected safely to active 15-minute market: '${live15.slug}'`);
-          activeMarketSlug = live15.slug;
-          marketData = live15;
-        }
-
-        // Fetch detailed market data if not already retrieved
-        if (!marketData?.tokens) {
+        // Check if market exists, and verify it has not expired or resolved
+        let isExpiredOrResolved = false;
+        if (activeMarketSlug && is15MinBtcMarket({ slug: activeMarketSlug })) {
           try {
             const mRes = await fetch(`https://api.limitless.exchange/markets/${encodeURIComponent(activeMarketSlug)}`);
             if (mRes.ok) {
               marketData = await mRes.json();
-            } else {
-              const live15 = await fetchLive15MinBtcMarket();
-              if (live15) {
-                marketData = live15;
-                activeMarketSlug = live15.slug;
+              if (marketData?.expirationTimestamp && marketData.expirationTimestamp <= Date.now()) {
+                isExpiredOrResolved = true;
               }
+              if (marketData?.status && marketData.status !== 'FUNDED') {
+                isExpiredOrResolved = true;
+              }
+            } else {
+              isExpiredOrResolved = true;
             }
           } catch {
-            // fallback
+            isExpiredOrResolved = true;
+          }
+        } else {
+          isExpiredOrResolved = true;
+        }
+
+        // If market is expired, resolved, or invalid, auto-route to current live active 15m market
+        if (isExpiredOrResolved || !marketData) {
+          const live15 = await fetchLive15MinBtcMarket();
+          if (live15 && is15MinBtcMarket(live15)) {
+            console.log(`[ORDER ROUTER] Market '${activeMarketSlug}' was expired/inactive. Auto-routed to current live 15m market: '${live15.slug}'`);
+            activeMarketSlug = live15.slug;
+            marketData = live15;
+            cachedActiveBtc = live15;
+          } else {
+            res.statusCode = 400;
+            return res.end(JSON.stringify({
+              success: false,
+              error: `Safety Guard Blocked: No active, unexpired 15-minute BTC market was found on Limitless Exchange. Order aborted.`,
+            }));
           }
         }
 
@@ -506,13 +509,43 @@ function setupApiMiddlewares(middlewares: any) {
           }));
         }
 
+        // Ensure marketData has tokens and venue
+        if (!marketData?.tokens?.yes || !marketData?.tokens?.no || !marketData?.venue?.exchange) {
+          try {
+            const mFullRes = await fetch(`https://api.limitless.exchange/markets/${encodeURIComponent(activeMarketSlug)}`);
+            if (mFullRes.ok) {
+              const mFull = await mFullRes.json();
+              marketData = { ...marketData, ...mFull };
+            }
+          } catch {
+            // Safe continuation
+          }
+        }
+
         const venueExchange = marketData?.venue?.exchange || '0x05c748E2f4DcDe0ec9Fa8DDc40DE6b867f923fa5';
         const isLong = direction === 'LONG' || outcome === 'UP';
-        const targetTokenId = isLong
-          ? (marketData?.tokens?.yes || '59421473136307452468391913282081951561385299434690059271645163627705056748660')
-          : (marketData?.tokens?.no || '40162699974295487791837260294296186163581478509542482654947866172365777902927');
+        const targetTokenId = isLong ? marketData?.tokens?.yes : marketData?.tokens?.no;
 
-        const normalizedPrice = Number(price) > 1 ? Number(price) / 100 : (Number(price) || 0.50);
+        if (!targetTokenId) {
+          res.statusCode = 400;
+          return res.end(JSON.stringify({
+            success: false,
+            error: `Token ID for outcome ${outcome} could not be resolved for market '${activeMarketSlug}'. Order cancelled.`,
+          }));
+        }
+
+        // Extract market ask price for this outcome so FAK orders fill immediately
+        const marketAsk = isLong
+          ? (marketData?.tradePrices?.buy?.market?.[0] ?? marketData?.prices?.[0] ?? 0.50)
+          : (marketData?.tradePrices?.buy?.market?.[1] ?? marketData?.prices?.[1] ?? 0.50);
+
+        let inputPrice = Number(price) > 1 ? Number(price) / 100 : (Number(price) || marketAsk);
+        // If price is lower than market ask and order is FAK, bump to marketAsk to prevent immediate kill
+        if (type === 'FAK' && inputPrice < marketAsk) {
+          inputPrice = marketAsk;
+        }
+        // Price must have max 3 decimal places for Limitless SDK tick alignment (0.001)
+        const tickAlignedPrice = Math.max(0.001, Math.min(0.999, parseFloat(Number(inputPrice).toFixed(3))));
         const contractCount = Math.max(1, Math.round(Number(size) || 1));
 
         if (hasLiveAuth && pk && tokenId && secret) {
@@ -546,7 +579,7 @@ function setupApiMiddlewares(middlewares: any) {
             tokenId: String(targetTokenId),
             side: sdk.Side.BUY,
             orderType: orderTypeEnum,
-            price: normalizedPrice,
+            price: tickAlignedPrice,
             size: contractCount,
           });
 
@@ -558,7 +591,7 @@ function setupApiMiddlewares(middlewares: any) {
             direction: isLong ? 'LONG' : 'SHORT',
             outcome: isLong ? 'UP' : 'DOWN',
             tokenId: targetTokenId,
-            price: normalizedPrice,
+            price: tickAlignedPrice,
             size: contractCount,
             chunkId,
             details: result,
@@ -572,7 +605,7 @@ function setupApiMiddlewares(middlewares: any) {
             chainId: 8453,
             verifyingContract: venueExchange,
           };
-          const makerAmount = Math.round(normalizedPrice * contractCount * 1e6);
+          const makerAmount = Math.round(tickAlignedPrice * contractCount * 1e6);
           const takerAmount = Math.round(contractCount * 1e6);
 
           const eip712Order = {
@@ -605,8 +638,10 @@ function setupApiMiddlewares(middlewares: any) {
           }));
         }
       } catch (err: any) {
+        const errorDetail = err?.response?.data?.message || err?.response?.data?.error || err?.message || String(err);
+        console.warn('[EIP-712 ORDER NOTICE]', errorDetail);
         res.statusCode = 500;
-        res.end(JSON.stringify({ success: false, error: err.message || String(err) }));
+        res.end(JSON.stringify({ success: false, error: errorDetail }));
       }
     });
   });

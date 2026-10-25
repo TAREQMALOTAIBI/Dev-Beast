@@ -354,34 +354,87 @@ app.post('/api/limitless/order', async (req, res) => {
     let activeMarketSlug = market || 'btc-100k-weekly';
     let marketData = null;
 
-    try {
-      const mRes = await fetch(`https://api.limitless.exchange/markets/${encodeURIComponent(activeMarketSlug)}`);
-      if (mRes.ok) {
-        marketData = await mRes.json();
-      } else {
-        const activeRes = await fetch('https://api.limitless.exchange/markets/active');
-        if (activeRes.ok) {
-          const activeJson = await activeRes.json();
-          const list = activeJson?.data || [];
-          marketData = list.find((m) => m.slug?.toLowerCase().includes('btc')) || list[0];
-          if (marketData?.slug) {
-            activeMarketSlug = marketData.slug;
+    // Check if market exists, and verify it has not expired or resolved
+    let isExpiredOrResolved = false;
+    if (activeMarketSlug && is15MinBtcMarket({ slug: activeMarketSlug })) {
+      try {
+        const mRes = await fetch(`https://api.limitless.exchange/markets/${encodeURIComponent(activeMarketSlug)}`);
+        if (mRes.ok) {
+          marketData = await mRes.json();
+          if (marketData?.expirationTimestamp && marketData.expirationTimestamp <= Date.now()) {
+            isExpiredOrResolved = true;
           }
+          if (marketData?.status && marketData.status !== 'FUNDED') {
+            isExpiredOrResolved = true;
+          }
+        } else {
+          isExpiredOrResolved = true;
+        }
+      } catch {
+        isExpiredOrResolved = true;
+      }
+    } else {
+      isExpiredOrResolved = true;
+    }
+
+    if (isExpiredOrResolved || !marketData) {
+      const activeRes = await fetch('https://api.limitless.exchange/markets/active');
+      if (activeRes.ok) {
+        const activeJson = await activeRes.json();
+        const list = activeJson?.data || [];
+        const now = Date.now();
+        const live15 = list.find((m) => is15MinBtcMarket(m) && m.status === 'FUNDED' && (!m.expirationTimestamp || m.expirationTimestamp > now))
+          || list.find((m) => is15MinBtcMarket(m) && (!m.expirationTimestamp || m.expirationTimestamp > now));
+        if (live15) {
+          activeMarketSlug = live15.slug;
+          marketData = live15;
+          cachedActiveBtcServer = live15;
+          console.log(`[ORDER ROUTER] Market was expired/inactive. Auto-routed to current live 15m market: '${live15.slug}'`);
         }
       }
-    } catch (e) {
-      console.warn('[EIP-712] Failed to fetch market info:', e.message);
+    }
+
+    if (!marketData || !is15MinBtcMarket(marketData)) {
+      return res.status(400).json({
+        success: false,
+        error: `Safety Guard Blocked: No active, unexpired 15-minute BTC market was found on Limitless Exchange. Order aborted.`,
+      });
+    }
+
+    // Ensure marketData has tokens and venue
+    if (!marketData?.tokens?.yes || !marketData?.tokens?.no || !marketData?.venue?.exchange) {
+      try {
+        const mFullRes = await fetch(`https://api.limitless.exchange/markets/${encodeURIComponent(activeMarketSlug)}`);
+        if (mFullRes.ok) {
+          const mFull = await mFullRes.json();
+          marketData = { ...marketData, ...mFull };
+        }
+      } catch {
+        // Safe continuation
+      }
     }
 
     const venueExchange = marketData?.venue?.exchange || '0x05c748E2f4DcDe0ec9Fa8DDc40DE6b867f923fa5';
     const isLong = direction === 'LONG' || outcome === 'UP';
-    const targetTokenId = isLong
-      ? (marketData?.tokens?.yes || '59421473136307452468391913282081951561385299434690059271645163627705056748660')
-      : (marketData?.tokens?.no || '40162699974295487791837260294296186163581478509542482654947866172365777902927');
+    const targetTokenId = isLong ? marketData?.tokens?.yes : marketData?.tokens?.no;
 
-    const normalizedPrice = Number(price) > 1 ? Number(price) / 100 : (Number(price) || 0.50);
-    // Allow fractional contracts (e.g. 0.1, 0.25, 0.5, 1.25)
-    const contractCount = Math.max(0.01, parseFloat(Number(size || 0.01).toFixed(4)));
+    if (!targetTokenId) {
+      return res.status(400).json({
+        success: false,
+        error: `Token ID for outcome ${outcome} could not be resolved for market '${activeMarketSlug}'. Order cancelled.`,
+      });
+    }
+
+    const marketAsk = isLong
+      ? (marketData?.tradePrices?.buy?.market?.[0] ?? marketData?.prices?.[0] ?? 0.50)
+      : (marketData?.tradePrices?.buy?.market?.[1] ?? marketData?.prices?.[1] ?? 0.50);
+
+    let inputPrice = Number(price) > 1 ? Number(price) / 100 : (Number(price) || marketAsk);
+    if (type === 'FAK' && inputPrice < marketAsk) {
+      inputPrice = marketAsk;
+    }
+    const tickAlignedPrice = Math.max(0.001, Math.min(0.999, parseFloat(Number(inputPrice).toFixed(3))));
+    const contractCount = Math.max(1, Math.round(Number(size) || 1));
 
     if (hasLiveAuth) {
       const { ethers } = await import('ethers');
@@ -422,7 +475,7 @@ app.post('/api/limitless/order', async (req, res) => {
         tokenId: String(targetTokenId),
         side: sdk.Side.BUY,
         orderType: orderTypeEnum,
-        price: normalizedPrice,
+        price: tickAlignedPrice,
         size: contractCount,
       });
 
@@ -435,7 +488,7 @@ app.post('/api/limitless/order', async (req, res) => {
         direction: isLong ? 'LONG' : 'SHORT',
         outcome: isLong ? 'UP' : 'DOWN',
         tokenId: targetTokenId,
-        price: normalizedPrice,
+        price: tickAlignedPrice,
         size: contractCount,
         chunkId,
         details: result,
@@ -452,7 +505,7 @@ app.post('/api/limitless/order', async (req, res) => {
         verifyingContract: venueExchange,
       };
 
-      const makerAmount = Math.round(normalizedPrice * contractCount * 1e6);
+      const makerAmount = Math.round(tickAlignedPrice * contractCount * 1e6);
       const takerAmount = Math.round(contractCount * 1e6);
 
       const eip712Order = {
@@ -485,8 +538,9 @@ app.post('/api/limitless/order', async (req, res) => {
       });
     }
   } catch (err) {
-    console.error('[EIP-712 ORDER ERROR]', err);
-    res.status(500).json({ success: false, error: err.message || String(err) });
+    const errorDetail = err?.response?.data?.message || err?.response?.data?.error || err?.message || String(err);
+    console.warn('[EIP-712 ORDER NOTICE]', errorDetail);
+    res.status(500).json({ success: false, error: errorDetail });
   }
 });
 

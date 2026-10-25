@@ -236,6 +236,37 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
               </span>
             </div>
 
+            {/* Quick Sensitivity Presets */}
+            <div className="flex flex-wrap items-center gap-2 pt-1 pb-1">
+              <span className="text-[11px] text-slate-400">{isAr ? 'قوالب الحساسية وسرعة الدخول:' : 'Sensitivity Presets:'}</span>
+              <button
+                type="button"
+                onClick={() => setDraft({
+                  ...draft,
+                  zScoreUpper: 1.8,
+                  zScoreEntry: 1.5,
+                  zScoreLower: -1.8,
+                  zScoreLowerEntry: -1.5,
+                })}
+                className="px-2.5 py-1 rounded text-[11px] font-bold bg-emerald-950/80 hover:bg-emerald-900/90 text-emerald-300 border border-emerald-600/50 cursor-pointer"
+              >
+                {isAr ? '⚡ سريع ونشط (±1.8σ / ±1.5σ) - صفقات متكررة' : '⚡ Active (±1.8σ / ±1.5σ)'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setDraft({
+                  ...draft,
+                  zScoreUpper: 2.0,
+                  zScoreEntry: 1.9,
+                  zScoreLower: -2.0,
+                  zScoreLowerEntry: -1.9,
+                })}
+                className="px-2.5 py-1 rounded text-[11px] font-bold bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 cursor-pointer"
+              >
+                {isAr ? '🛡️ محافظ (±2.0σ / ±1.9σ) - ارتداد أقصى' : '🛡️ Conservative (±2.0σ / ±1.9σ)'}
+              </button>
+            </div>
+
             {/* Thresholds Grid: Upper & Lower */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
               {/* Upper Arm */}
@@ -247,11 +278,11 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                   type="number"
                   step="0.05"
                   value={draft.zScoreUpper}
-                  onChange={(e) => setDraft({ ...draft, zScoreUpper: parseFloat(e.target.value) || 2.0 })}
+                  onChange={(e) => setDraft({ ...draft, zScoreUpper: parseFloat(e.target.value) || 1.8 })}
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
                 />
                 <span className="text-[10px] text-slate-500 mt-1 block">
-                  {isAr ? 'التأهب لصفقة هبوط عند تجاوز +2.0σ' : 'Arms Short when Z crosses above upper bound'}
+                  {isAr ? 'التأهب لصفقة هبوط عند تجاوز +1.8σ' : 'Arms Short when Z crosses above upper bound'}
                 </span>
               </div>
 
@@ -332,13 +363,13 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
 
               <div>
                 <label className="block text-slate-400 mb-1">
-                  {isAr ? 'أقصى سعر للعقد ($)' : 'Max Price Cents ($)'}
+                  {isAr ? 'سقف سعر الشراء الأقصى للعقد ($)' : 'Max Price Ceiling ($)'}
                 </label>
                 <input
                   type="number"
-                  step="0.01"
+                  step="0.05"
                   value={draft.maxPriceCents}
-                  onChange={(e) => setDraft({ ...draft, maxPriceCents: parseFloat(e.target.value) || 0.2 })}
+                  onChange={(e) => setDraft({ ...draft, maxPriceCents: parseFloat(e.target.value) || 0.85 })}
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
                 />
               </div>

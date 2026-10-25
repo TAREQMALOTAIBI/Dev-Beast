@@ -518,18 +518,28 @@ export class LimitlessService {
       });
       const orderResult = await orderRes.json().catch(() => null);
       if (!orderRes.ok || (orderResult && orderResult.success === false)) {
-        throw new Error(orderResult?.error || 'Order execution rejected by exchange');
+        const errMessage = orderResult?.error || orderResult?.message || `HTTP ${orderRes.status}: Order rejected by Limitless exchange`;
+        chunkState.status = 'FAILED';
+        chunkState.timestamp = Date.now();
+        (chunkState as any).error = errMessage;
+        onChunkUpdate({ ...chunkState });
+        this.log('SYSTEM', `❌ [فشل تنفيذ الصفقة] ${errMessage}`);
+        throw new Error(errMessage);
       }
 
       chunkState.status = 'SENT';
       chunkState.timestamp = Date.now();
+      (chunkState as any).orderId = orderResult?.orderId;
+      (chunkState as any).details = orderResult?.details;
       onChunkUpdate({ ...chunkState });
       soundController.playChunkExecuted(0);
       console.log(
         `🚀 Live Direct Order transmitted to Limitless: ${contractsToBuy} contracts @ $${priceCents} (${orderType}) [5% Max Risk - No Chunking]`
       );
-    } catch (err) {
+    } catch (err: any) {
       chunkState.status = 'FAILED';
+      chunkState.timestamp = Date.now();
+      (chunkState as any).error = err?.message || String(err);
       onChunkUpdate({ ...chunkState });
       throw err;
     }

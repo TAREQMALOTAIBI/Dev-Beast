@@ -372,6 +372,7 @@ export default function App() {
                   isEntrySignal={isEntrySignal}
                   botActive={botActive}
                   onToggleBot={toggleBot}
+                  onTriggerManualTrade={triggerManualTrade}
                   isExecuting={isExecuting}
                   soundEnabled={soundEnabled}
                   onToggleSound={toggleSound}
@@ -448,6 +449,9 @@ export default function App() {
                 onOpenConfig={() => setIsConfigOpen(true)}
                 lang={lang}
                 chunksCount={config.fractionChunks}
+                onTriggerManualTrade={triggerManualTrade}
+                botActive={botActive}
+                onToggleBot={toggleBot}
               />
             </div>
           </div>

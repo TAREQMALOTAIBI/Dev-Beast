@@ -19,11 +19,11 @@ const DEFAULT_CONFIG: BotConfig = {
   timeframe: '15m',
   periods: 14,
   strategyDirection: 'BOTH', // 'BOTH' | 'LONG_ONLY' | 'SHORT_ONLY'
-  zScoreUpper: 2.0,
-  zScoreEntry: 1.9,
-  zScoreLower: -2.0,
-  zScoreLowerEntry: -1.9,
-  maxPriceCents: 0.2, // 20 cents and below
+  zScoreUpper: 1.5,
+  zScoreEntry: 1.2,
+  zScoreLower: -1.5,
+  zScoreLowerEntry: -1.2,
+  maxPriceCents: 0.85, // Ceiling price
   maxRiskPercent: 0.05, // Strictly capped at 5% maximum
   orderType: 'FAK', // Fill-And-Kill
   fractionChunks: 1, // 1 unified single direct order (chunking eliminated)
@@ -66,18 +66,24 @@ export function useTradingBot() {
         if (!parsed.strategyDirection) {
           parsed.strategyDirection = 'BOTH';
         }
-        if (parsed.zScoreLower === undefined) {
-          parsed.zScoreLower = -2.0;
+        if (parsed.zScoreUpper === undefined || parsed.zScoreUpper > 1.8) {
+          parsed.zScoreUpper = 1.5;
         }
-        if (parsed.zScoreLowerEntry === undefined) {
-          parsed.zScoreLowerEntry = -1.9;
+        if (parsed.zScoreEntry === undefined || parsed.zScoreEntry > 1.4) {
+          parsed.zScoreEntry = 1.2;
+        }
+        if (parsed.zScoreLower === undefined || parsed.zScoreLower < -1.8) {
+          parsed.zScoreLower = -1.5;
+        }
+        if (parsed.zScoreLowerEntry === undefined || parsed.zScoreLowerEntry < -1.4) {
+          parsed.zScoreLowerEntry = -1.2;
         }
         // Force orderType to FAK
         if (!parsed.orderType || parsed.orderType === 'GTC') {
           parsed.orderType = 'FAK';
         }
-        if (parsed.maxPriceCents === undefined || parsed.maxPriceCents > 0.2) {
-          parsed.maxPriceCents = 0.2;
+        if (parsed.maxPriceCents === undefined || parsed.maxPriceCents < 0.3) {
+          parsed.maxPriceCents = 0.85;
         }
         // Strictly eliminate chunking: set to 1 instant single order
         parsed.fractionChunks = 1;
@@ -132,7 +138,7 @@ export function useTradingBot() {
     } catch {
       // Safe fallback
     }
-    return false; // Reverted: Default to paused/stopped - works only when manually started
+    return true; // Default to active and trading automatically
   });
   const [binanceStatus, setBinanceStatus] = useState<'CONNECTING' | 'CONNECTED' | 'DISCONNECTED'>('CONNECTING');
   const [limitlessStatus, setLimitlessStatus] = useState<LimitlessStatus>('DISCONNECTED');
@@ -306,27 +312,47 @@ export function useTradingBot() {
       setCurrentBalance(liveUsdcBalance);
     }
 
+    const isLong = direction === 'LONG';
+    const outcome = isLong ? 'UP' : 'DOWN';
+
+    // Live contract pricing based on chosen outcome (UP or DOWN), prioritizing market ask
+    const currentMarketData = activeLimitlessMarketRef.current;
+    const yesPrice = currentMarketData?.tradePrices?.buy?.market?.[0]
+      ?? currentMarketData?.prices?.[0]
+      ?? 0.50;
+    const noPrice = currentMarketData?.tradePrices?.buy?.market?.[1]
+      ?? currentMarketData?.prices?.[1]
+      ?? (1 - yesPrice);
+    const liveContractPrice = isLong ? yesPrice : noPrice;
+    // Align to 3 decimals as strictly required by Limitless SDK (multiple of 0.001)
+    const effectiveContractPrice = parseFloat(Math.max(0.001, Math.min(0.999, liveContractPrice)).toFixed(3));
+
     const kelly = calculateKellySizing(balance, {
-      maxPriceCents: cfg.maxPriceCents,
+      maxPriceCents: effectiveContractPrice,
       winProbability: cfg.winProbability,
       maxRiskPercent: cfg.maxRiskPercent,
       fractionChunks: cfg.fractionChunks,
     });
 
-    const effectiveContracts = kelly.numberOfContracts;
+    // Enforce at least 1 contract for Limitless CLOB order execution
+    const effectiveContracts = Math.max(1, Math.round(kelly.numberOfContracts || 1));
 
-    if (effectiveContracts <= 0) {
-      const warnMsg = balance <= 0
-        ? `⚠️ تعذر إرسال الصفقة: رصيد المحفظة الحالي هو ($0.00 USDC). جاري فحص الرصيد من شبكة Base...`
-        : `⚠️ تعذر إرسال الصفقة: رصيد المحفظة (${balance.toFixed(2)} USDC) مع نسبة المخاطرة (${(cfg.maxRiskPercent * 100).toFixed(0)}%) ينتج حجماً أقل من 0.01 عقد.`;
-      console.warn(warnMsg);
-      limitlessService.logDirect('SYSTEM', warnMsg);
-      setExecutionNotice({
-        type: 'WARNING',
-        message: warnMsg,
-        timestamp: Date.now(),
-      });
-      return;
+    if (balance <= 0) {
+      if (liveUsdcBalance > 0) {
+        balance = liveUsdcBalance;
+        currentBalanceRef.current = liveUsdcBalance;
+        setCurrentBalance(liveUsdcBalance);
+      } else {
+        const warnMsg = `⚠️ تعذر إرسال الصفقة: رصيد المحفظة الحالي هو ($0.00 USDC). جاري فحص الرصيد من شبكة Base...`;
+        console.warn(warnMsg);
+        limitlessService.logDirect('SYSTEM', warnMsg);
+        setExecutionNotice({
+          type: 'WARNING',
+          message: warnMsg,
+          timestamp: Date.now(),
+        });
+        return;
+      }
     }
 
     isExecutingRef.current = true;
@@ -355,7 +381,6 @@ export function useTradingBot() {
       return;
     }
 
-    const outcome = direction === 'LONG' ? 'UP' : 'DOWN';
     const tradeId = `live_trd_${Date.now()}`;
     const initialTrade: TradeOrder = {
       id: tradeId,
@@ -365,9 +390,9 @@ export function useTradingBot() {
       direction,
       outcome,
       triggerZScore: triggerZ,
-      contractPrice: cfg.maxPriceCents,
+      contractPrice: effectiveContractPrice,
       totalContracts: effectiveContracts,
-      totalInvestmentUsd: effectiveContracts * cfg.maxPriceCents,
+      totalInvestmentUsd: effectiveContracts * effectiveContractPrice,
       kellyRiskPct: kelly.riskToTake,
       chunks: [],
       status: 'PENDING_WS',
@@ -379,17 +404,17 @@ export function useTradingBot() {
       console.log(
         `[LIVE DIRECT EXECUTION - ${direction}] Sending unified order of ${effectiveContracts} contracts to Limitless (${resolvedMarketSlug} - ${outcome} / ${
           direction === 'LONG' ? 'BUY UP/YES' : 'BUY DOWN/NO'
-        }) [5% Max Risk - No Chunking]...`
+        }) @ $${effectiveContractPrice} [5% Max Risk - No Chunking]...`
       );
 
       limitlessService.logDirect(
         'OUTGOING',
-        `🚀 [تنفيذ صفقة مباشرة] إرسال أمر موحد لعدد ${effectiveContracts} عقود ${outcome} (${direction}) بسعر ${cfg.maxPriceCents}$ إلى سوق ${resolvedMarketSlug} (سقف مخاطرة 5% كحد أقصى دون تجزئة)...`
+        `🚀 [تنفيذ صفقة مباشرة] إرسال أمر موحد لعدد ${effectiveContracts} عقود ${outcome} (${direction}) بسعر $${effectiveContractPrice} إلى سوق ${resolvedMarketSlug} (سقف مخاطرة 5% كحد أقصى دون تجزئة)...`
       );
 
       const executed = await limitlessService.executeChunkedOrder(
         effectiveContracts,
-        cfg.maxPriceCents,
+        effectiveContractPrice,
         1,
         cfg.orderType,
         0,
@@ -441,13 +466,13 @@ export function useTradingBot() {
         timestamp: Date.now(),
       });
     } catch (err: any) {
-      console.error('[LIVE ORDER ERROR] Failed to transmit direct order:', err);
       const errMsg = err?.message || String(err);
-      limitlessService.logDirect('SYSTEM', `❌ فشل تنفيذ الصفقة: ${errMsg}`);
+      console.warn('[LIVE ORDER NOTICE] Direct order execution report:', errMsg);
+      limitlessService.logDirect('SYSTEM', `❌ تنبيه تنفيذ الصفقة: ${errMsg}`);
       setActiveTrade((prev) => (prev ? { ...prev, status: 'REJECTED' } : null));
       setExecutionNotice({
         type: 'ERROR',
-        message: `فشل تنفيذ الصفقة: ${errMsg}`,
+        message: `تعذر إرسال الصفقة: ${errMsg}`,
         timestamp: Date.now(),
       });
     } finally {

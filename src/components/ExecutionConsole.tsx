@@ -25,6 +25,9 @@ interface ExecutionConsoleProps {
   onOpenConfig: () => void;
   lang: 'en' | 'ar';
   chunksCount?: number;
+  onTriggerManualTrade?: (direction: 'SHORT' | 'LONG') => void;
+  botActive?: boolean;
+  onToggleBot?: () => void;
 }
 
 export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
@@ -41,6 +44,9 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
   onOpenConfig,
   lang,
   chunksCount = 1,
+  onTriggerManualTrade,
+  botActive,
+  onToggleBot,
 }) => {
   const isAr = lang === 'ar';
   const [selectedPayload, setSelectedPayload] = useState<Record<string, unknown> | null>(null);
@@ -177,6 +183,46 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
       {/* Tab 1: Live Order Chunks */}
       {activeTab === 'chunks' && (
         <div className="p-4 flex flex-col gap-4">
+          {onTriggerManualTrade && (
+            <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-xl flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-xs">
+                <span className={`w-2.5 h-2.5 rounded-full ${botActive ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+                <span className="font-bold text-slate-200">
+                  {isAr
+                    ? (botActive ? '● الروبوت نشط ويتداول تلقائياً' : '○ الروبوت متوقف مؤقتاً')
+                    : (botActive ? '● Bot Active & Auto-Trading' : '○ Bot Paused')}
+                </span>
+                {onToggleBot && (
+                  <button
+                    onClick={onToggleBot}
+                    className="text-[11px] font-semibold underline text-sky-400 hover:text-sky-300 ml-1 cursor-pointer"
+                  >
+                    {isAr ? (botActive ? 'إيقاف' : 'تشغيل') : (botActive ? 'Pause' : 'Start')}
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-slate-400">{isAr ? 'تجربة صفقة فورية:' : 'Test Trade:'}</span>
+                <button
+                  onClick={() => onTriggerManualTrade('LONG')}
+                  disabled={isExecuting}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white cursor-pointer shadow-sm transition-all"
+                  title={isAr ? 'شراء عقد UP صعود فوري بسعر السوق الحقيقي' : 'Instant BUY UP'}
+                >
+                  {isAr ? '⚡ شراء UP فوري' : '⚡ Buy UP'}
+                </button>
+                <button
+                  onClick={() => onTriggerManualTrade('SHORT')}
+                  disabled={isExecuting}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white cursor-pointer shadow-sm transition-all"
+                  title={isAr ? 'شراء عقد DOWN هبوط فوري بسعر السوق الحقيقي' : 'Instant BUY DOWN'}
+                >
+                  {isAr ? '⚡ شراء DOWN فوري' : '⚡ Buy DOWN'}
+                </button>
+              </div>
+            </div>
+          )}
+
           {(() => {
             const effectiveChunks = Math.max(1, chunksCount || 1);
             const chunkIndices = Array.from({ length: effectiveChunks }, (_, i) => i + 1);

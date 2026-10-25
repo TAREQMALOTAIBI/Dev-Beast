@@ -23,6 +23,7 @@ interface StrategyStatusCardProps {
   isEntrySignal: boolean;
   botActive: boolean;
   onToggleBot: () => void;
+  onTriggerManualTrade?: (direction: 'SHORT' | 'LONG') => void;
   isExecuting?: boolean;
   soundEnabled: boolean;
   onToggleSound: () => void;
@@ -47,6 +48,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
   isEntrySignal,
   botActive,
   onToggleBot,
+  onTriggerManualTrade,
   isExecuting = false,
   soundEnabled,
   onToggleSound,
@@ -245,6 +247,39 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
               : (botActive ? '⚡ Automated engine active: Real-time execution triggers automatically on Z-Score reversal signals.' : 'Automated execution is paused. Click above to start.')}
           </span>
         </div>
+
+        {/* Instant Trade Testing Buttons */}
+        {onTriggerManualTrade && (
+          <div className="mt-3 pt-3 border-t border-slate-800/80">
+            <div className="text-[11px] text-slate-300 font-semibold mb-2 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Zap className="w-3.5 h-3.5 text-amber-400" />
+                <span>{isAr ? 'تنفيذ فوري وتجربة صفقة الآن (سقف مخاطرة 5%):' : 'Instant Trade / Direct Execution (5% Max):'}</span>
+              </span>
+              <span className="text-[10px] text-emerald-400 font-mono">Real CLOB</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => onTriggerManualTrade('LONG')}
+                disabled={isExecuting}
+                className="py-2 px-3 rounded-lg font-bold text-xs bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+                title={isAr ? 'شراء عقد UP صعود مباشرة بسعر السوق اللحظي' : 'Buy UP contract at live market ask'}
+              >
+                <TrendingUp className="w-3.5 h-3.5" />
+                <span>{isAr ? 'شراء UP (صعود) فوري' : 'Buy UP (Long)'}</span>
+              </button>
+              <button
+                onClick={() => onTriggerManualTrade('SHORT')}
+                disabled={isExecuting}
+                className="py-2 px-3 rounded-lg font-bold text-xs bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+                title={isAr ? 'شراء عقد DOWN هبوط مباشرة بسعر السوق اللحظي' : 'Buy DOWN contract at live market ask'}
+              >
+                <TrendingDown className="w-3.5 h-3.5" />
+                <span>{isAr ? 'شراء DOWN (هبوط) فوري' : 'Buy DOWN (Short)'}</span>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Dual Direction Live Strategy Status Wings */}
