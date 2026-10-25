@@ -202,12 +202,16 @@ async function initLimitlessSdkWebSocket() {
         ? cachedActiveBtc.slug
         : 'btc-up-or-down-15-min';
       try {
-        await ws.subscribe('subscribe_market_prices', {
+        const subParams: any = {
           marketSlugs: [activeSlug],
-        });
+        };
+        if (cachedActiveBtc?.address) {
+          subParams.marketAddresses = [cachedActiveBtc.address];
+        }
+        await ws.subscribe('subscribe_market_prices', subParams);
 
         if (hasAuth) {
-          await ws.subscribe('subscribe_positions', { marketSlugs: [activeSlug] });
+          await ws.subscribe('subscribe_positions', subParams);
           await ws.subscribe('subscribe_order_events');
           await ws.subscribe('subscribe_transactions');
         }
@@ -229,20 +233,54 @@ async function initLimitlessSdkWebSocket() {
 
       // Extract real-time live contract price from orderbook update and sync with cachedActiveBtc
       const ob = data?.orderbook;
-      const liveMidpoint = ob?.adjustedMidpoint ?? (
-        ob?.bids?.[0]?.price && ob?.asks?.[0]?.price
-          ? (ob.bids[0].price + ob.asks[0].price) / 2
-          : null
-      );
+      let liveYesPrice: number | null = null;
+      if (typeof ob?.adjustedMidpoint === 'number' && ob.adjustedMidpoint > 0 && ob.adjustedMidpoint < 1) {
+        liveYesPrice = ob.adjustedMidpoint;
+      } else if (ob?.bids?.[0]?.price && ob?.asks?.[0]?.price) {
+        liveYesPrice = (ob.bids[0].price + ob.asks[0].price) / 2;
+      } else if (ob?.bids?.[0]?.price && ob.bids[0].price > 0 && ob.bids[0].price < 1) {
+        liveYesPrice = ob.bids[0].price;
+      } else if (ob?.asks?.[0]?.price && ob.asks[0].price > 0 && ob.asks[0].price < 1) {
+        liveYesPrice = ob.asks[0].price;
+      }
 
-      if (liveMidpoint && liveMidpoint > 0 && cachedActiveBtc && (slug === cachedActiveBtc.slug || !slug)) {
-        const p0 = parseFloat(Number(liveMidpoint).toFixed(4));
+      if (liveYesPrice !== null && liveYesPrice > 0 && liveYesPrice < 1) {
+        const p0 = parseFloat(Number(liveYesPrice).toFixed(4));
         const p1 = parseFloat((1 - p0).toFixed(4));
-        cachedActiveBtc.prices = [p0, p1];
-        broadcastSse('priceUpdate', { marketSlug: slug || cachedActiveBtc.slug, prices: [p0, p1] });
+        if (cachedActiveBtc) {
+          cachedActiveBtc.prices = [p0, p1];
+          if (cachedActiveBtc.tradePrices?.buy?.market) {
+            cachedActiveBtc.tradePrices.buy.market = [p0, p1];
+          }
+        }
+        broadcastSse('priceUpdate', { marketSlug: slug || cachedActiveBtc?.slug, prices: [p0, p1] });
       }
 
       broadcastSse('orderbookUpdate', data);
+    });
+
+    // Handle AMM price stream events
+    ws.on('newPriceData', (data: any) => {
+      const updates = Array.isArray(data?.updatedPrices)
+        ? data.updatedPrices
+        : (data?.updatedPrices ? [data.updatedPrices] : [data]);
+
+      for (const p of updates) {
+        if (!p) continue;
+        const yes = typeof p.yesPrice === 'number' ? p.yesPrice : (typeof p.price === 'number' ? p.price : null);
+        const no = typeof p.noPrice === 'number' ? p.noPrice : (yes !== null ? 1 - yes : null);
+        if (yes !== null && no !== null && yes > 0 && no > 0) {
+          const p0 = parseFloat(Number(yes).toFixed(4));
+          const p1 = parseFloat(Number(no).toFixed(4));
+          if (cachedActiveBtc) {
+            cachedActiveBtc.prices = [p0, p1];
+            if (cachedActiveBtc.tradePrices?.buy?.market) {
+              cachedActiveBtc.tradePrices.buy.market = [p0, p1];
+            }
+          }
+          broadcastSse('priceUpdate', { marketSlug: p.marketSlug || cachedActiveBtc?.slug, prices: [p0, p1] });
+        }
+      }
     });
 
     ws.on('oraclePriceData', (data: any) => {
@@ -378,27 +416,16 @@ function setupApiMiddlewares(middlewares: any) {
     }));
   });
 
-  middlewares.use('/api/limitless/active-btc', async (_req: any, res: any) => {
-    res.setHeader('Content-Type', 'application/json');
+  async function pollActiveBtcMarket() {
     try {
-      const now = Date.now();
-      const isExpired = cachedActiveBtc?.expirationTimestamp && cachedActiveBtc.expirationTimestamp <= now;
-      if (!isExpired && cachedActiveBtc && is15MinBtcMarket(cachedActiveBtc) && now - lastBtcFetchTime < 10000) {
-        return res.end(JSON.stringify({ success: true, ...cachedActiveBtc }));
-      }
-
-      const response = await fetch('https://api.limitless.exchange/markets/active');
-      const json = await response.json();
-      const markets = json?.data || [];
-
-      // STRICT FILTER: Active, funded 15-minute BTC market that has not expired
-      const btc15Market = markets.find((m: any) => is15MinBtcMarket(m) && m.status === 'FUNDED' && (!m.expirationTimestamp || m.expirationTimestamp > now))
-        || markets.find((m: any) => is15MinBtcMarket(m) && (!m.expirationTimestamp || m.expirationTimestamp > now))
-        || markets.find((m: any) => is15MinBtcMarket(m));
-
+      const btc15Market = await fetchLive15MinBtcMarket();
       if (btc15Market) {
+        const now = Date.now();
         const previousSlug = cachedActiveBtc?.slug;
-        const slugChanged = previousSlug !== btc15Market.slug;
+        const slugChanged = previousSlug && previousSlug !== btc15Market.slug;
+        const prevPrices = cachedActiveBtc?.prices;
+        const pricesChanged = !prevPrices || prevPrices[0] !== btc15Market.prices?.[0] || prevPrices[1] !== btc15Market.prices?.[1];
+
         cachedActiveBtc = {
           slug: btc15Market.slug,
           title: btc15Market.title,
@@ -416,6 +443,10 @@ function setupApiMiddlewares(middlewares: any) {
         };
         lastBtcFetchTime = now;
 
+        if (pricesChanged && btc15Market.prices) {
+          broadcastSse('priceUpdate', { marketSlug: btc15Market.slug, prices: btc15Market.prices });
+        }
+
         if (slugChanged) {
           latestOrderbookData = null;
           broadcastSse('marketChange', cachedActiveBtc);
@@ -425,7 +456,27 @@ function setupApiMiddlewares(middlewares: any) {
             }).catch(() => {});
           }
         }
+      }
+    } catch {
+      // safe continuation
+    }
+  }
 
+  // Poll every 2.5 seconds for fresh contract prices
+  setInterval(pollActiveBtcMarket, 2500);
+
+  middlewares.use('/api/limitless/active-btc', async (_req: any, res: any) => {
+    res.setHeader('Content-Type', 'application/json');
+    try {
+      const now = Date.now();
+      const isExpired = cachedActiveBtc?.expirationTimestamp && cachedActiveBtc.expirationTimestamp <= now;
+      if (!isExpired && cachedActiveBtc && is15MinBtcMarket(cachedActiveBtc) && now - lastBtcFetchTime < 2000) {
+        return res.end(JSON.stringify({ success: true, ...cachedActiveBtc }));
+      }
+
+      await pollActiveBtcMarket();
+
+      if (cachedActiveBtc) {
         return res.end(JSON.stringify({ success: true, ...cachedActiveBtc }));
       }
 

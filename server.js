@@ -96,14 +96,19 @@ async function initLimitlessSdkWebSocket() {
       // Determine active 15m market slug
       const activeSlug = cachedActiveBtcServer?.slug || cachedActiveBtc?.slug || 'btc-up-or-down-15-min';
       try {
-        await ws.subscribe('subscribe_market_prices', {
+        const subParams = {
           marketSlugs: [activeSlug],
-        });
+        };
+        const activeAddr = cachedActiveBtcServer?.address || cachedActiveBtc?.address;
+        if (activeAddr) {
+          subParams.marketAddresses = [activeAddr];
+        }
+        await ws.subscribe('subscribe_market_prices', subParams);
         console.log(`[Limitless WS] Subscribed to market prices for: ${activeSlug}`);
 
         if (hasAuth) {
           // Per Limitless docs: subscribe immediately after connect() to ensure fresh HMAC signature
-          await ws.subscribe('subscribe_positions', { marketSlugs: [activeSlug] });
+          await ws.subscribe('subscribe_positions', subParams);
           await ws.subscribe('subscribe_order_events');
           await ws.subscribe('subscribe_transactions');
           console.log('[Limitless WS] Subscribed to authenticated positions, order events & tx');
@@ -127,21 +132,54 @@ async function initLimitlessSdkWebSocket() {
 
       // Extract real-time live contract price from orderbook update and sync with cached active market
       const ob = data?.orderbook;
-      const liveMidpoint = ob?.adjustedMidpoint ?? (
-        ob?.bids?.[0]?.price && ob?.asks?.[0]?.price
-          ? (ob.bids[0].price + ob.asks[0].price) / 2
-          : null
-      );
+      let liveYesPrice = null;
+      if (typeof ob?.adjustedMidpoint === 'number' && ob.adjustedMidpoint > 0 && ob.adjustedMidpoint < 1) {
+        liveYesPrice = ob.adjustedMidpoint;
+      } else if (ob?.bids?.[0]?.price && ob?.asks?.[0]?.price) {
+        liveYesPrice = (ob.bids[0].price + ob.asks[0].price) / 2;
+      } else if (ob?.bids?.[0]?.price && ob.bids[0].price > 0 && ob.bids[0].price < 1) {
+        liveYesPrice = ob.bids[0].price;
+      } else if (ob?.asks?.[0]?.price && ob.asks[0].price > 0 && ob.asks[0].price < 1) {
+        liveYesPrice = ob.asks[0].price;
+      }
 
-      if (liveMidpoint && liveMidpoint > 0) {
-        const p0 = parseFloat(Number(liveMidpoint).toFixed(4));
+      if (liveYesPrice !== null && liveYesPrice > 0 && liveYesPrice < 1) {
+        const p0 = parseFloat(Number(liveYesPrice).toFixed(4));
         const p1 = parseFloat((1 - p0).toFixed(4));
-        if (cachedActiveBtcServer) cachedActiveBtcServer.prices = [p0, p1];
-        if (cachedActiveBtc) cachedActiveBtc.prices = [p0, p1];
+        if (cachedActiveBtcServer) {
+          cachedActiveBtcServer.prices = [p0, p1];
+          if (cachedActiveBtcServer.tradePrices?.buy?.market) {
+            cachedActiveBtcServer.tradePrices.buy.market = [p0, p1];
+          }
+        }
         broadcastSse('priceUpdate', { marketSlug: slug, prices: [p0, p1] });
       }
 
       broadcastSse('orderbookUpdate', data);
+    });
+
+    // Handle AMM price stream events
+    ws.on('newPriceData', (data) => {
+      const updates = Array.isArray(data?.updatedPrices)
+        ? data.updatedPrices
+        : (data?.updatedPrices ? [data.updatedPrices] : [data]);
+
+      for (const p of updates) {
+        if (!p) continue;
+        const yes = typeof p.yesPrice === 'number' ? p.yesPrice : (typeof p.price === 'number' ? p.price : null);
+        const no = typeof p.noPrice === 'number' ? p.noPrice : (yes !== null ? 1 - yes : null);
+        if (yes !== null && no !== null && yes > 0 && no > 0) {
+          const p0 = parseFloat(Number(yes).toFixed(4));
+          const p1 = parseFloat(Number(no).toFixed(4));
+          if (cachedActiveBtcServer) {
+            cachedActiveBtcServer.prices = [p0, p1];
+            if (cachedActiveBtcServer.tradePrices?.buy?.market) {
+              cachedActiveBtcServer.tradePrices.buy.market = [p0, p1];
+            }
+          }
+          broadcastSse('priceUpdate', { marketSlug: p.marketSlug || cachedActiveBtcServer?.slug, prices: [p0, p1] });
+        }
+      }
     });
 
     // Oracle price updates (Chainlink / Pyth)
@@ -279,36 +317,83 @@ app.get('/api/limitless/live-state', (_req, res) => {
 let cachedActiveBtcServer = null;
 let lastBtcFetchTimeServer = 0;
 
+async function fetchLive15MinBtcMarket() {
+  try {
+    const response = await fetch('https://api.limitless.exchange/markets/active');
+    if (!response.ok) return null;
+    const json = await response.json();
+    const list = json?.data || [];
+    const now = Date.now();
+    const btc15 = list.find((m) => is15MinBtcMarket(m) && m.status === 'FUNDED' && (!m.expirationTimestamp || m.expirationTimestamp > now))
+      || list.find((m) => is15MinBtcMarket(m) && (!m.expirationTimestamp || m.expirationTimestamp > now))
+      || list.find((m) => is15MinBtcMarket(m));
+    return btc15 || null;
+  } catch {
+    return null;
+  }
+}
+
+async function pollActiveBtcMarket() {
+  try {
+    const market = await fetchLive15MinBtcMarket();
+    if (market) {
+      const now = Date.now();
+      const previousSlug = cachedActiveBtcServer?.slug;
+      const slugChanged = previousSlug && previousSlug !== market.slug;
+      const prevPrices = cachedActiveBtcServer?.prices;
+      const pricesChanged = !prevPrices || prevPrices[0] !== market.prices?.[0] || prevPrices[1] !== market.prices?.[1];
+
+      cachedActiveBtcServer = {
+        slug: market.slug,
+        title: market.title,
+        status: market.status,
+        prices: market.prices,
+        tradePrices: market.tradePrices,
+        address: market.address,
+        expirationTimestamp: market.expirationTimestamp,
+        startAt: market.startAt,
+        openPrice: market.metadata?.openPrice,
+        tokens: market.tokens,
+        venueExchange: market.venue?.exchange,
+        volumeFormatted: market.volumeFormatted,
+        oracleSource: market.priceOracleMetadata?.name || 'Chainlink BTC 60s TWAP',
+      };
+      lastBtcFetchTimeServer = now;
+
+      if (pricesChanged && market.prices) {
+        broadcastSse('priceUpdate', { marketSlug: market.slug, prices: market.prices });
+      }
+
+      if (slugChanged) {
+        latestOrderbookData = null;
+        console.log(`[Limitless Rollover] New 15m contract active: ${market.slug}`);
+        broadcastSse('marketChange', cachedActiveBtcServer);
+        if (limitlessWsInstance) {
+          limitlessWsInstance.subscribe('subscribe_market_prices', {
+            marketSlugs: [market.slug],
+          }).catch(() => {});
+        }
+      }
+    }
+  } catch (err) {
+    // safe continuation
+  }
+}
+
+// Background poller every 2.5s for real-time contract price movement
+pollActiveBtcMarket();
+setInterval(pollActiveBtcMarket, 2500);
+
 app.get('/api/limitless/active-btc', async (_req, res) => {
   try {
     const now = Date.now();
-    if (cachedActiveBtcServer && is15MinBtcMarket(cachedActiveBtcServer) && now - lastBtcFetchTimeServer < 15000) {
+    if (cachedActiveBtcServer && is15MinBtcMarket(cachedActiveBtcServer) && now - lastBtcFetchTimeServer < 2000) {
       return res.json({ success: true, ...cachedActiveBtcServer });
     }
 
-    const response = await fetch('https://api.limitless.exchange/markets/active');
-    const json = await response.json();
-    const markets = json?.data || [];
+    await pollActiveBtcMarket();
 
-    const btcMarket = markets.find((m) => is15MinBtcMarket(m));
-
-    if (btcMarket) {
-      cachedActiveBtcServer = {
-        slug: btcMarket.slug,
-        title: btcMarket.title,
-        status: btcMarket.status,
-        prices: btcMarket.prices,
-        tradePrices: btcMarket.tradePrices,
-        address: btcMarket.address,
-        expirationTimestamp: btcMarket.expirationTimestamp,
-        startAt: btcMarket.startAt,
-        openPrice: btcMarket.metadata?.openPrice,
-        tokens: btcMarket.tokens,
-        venueExchange: btcMarket.venue?.exchange,
-        volumeFormatted: btcMarket.volumeFormatted,
-        oracleSource: btcMarket.priceOracleMetadata?.name || 'Chainlink BTC 60s TWAP',
-      };
-      lastBtcFetchTimeServer = now;
+    if (cachedActiveBtcServer) {
       return res.json({ success: true, ...cachedActiveBtcServer });
     }
 

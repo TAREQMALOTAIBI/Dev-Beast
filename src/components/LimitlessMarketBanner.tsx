@@ -80,6 +80,14 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
     return () => clearInterval(interval);
   }, [market?.expirationTimestamp, market?.startAt]);
 
+  // Auto-refresh active market prices every 2.5 seconds to guarantee zero price staleness
+  useEffect(() => {
+    const timer = setInterval(() => {
+      onRefresh();
+    }, 2500);
+    return () => clearInterval(timer);
+  }, [onRefresh]);
+
   const slug = market?.slug || 'btc-up-or-down-15-min';
   const title = market?.title || (isAr ? 'سوق البيتكوين صعود أم هبوط - 15 دقيقة' : 'BTC Up or Down - 15 Min');
   const marketUrl = `https://limitless.exchange/markets/${encodeURIComponent(slug)}`;
@@ -88,19 +96,31 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
   const bestBid = orderbook?.orderbook?.bids?.[0];
   const bestAsk = orderbook?.orderbook?.asks?.[0];
 
-  // Dynamic live price calculation prioritizing live orderbook midpoint and bid/ask spread
+  // Orderbook midpoint
   const bookMidpoint = orderbook?.orderbook?.adjustedMidpoint && orderbook.orderbook.adjustedMidpoint > 0
     ? orderbook.orderbook.adjustedMidpoint
     : (bestBid && bestAsk && bestBid.price > 0 && bestAsk.price > 0)
       ? (bestBid.price + bestAsk.price) / 2
       : null;
 
-  const rawYes = bookMidpoint !== null
-    ? bookMidpoint
-    : (market?.prices?.[0] !== undefined ? market.prices[0] : 0.65);
+  // Dynamic live contract price:
+  // 1. Prioritize official live market prices from Limitless Exchange
+  // 2. Or market ask price from tradePrices
+  // 3. Fallback to orderbook midpoint if available
+  const liveMarketYes = market?.prices?.[0] !== undefined
+    ? market.prices[0]
+    : market?.tradePrices?.buy?.market?.[0] !== undefined && market.tradePrices.buy.market[0] > 0
+      ? market.tradePrices.buy.market[0]
+      : (bookMidpoint !== null ? bookMidpoint : 0.50);
 
-  const yesPrice = Math.max(0.01, Math.min(0.99, rawYes));
-  const noPrice = Math.max(0.01, Math.min(0.99, 1.0 - yesPrice));
+  const liveMarketNo = market?.prices?.[1] !== undefined
+    ? market.prices[1]
+    : market?.tradePrices?.buy?.market?.[1] !== undefined && market.tradePrices.buy.market[1] > 0
+      ? market.tradePrices.buy.market[1]
+      : (1.0 - liveMarketYes);
+
+  const yesPrice = Math.max(0.005, Math.min(0.995, liveMarketYes));
+  const noPrice = Math.max(0.005, Math.min(0.995, liveMarketNo));
 
   const [lastTick, setLastTick] = useState<{ direction: 'up' | 'down' | null; delta: number; time: number }>({
     direction: null,

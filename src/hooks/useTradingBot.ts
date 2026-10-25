@@ -588,17 +588,6 @@ export function useTradingBot() {
     });
     const unsubOrderbook = limitlessService.subscribeOrderbook((ob) => {
       setOrderbook(ob);
-      if (ob?.orderbook?.adjustedMidpoint && ob.orderbook.adjustedMidpoint > 0) {
-        const liveYes = parseFloat(Number(ob.orderbook.adjustedMidpoint).toFixed(4));
-        const liveNo = parseFloat((1 - liveYes).toFixed(4));
-        setActiveLimitlessMarket((prev) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            prices: [liveYes, liveNo],
-          };
-        });
-      }
     });
     const unsubPrices = limitlessService.subscribePriceUpdate((data) => {
       if (data && data.prices && data.prices.length >= 2) {
@@ -831,11 +820,11 @@ export function useTradingBot() {
         // Fallback to define
       });
 
-    // Keep active Limitless BTC prediction market synchronized
+    // Keep active Limitless BTC prediction market synchronized continuously
     refreshActiveMarket();
     const marketInterval = setInterval(() => {
       refreshActiveMarket();
-    }, 15000);
+    }, 2500);
 
     // Fetch initial balance and poll periodically so live wallet balance is continuously updated
     refreshLiveBalance();
