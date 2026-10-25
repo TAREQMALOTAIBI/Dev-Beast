@@ -49,9 +49,19 @@ export class LimitlessService {
           if (data.status && data.status !== 'DISCONNECTED') {
             this.setStatus(data.status);
           }
-          if (data.orderbook && data.orderbook.orderbook) {
-            this.currentOrderbook = data.orderbook;
-            this.orderbookListeners.forEach((l) => l(data.orderbook));
+          if (data.orderbook) {
+            const obWrapped = data.orderbook.orderbook ? data.orderbook : { marketSlug: data.market?.slug || this.activeMarketSlug, orderbook: data.orderbook, timestamp: Date.now() };
+            this.currentOrderbook = obWrapped;
+            this.orderbookListeners.forEach((l) => l(obWrapped));
+
+            const ob = obWrapped.orderbook;
+            if (typeof ob?.adjustedMidpoint === 'number' && ob.adjustedMidpoint > 0 && ob.adjustedMidpoint < 1) {
+              const p0 = parseFloat(Number(ob.adjustedMidpoint).toFixed(4));
+              const p1 = parseFloat((1 - p0).toFixed(4));
+              this.priceListeners.forEach((l) =>
+                l({ marketSlug: data.market?.slug || this.activeMarketSlug, prices: [p0, p1] })
+              );
+            }
           }
           if (data.oracle) {
             this.currentOracle = data.oracle;
@@ -402,6 +412,13 @@ export class LimitlessService {
           };
           this.currentOrderbook = update;
           this.orderbookListeners.forEach((l) => l(update));
+
+          const mid = update.orderbook.adjustedMidpoint;
+          if (typeof mid === 'number' && mid > 0 && mid < 1) {
+            const p0 = parseFloat(Number(mid).toFixed(4));
+            const p1 = parseFloat((1 - p0).toFixed(4));
+            this.priceListeners.forEach((l) => l({ marketSlug: slug, prices: [p0, p1] }));
+          }
         }
       }
     } catch {

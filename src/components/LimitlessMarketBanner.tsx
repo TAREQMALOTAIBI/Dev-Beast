@@ -104,20 +104,24 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
       : null;
 
   // Dynamic live contract price:
-  // 1. Prioritize official live market prices from Limitless Exchange
-  // 2. Or market ask price from tradePrices
-  // 3. Fallback to orderbook midpoint if available
-  const liveMarketYes = market?.prices?.[0] !== undefined
-    ? market.prices[0]
-    : market?.tradePrices?.buy?.market?.[0] !== undefined && market.tradePrices.buy.market[0] > 0
-      ? market.tradePrices.buy.market[0]
-      : (bookMidpoint !== null ? bookMidpoint : 0.50);
+  // 1. Prioritize real-time live orderbook midpoint (adjustedMidpoint / best bid-ask)
+  // 2. Then official live market prices from Limitless Exchange
+  // 3. Or market ask price from tradePrices
+  const liveMarketYes = (bookMidpoint !== null && bookMidpoint > 0 && bookMidpoint < 1)
+    ? bookMidpoint
+    : (market?.prices?.[0] !== undefined && market.prices[0] > 0 && market.prices[0] < 1)
+      ? market.prices[0]
+      : (market?.tradePrices?.buy?.market?.[0] !== undefined && market.tradePrices.buy.market[0] > 0)
+        ? market.tradePrices.buy.market[0]
+        : 0.50;
 
-  const liveMarketNo = market?.prices?.[1] !== undefined
-    ? market.prices[1]
-    : market?.tradePrices?.buy?.market?.[1] !== undefined && market.tradePrices.buy.market[1] > 0
-      ? market.tradePrices.buy.market[1]
-      : (1.0 - liveMarketYes);
+  const liveMarketNo = (bookMidpoint !== null && bookMidpoint > 0 && bookMidpoint < 1)
+    ? (1.0 - bookMidpoint)
+    : (market?.prices?.[1] !== undefined && market.prices[1] > 0 && market.prices[1] < 1)
+      ? market.prices[1]
+      : (market?.tradePrices?.buy?.market?.[1] !== undefined && market.tradePrices.buy.market[1] > 0)
+        ? market.tradePrices.buy.market[1]
+        : (1.0 - liveMarketYes);
 
   const yesPrice = Math.max(0.005, Math.min(0.995, liveMarketYes));
   const noPrice = Math.max(0.005, Math.min(0.995, liveMarketNo));

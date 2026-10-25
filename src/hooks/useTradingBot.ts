@@ -592,7 +592,14 @@ export function useTradingBot() {
     const unsubPrices = limitlessService.subscribePriceUpdate((data) => {
       if (data && data.prices && data.prices.length >= 2) {
         setActiveLimitlessMarket((prev) => {
-          if (!prev) return prev;
+          if (!prev) {
+            return {
+              slug: data.marketSlug || 'btc-up-or-down-15-min',
+              title: 'BTC Up or Down - 15 Min',
+              status: 'FUNDED',
+              prices: [data.prices[0], data.prices[1]],
+            } as any;
+          }
           return {
             ...prev,
             prices: [data.prices[0], data.prices[1]],

@@ -171,56 +171,6 @@ async function initLimitlessSdkWebSocket() {
     currentWsStatus = 'CONNECTING';
     broadcastSse('status', { status: 'CONNECTING' });
 
-    ws.on('connect', async () => {
-      currentWsStatus = hasAuth ? 'AUTHENTICATED' : 'CONNECTED';
-      broadcastSse('status', { status: currentWsStatus });
-
-      try {
-        const btc15 = await fetchLive15MinBtcMarket();
-        if (btc15) {
-          cachedActiveBtc = {
-            slug: btc15.slug,
-            title: btc15.title,
-            status: btc15.status,
-            prices: btc15.prices,
-            tradePrices: btc15.tradePrices,
-            address: btc15.address,
-            expirationTimestamp: btc15.expirationTimestamp,
-            startAt: btc15.startAt,
-            openPrice: btc15.metadata?.openPrice,
-            tokens: btc15.tokens,
-            venueExchange: btc15.venue?.exchange,
-            volumeFormatted: btc15.volumeFormatted,
-            oracleSource: btc15.priceOracleMetadata?.name || 'Chainlink BTC 60s TWAP',
-          };
-          lastBtcFetchTime = Date.now();
-        }
-      } catch {
-        // safe continuation
-      }
-
-      const activeSlug = cachedActiveBtc?.slug && is15MinBtcMarket(cachedActiveBtc)
-        ? cachedActiveBtc.slug
-        : 'btc-up-or-down-15-min';
-      try {
-        const subParams: any = {
-          marketSlugs: [activeSlug],
-        };
-        if (cachedActiveBtc?.address) {
-          subParams.marketAddresses = [cachedActiveBtc.address];
-        }
-        await ws.subscribe('subscribe_market_prices', subParams);
-
-        if (hasAuth) {
-          await ws.subscribe('subscribe_positions', subParams);
-          await ws.subscribe('subscribe_order_events');
-          await ws.subscribe('subscribe_transactions');
-        }
-      } catch (err: any) {
-        // Safe continuation
-      }
-    });
-
     ws.on('orderbookUpdate', (data: any) => {
       const slug = data?.marketSlug;
       const lastVer = slug ? orderbookVersions.get(slug) || 0 : 0;
@@ -330,6 +280,53 @@ async function initLimitlessSdkWebSocket() {
     });
 
     await ws.connect();
+    currentWsStatus = hasAuth ? 'AUTHENTICATED' : 'CONNECTED';
+    broadcastSse('status', { status: currentWsStatus });
+
+    try {
+      const btc15 = await fetchLive15MinBtcMarket();
+      if (btc15) {
+        cachedActiveBtc = {
+          slug: btc15.slug,
+          title: btc15.title,
+          status: btc15.status,
+          prices: btc15.prices,
+          tradePrices: btc15.tradePrices,
+          address: btc15.address,
+          expirationTimestamp: btc15.expirationTimestamp,
+          startAt: btc15.startAt,
+          openPrice: btc15.metadata?.openPrice,
+          tokens: btc15.tokens,
+          venueExchange: btc15.venue?.exchange,
+          volumeFormatted: btc15.volumeFormatted,
+          oracleSource: btc15.priceOracleMetadata?.name || 'Chainlink BTC 60s TWAP',
+        };
+        lastBtcFetchTime = Date.now();
+      }
+    } catch {
+      // safe continuation
+    }
+
+    const activeSlug = cachedActiveBtc?.slug && is15MinBtcMarket(cachedActiveBtc)
+      ? cachedActiveBtc.slug
+      : 'btc-up-or-down-15-min';
+    try {
+      const subParams: any = {
+        marketSlugs: [activeSlug],
+      };
+      if (cachedActiveBtc?.address) {
+        subParams.marketAddresses = [cachedActiveBtc.address];
+      }
+      await ws.subscribe('subscribe_market_prices', subParams);
+
+      if (hasAuth) {
+        await ws.subscribe('subscribe_positions', subParams);
+        await ws.subscribe('subscribe_order_events');
+        await ws.subscribe('subscribe_transactions');
+      }
+    } catch {
+      // safe continuation
+    }
   } catch (err: any) {
     currentWsStatus = 'ERROR';
     broadcastSse('status', { status: 'ERROR', message: err.message || String(err) });
@@ -420,42 +417,78 @@ function setupApiMiddlewares(middlewares: any) {
   async function pollActiveBtcMarket() {
     try {
       const btc15Market = await fetchLive15MinBtcMarket();
-      if (btc15Market) {
-        const now = Date.now();
-        const previousSlug = cachedActiveBtc?.slug;
-        const slugChanged = previousSlug && previousSlug !== btc15Market.slug;
-        const prevPrices = cachedActiveBtc?.prices;
-        const pricesChanged = !prevPrices || prevPrices[0] !== btc15Market.prices?.[0] || prevPrices[1] !== btc15Market.prices?.[1];
+      if (!btc15Market) return;
 
-        cachedActiveBtc = {
-          slug: btc15Market.slug,
-          title: btc15Market.title,
-          status: btc15Market.status,
-          prices: btc15Market.prices,
-          tradePrices: btc15Market.tradePrices,
-          address: btc15Market.address,
-          expirationTimestamp: btc15Market.expirationTimestamp,
-          startAt: btc15Market.startAt,
-          openPrice: btc15Market.metadata?.openPrice,
-          tokens: btc15Market.tokens,
-          venueExchange: btc15Market.venue?.exchange,
-          volumeFormatted: btc15Market.volumeFormatted,
-          oracleSource: btc15Market.priceOracleMetadata?.name || 'Chainlink BTC 60s TWAP',
-        };
-        lastBtcFetchTime = now;
+      const now = Date.now();
+      const previousSlug = cachedActiveBtc?.slug;
+      const slugChanged = previousSlug && previousSlug !== btc15Market.slug;
 
-        if (pricesChanged && btc15Market.prices) {
-          broadcastSse('priceUpdate', { marketSlug: btc15Market.slug, prices: btc15Market.prices });
-        }
-
-        if (slugChanged) {
-          latestOrderbookData = null;
-          broadcastSse('marketChange', cachedActiveBtc);
-          if (limitlessWsInstance) {
-            limitlessWsInstance.subscribe('subscribe_market_prices', {
-              marketSlugs: [btc15Market.slug],
-            }).catch(() => {});
+      let liveYesPrice: number | null = null;
+      try {
+        const obRes = await fetch(`https://api.limitless.exchange/markets/${encodeURIComponent(btc15Market.slug)}/orderbook`);
+        if (obRes.ok) {
+          const obJson = await obRes.json();
+          latestOrderbookData = {
+            marketSlug: btc15Market.slug,
+            orderbook: obJson,
+            timestamp: now,
+          };
+          if (typeof obJson?.adjustedMidpoint === 'number' && obJson.adjustedMidpoint > 0 && obJson.adjustedMidpoint < 1) {
+            liveYesPrice = obJson.adjustedMidpoint;
+          } else if (obJson?.bids?.[0]?.price && obJson?.asks?.[0]?.price) {
+            liveYesPrice = (obJson.bids[0].price + obJson.asks[0].price) / 2;
+          } else if (obJson?.bids?.[0]?.price && obJson.bids[0].price > 0 && obJson.bids[0].price < 1) {
+            liveYesPrice = obJson.bids[0].price;
+          } else if (obJson?.asks?.[0]?.price && obJson.asks[0].price > 0 && obJson.asks[0].price < 1) {
+            liveYesPrice = obJson.asks[0].price;
           }
+          broadcastSse('orderbookUpdate', latestOrderbookData);
+        }
+      } catch {
+        // safe continuation
+      }
+
+      let resolvedPrices = btc15Market.prices || [0.5, 0.5];
+      if (liveYesPrice !== null && liveYesPrice > 0 && liveYesPrice < 1) {
+        const p0 = parseFloat(Number(liveYesPrice).toFixed(4));
+        const p1 = parseFloat((1 - p0).toFixed(4));
+        resolvedPrices = [p0, p1];
+      } else if (cachedActiveBtc?.prices && !slugChanged) {
+        resolvedPrices = cachedActiveBtc.prices;
+      }
+
+      const prevPrices = cachedActiveBtc?.prices;
+      const pricesChanged = !prevPrices || prevPrices[0] !== resolvedPrices[0] || prevPrices[1] !== resolvedPrices[1];
+
+      cachedActiveBtc = {
+        slug: btc15Market.slug,
+        title: btc15Market.title,
+        status: btc15Market.status,
+        prices: resolvedPrices,
+        tradePrices: btc15Market.tradePrices || { buy: { market: resolvedPrices } },
+        address: btc15Market.address,
+        expirationTimestamp: btc15Market.expirationTimestamp,
+        startAt: btc15Market.startAt,
+        openPrice: btc15Market.metadata?.openPrice,
+        tokens: btc15Market.tokens,
+        venueExchange: btc15Market.venue?.exchange,
+        volumeFormatted: btc15Market.volumeFormatted,
+        oracleSource: btc15Market.priceOracleMetadata?.name || 'Chainlink BTC 60s TWAP',
+      };
+      lastBtcFetchTime = now;
+
+      if (pricesChanged) {
+        broadcastSse('priceUpdate', { marketSlug: btc15Market.slug, prices: resolvedPrices });
+      }
+
+      if (slugChanged) {
+        latestOrderbookData = null;
+        broadcastSse('marketChange', cachedActiveBtc);
+        if (limitlessWsInstance && typeof limitlessWsInstance.isConnected === 'function' && limitlessWsInstance.isConnected()) {
+          limitlessWsInstance.subscribe('subscribe_market_prices', {
+            marketSlugs: [btc15Market.slug],
+            ...(btc15Market.address ? { marketAddresses: [btc15Market.address] } : {}),
+          }).catch(() => {});
         }
       }
     } catch {
