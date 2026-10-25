@@ -47,7 +47,15 @@ export class LimitlessService {
         const data = await res.json();
         if (data) {
           if (data.status && data.status !== 'DISCONNECTED') {
-            this.setStatus(data.status);
+            if (data.status === 'ERROR' && (data.orderbook || data.market)) {
+              const hasAuth = Boolean(this.credentials?.tokenId || this.credentials?.apiKey);
+              this.setStatus(hasAuth ? 'AUTHENTICATED' : 'CONNECTED');
+            } else {
+              this.setStatus(data.status);
+            }
+          }
+          if (data.market?.slug) {
+            this.activeMarketSlug = data.market.slug;
           }
           if (data.orderbook) {
             const obWrapped = data.orderbook.orderbook ? data.orderbook : { marketSlug: data.market?.slug || this.activeMarketSlug, orderbook: data.orderbook, timestamp: Date.now() };
@@ -270,7 +278,8 @@ export class LimitlessService {
         es.addEventListener('marketChange', (e: MessageEvent) => {
           try {
             const data = JSON.parse(e.data);
-            if (data) {
+            if (data?.slug) {
+              this.activeMarketSlug = data.slug;
               this.marketChangeListeners.forEach((l) => l(data));
             }
           } catch {}

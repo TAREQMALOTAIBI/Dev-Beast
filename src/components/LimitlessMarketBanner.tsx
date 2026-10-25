@@ -67,6 +67,10 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
       const mins = Math.floor(totalSec / 60);
       const secs = totalSec % 60;
 
+      if (totalSec <= 0) {
+        onRefresh();
+      }
+
       const start = market?.startAt ? new Date(market.startAt).getTime() : exp - 15 * 60 * 1000;
       const totalDuration = Math.max(1, exp - start);
       const elapsed = Math.max(0, now - start);

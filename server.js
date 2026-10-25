@@ -71,10 +71,17 @@ async function fetchLive15MinBtcMarket() {
     const json = await response.json();
     const list = json?.data || [];
     const now = Date.now();
-    const btc15 = list.find((m) => is15MinBtcMarket(m) && m.status === 'FUNDED' && (!m.expirationTimestamp || m.expirationTimestamp > now))
-      || list.find((m) => is15MinBtcMarket(m) && (!m.expirationTimestamp || m.expirationTimestamp > now))
-      || list.find((m) => is15MinBtcMarket(m));
-    return btc15 || null;
+    // Strictly require unexpired 15-minute BTC market (expirationTimestamp > now)
+    const valid15mMkts = list.filter((m) => is15MinBtcMarket(m) && m.expirationTimestamp && Number(m.expirationTimestamp) > now);
+    
+    // Sort so the currently active (closing soonest, but in the future) or funded market is first
+    valid15mMkts.sort((a, b) => {
+      if (a.status === 'FUNDED' && b.status !== 'FUNDED') return -1;
+      if (b.status === 'FUNDED' && a.status !== 'FUNDED') return 1;
+      return (Number(a.expirationTimestamp) || 0) - (Number(b.expirationTimestamp) || 0);
+    });
+
+    return valid15mMkts[0] || null;
   } catch {
     return null;
   }
@@ -82,10 +89,25 @@ async function fetchLive15MinBtcMarket() {
 
 async function pollActiveBtcMarket() {
   try {
-    const market = await fetchLive15MinBtcMarket();
-    if (!market) return;
-
     const now = Date.now();
+
+    // Wipe cached market if expired
+    if (cachedActiveBtc?.expirationTimestamp && Number(cachedActiveBtc.expirationTimestamp) <= now) {
+      console.log(`[Limitless Rollover] Current contract expired (${cachedActiveBtc.slug}). Clearing cached active market...`);
+      cachedActiveBtc = null;
+      latestOrderbookData = null;
+      subscribedSlugs.clear();
+    }
+
+    const market = await fetchLive15MinBtcMarket();
+    if (!market) {
+      // If no new market found yet, ensure socket is still healthy
+      if (!limitlessWsInstance || typeof limitlessWsInstance.isConnected !== 'function' || !limitlessWsInstance.isConnected()) {
+        initLimitlessSdkWebSocket().catch(() => {});
+      }
+      return;
+    }
+
     const previousSlug = cachedActiveBtc?.slug;
     const slugChanged = previousSlug && previousSlug !== market.slug;
 
@@ -124,7 +146,6 @@ async function pollActiveBtcMarket() {
       const p1 = parseFloat((1 - p0).toFixed(4));
       resolvedPrices = [p0, p1];
     } else if (cachedActiveBtc?.prices && (!slugChanged)) {
-      // Keep previous live moving prices if orderbook was temporarily busy
       resolvedPrices = cachedActiveBtc.prices;
     }
 
@@ -152,22 +173,25 @@ async function pollActiveBtcMarket() {
       broadcastSse('priceUpdate', { marketSlug: market.slug, prices: resolvedPrices });
     }
 
-    if (slugChanged || !subscribedSlugs.has(market.slug)) {
-      if (slugChanged) {
-        latestOrderbookData = null;
-        console.log(`[Limitless Rollover] New 15m contract active on VM: ${market.slug}`);
-        broadcastSse('marketChange', cachedActiveBtc);
-      }
-      if (limitlessWsInstance && typeof limitlessWsInstance.isConnected === 'function' && limitlessWsInstance.isConnected()) {
-        try {
-          const subParams = { marketSlugs: [market.slug] };
-          if (market.address) subParams.marketAddresses = [market.address];
-          limitlessWsInstance.subscribe('subscribe_market_prices', subParams).catch(() => {});
-          subscribedSlugs.add(market.slug);
-          console.log(`[Limitless WS] Subscribed to market prices for: ${market.slug}`);
-        } catch {
-          // ignore
-        }
+    if (slugChanged) {
+      latestOrderbookData = null;
+      subscribedSlugs.clear();
+      console.log(`[Limitless Rollover] New 15m contract active on VM: ${market.slug}`);
+      broadcastSse('marketChange', cachedActiveBtc);
+    }
+
+    // Always maintain live WebSocket health & subscription
+    if (!limitlessWsInstance || typeof limitlessWsInstance.isConnected !== 'function' || !limitlessWsInstance.isConnected()) {
+      initLimitlessSdkWebSocket().catch(() => {});
+    } else if (!subscribedSlugs.has(market.slug)) {
+      try {
+        const subParams = { marketSlugs: [market.slug] };
+        if (market.address) subParams.marketAddresses = [market.address];
+        limitlessWsInstance.subscribe('subscribe_market_prices', subParams).catch(() => {});
+        subscribedSlugs.add(market.slug);
+        console.log(`[Limitless WS] Subscribed to market prices for: ${market.slug}`);
+      } catch {
+        // ignore
       }
     }
   } catch (err) {
@@ -178,12 +202,25 @@ async function pollActiveBtcMarket() {
 // ============================================================================
 // Limitless Official WebSocketClient Streaming Manager (per official docs)
 // ============================================================================
+let isWsConnecting = false;
+
 async function initLimitlessSdkWebSocket() {
+  if (isWsConnecting) return;
+  isWsConnecting = true;
+
   try {
     const sdk = await import('@limitless-exchange/sdk');
     const tokenId = (process.env.LMTS_TOKEN_ID || '').trim();
     const secret = (process.env.LMTS_TOKEN_SECRET || process.env['.MTS_TOKEN_SECRET'] || '').trim();
-    const hasAuth = Boolean(tokenId && secret);
+    let hasAuth = Boolean(tokenId && secret);
+
+    // If an existing socket exists, disconnect first
+    if (limitlessWsInstance) {
+      try {
+        await limitlessWsInstance.disconnect().catch(() => {});
+      } catch {}
+      limitlessWsInstance = null;
+    }
 
     const wsConfig = {
       url: 'wss://ws.limitless.exchange',
@@ -194,130 +231,155 @@ async function initLimitlessSdkWebSocket() {
       wsConfig.hmacCredentials = { tokenId, secret };
     }
 
-    const ws = new sdk.WebSocketClient(wsConfig);
+    let ws = new sdk.WebSocketClient(wsConfig);
     limitlessWsInstance = ws;
     currentWsStatus = 'CONNECTING';
     broadcastSse('status', { status: 'CONNECTING' });
 
-    // CLOB Orderbook updates
-    ws.on('orderbookUpdate', (data) => {
-      const slug = data?.marketSlug;
-      const lastVer = slug ? orderbookVersions.get(slug) || 0 : 0;
-      if (data?.version && data.version <= lastVer) {
-        return; // Drop frames with version <= last seen (per docs)
-      }
-      if (data?.version && slug) {
-        orderbookVersions.set(slug, data.version);
-      }
-      latestOrderbookData = data;
-
-      // Extract real-time live contract price from orderbook update and sync with cached active market
-      const ob = data?.orderbook;
-      let liveYesPrice = null;
-      if (typeof ob?.adjustedMidpoint === 'number' && ob.adjustedMidpoint > 0 && ob.adjustedMidpoint < 1) {
-        liveYesPrice = ob.adjustedMidpoint;
-      } else if (ob?.bids?.[0]?.price && ob?.asks?.[0]?.price) {
-        liveYesPrice = (ob.bids[0].price + ob.asks[0].price) / 2;
-      } else if (ob?.bids?.[0]?.price && ob.bids[0].price > 0 && ob.bids[0].price < 1) {
-        liveYesPrice = ob.bids[0].price;
-      } else if (ob?.asks?.[0]?.price && ob.asks[0].price > 0 && ob.asks[0].price < 1) {
-        liveYesPrice = ob.asks[0].price;
-      }
-
-      if (liveYesPrice !== null && liveYesPrice > 0 && liveYesPrice < 1) {
-        const p0 = parseFloat(Number(liveYesPrice).toFixed(4));
-        const p1 = parseFloat((1 - p0).toFixed(4));
-        if (cachedActiveBtc) {
-          cachedActiveBtc.prices = [p0, p1];
-          if (cachedActiveBtc.tradePrices?.buy?.market) {
-            cachedActiveBtc.tradePrices.buy.market = [p0, p1];
-          }
+    // Setup event listeners
+    const attachListeners = (targetWs) => {
+      // CLOB Orderbook updates
+      targetWs.on('orderbookUpdate', (data) => {
+        const slug = data?.marketSlug;
+        const lastVer = slug ? orderbookVersions.get(slug) || 0 : 0;
+        if (data?.version && data.version <= lastVer) {
+          return; // Drop frames with version <= last seen (per docs)
         }
-        broadcastSse('priceUpdate', { marketSlug: slug || cachedActiveBtc?.slug, prices: [p0, p1] });
-      }
+        if (data?.version && slug) {
+          orderbookVersions.set(slug, data.version);
+        }
+        latestOrderbookData = data;
 
-      broadcastSse('orderbookUpdate', data);
-    });
+        // Extract real-time live contract price from orderbook update
+        const ob = data?.orderbook;
+        let liveYesPrice = null;
+        if (typeof ob?.adjustedMidpoint === 'number' && ob.adjustedMidpoint > 0 && ob.adjustedMidpoint < 1) {
+          liveYesPrice = ob.adjustedMidpoint;
+        } else if (ob?.bids?.[0]?.price && ob?.asks?.[0]?.price) {
+          liveYesPrice = (ob.bids[0].price + ob.asks[0].price) / 2;
+        } else if (ob?.bids?.[0]?.price && ob.bids[0].price > 0 && ob.bids[0].price < 1) {
+          liveYesPrice = ob.bids[0].price;
+        } else if (ob?.asks?.[0]?.price && ob.asks[0].price > 0 && ob.asks[0].price < 1) {
+          liveYesPrice = ob.asks[0].price;
+        }
 
-    // Handle AMM price stream events
-    ws.on('newPriceData', (data) => {
-      const updates = Array.isArray(data?.updatedPrices)
-        ? data.updatedPrices
-        : (data?.updatedPrices ? [data.updatedPrices] : [data]);
-
-      for (const p of updates) {
-        if (!p) continue;
-        const yes = typeof p.yesPrice === 'number' ? p.yesPrice : (typeof p.price === 'number' ? p.price : null);
-        const no = typeof p.noPrice === 'number' ? p.noPrice : (yes !== null ? 1 - yes : null);
-        if (yes !== null && no !== null && yes > 0 && no > 0) {
-          const p0 = parseFloat(Number(yes).toFixed(4));
-          const p1 = parseFloat(Number(no).toFixed(4));
+        if (liveYesPrice !== null && liveYesPrice > 0 && liveYesPrice < 1) {
+          const p0 = parseFloat(Number(liveYesPrice).toFixed(4));
+          const p1 = parseFloat((1 - p0).toFixed(4));
           if (cachedActiveBtc) {
             cachedActiveBtc.prices = [p0, p1];
             if (cachedActiveBtc.tradePrices?.buy?.market) {
               cachedActiveBtc.tradePrices.buy.market = [p0, p1];
             }
           }
-          broadcastSse('priceUpdate', { marketSlug: p.marketSlug || cachedActiveBtc?.slug, prices: [p0, p1] });
+          broadcastSse('priceUpdate', { marketSlug: slug || cachedActiveBtc?.slug, prices: [p0, p1] });
         }
-      }
-    });
 
-    // Oracle price updates (Chainlink / Pyth)
-    ws.on('oraclePriceData', (data) => {
-      latestOracleData = data;
-      broadcastSse('oraclePriceData', data);
-    });
+        broadcastSse('orderbookUpdate', data);
+      });
 
-    // Account positions
-    ws.on('positions', (data) => {
-      latestPositionsData = data;
-      broadcastSse('positions', data);
-    });
+      // Handle AMM price stream events
+      targetWs.on('newPriceData', (data) => {
+        const updates = Array.isArray(data?.updatedPrices)
+          ? data.updatedPrices
+          : (data?.updatedPrices ? [data.updatedPrices] : [data]);
 
-    // Order lifecycle & settlement events
-    ws.on('orderEvent', (event) => {
-      recentOrderEvents.unshift(event);
-      if (recentOrderEvents.length > 50) recentOrderEvents.pop();
-      broadcastSse('orderEvent', event);
-    });
-
-    // Transaction events
-    ws.on('tx', (data) => {
-      recentTxEvents.unshift(data);
-      if (recentTxEvents.length > 50) recentTxEvents.pop();
-      broadcastSse('tx', data);
-    });
-
-    ws.on('system', (data) => {
-      broadcastSse('system', data);
-    });
-
-    // Disconnect handling per Limitless SDK specifications:
-    // "To survive a drop, clean up, re-connect afresh, and re-issue your subscribe() calls."
-    ws.on('disconnect', (reason) => {
-      currentWsStatus = 'CONNECTING';
-      console.log(`[Limitless WS] Disconnected (${reason}). Re-initiating connection with fresh handshake...`);
-      broadcastSse('status', { status: 'CONNECTING', reason });
-      subscribedSlugs.clear();
-      setTimeout(async () => {
-        try {
-          if (limitlessWsInstance) {
-            await limitlessWsInstance.disconnect().catch(() => {});
+        for (const p of updates) {
+          if (!p) continue;
+          const yes = typeof p.yesPrice === 'number' ? p.yesPrice : (typeof p.price === 'number' ? p.price : null);
+          const no = typeof p.noPrice === 'number' ? p.noPrice : (yes !== null ? 1 - yes : null);
+          if (yes !== null && no !== null && yes > 0 && no > 0) {
+            const p0 = parseFloat(Number(yes).toFixed(4));
+            const p1 = parseFloat(Number(no).toFixed(4));
+            if (cachedActiveBtc) {
+              cachedActiveBtc.prices = [p0, p1];
+              if (cachedActiveBtc.tradePrices?.buy?.market) {
+                cachedActiveBtc.tradePrices.buy.market = [p0, p1];
+              }
+            }
+            broadcastSse('priceUpdate', { marketSlug: p.marketSlug || cachedActiveBtc?.slug, prices: [p0, p1] });
           }
-          await initLimitlessSdkWebSocket();
-        } catch (e) {
-          console.error('[Limitless WS] Reconnection error:', e?.message || e);
         }
-      }, 1500);
-    });
+      });
 
-    ws.on('error', (err) => {
-      console.warn('[Limitless WS] Event error notice:', err?.message || err);
-    });
+      targetWs.on('oraclePriceData', (data) => {
+        latestOracleData = data;
+        broadcastSse('oraclePriceData', data);
+      });
 
-    // CRITICAL: Await connect() so the SDK sets internal state to 'connected' BEFORE subscribing
-    await ws.connect();
+      targetWs.on('positions', (data) => {
+        latestPositionsData = data;
+        broadcastSse('positions', data);
+      });
+
+      targetWs.on('orderEvent', (event) => {
+        recentOrderEvents.unshift(event);
+        if (recentOrderEvents.length > 50) recentOrderEvents.pop();
+        broadcastSse('orderEvent', event);
+      });
+
+      targetWs.on('tx', (data) => {
+        recentTxEvents.unshift(data);
+        if (recentTxEvents.length > 50) recentTxEvents.pop();
+        broadcastSse('tx', data);
+      });
+
+      targetWs.on('system', (data) => {
+        broadcastSse('system', data);
+      });
+
+      targetWs.on('disconnect', (reason) => {
+        currentWsStatus = 'CONNECTING';
+        console.log(`[Limitless WS] Disconnected (${reason}). Re-initiating connection in 1.5s...`);
+        broadcastSse('status', { status: 'CONNECTING', reason });
+        subscribedSlugs.clear();
+        limitlessWsInstance = null;
+        setTimeout(() => {
+          initLimitlessSdkWebSocket().catch(() => {});
+        }, 1500);
+      });
+
+      targetWs.on('error', async (err) => {
+        const errMsg = err?.message || String(err);
+        console.warn('[Limitless WS] Event error notice:', errMsg);
+        // If market resolved or auth failure, recover immediately
+        if (errMsg.includes('resolved') || errMsg.includes('Invalid') || !targetWs.isConnected()) {
+          console.log('[Limitless WS] Detected market resolution or disconnect. Auto-recovering...');
+          cachedActiveBtc = null;
+          subscribedSlugs.clear();
+          try { await targetWs.disconnect(); } catch {}
+          limitlessWsInstance = null;
+          setTimeout(() => {
+            pollActiveBtcMarket().then(() => initLimitlessSdkWebSocket().catch(() => {}));
+          }, 1000);
+        }
+      });
+    };
+
+    attachListeners(ws);
+
+    // Try connecting
+    try {
+      await ws.connect();
+    } catch (authErr) {
+      if (hasAuth) {
+        console.warn('[Limitless WS] HMAC connection failed, falling back to public mode for prices:', authErr?.message || authErr);
+        // Fallback to public mode (no credentials) so UP/DOWN prices never stop streaming
+        hasAuth = false;
+        try { await ws.disconnect().catch(() => {}); } catch {}
+        ws = new sdk.WebSocketClient({
+          url: 'wss://ws.limitless.exchange',
+          autoReconnect: false,
+          timeout: 10000,
+        });
+        limitlessWsInstance = ws;
+        attachListeners(ws);
+        await ws.connect();
+      } else {
+        throw authErr;
+      }
+    }
+
     currentWsStatus = hasAuth ? 'AUTHENTICATED' : 'CONNECTED';
     console.log(`[Limitless WS] Connected successfully. Status: ${currentWsStatus}`);
     broadcastSse('status', { status: currentWsStatus });
@@ -327,32 +389,43 @@ async function initLimitlessSdkWebSocket() {
       await pollActiveBtcMarket();
     }
 
-    const activeSlug = cachedActiveBtc?.slug && is15MinBtcMarket(cachedActiveBtc)
-      ? cachedActiveBtc.slug
-      : 'btc-up-or-down-15-min';
+    const now = Date.now();
+    const activeSlug = cachedActiveBtc?.slug &&
+      is15MinBtcMarket(cachedActiveBtc) &&
+      (!cachedActiveBtc.expirationTimestamp || Number(cachedActiveBtc.expirationTimestamp) > now)
+        ? cachedActiveBtc.slug
+        : null;
 
-    try {
-      const subParams = { marketSlugs: [activeSlug] };
-      if (cachedActiveBtc?.address) {
-        subParams.marketAddresses = [cachedActiveBtc.address];
-      }
-      await ws.subscribe('subscribe_market_prices', subParams);
-      subscribedSlugs.add(activeSlug);
-      console.log(`[Limitless WS] Subscribed to live market prices for: ${activeSlug}`);
+    if (activeSlug) {
+      try {
+        const subParams = { marketSlugs: [activeSlug] };
+        if (cachedActiveBtc?.address) {
+          subParams.marketAddresses = [cachedActiveBtc.address];
+        }
+        await ws.subscribe('subscribe_market_prices', subParams);
+        subscribedSlugs.add(activeSlug);
+        console.log(`[Limitless WS] Subscribed to live market prices for: ${activeSlug}`);
 
-      if (hasAuth) {
-        await ws.subscribe('subscribe_positions', subParams);
-        await ws.subscribe('subscribe_order_events');
-        await ws.subscribe('subscribe_transactions');
-        console.log('[Limitless WS] Subscribed to authenticated positions, order events & tx');
+        if (hasAuth) {
+          await ws.subscribe('subscribe_positions', subParams);
+          await ws.subscribe('subscribe_order_events');
+          await ws.subscribe('subscribe_transactions');
+          console.log('[Limitless WS] Subscribed to authenticated positions, order events & tx');
+        }
+      } catch (subErr) {
+        console.warn('[Limitless WS] Initial subscribe warning:', subErr?.message || subErr);
       }
-    } catch (subErr) {
-      console.warn('[Limitless WS] Initial subscribe warning:', subErr?.message || subErr);
     }
   } catch (err) {
     console.error('[Limitless WS] Connection failed:', err?.message || err);
     currentWsStatus = 'ERROR';
     broadcastSse('status', { status: 'ERROR', message: err?.message || String(err) });
+    // Auto-retry in 3s so the bot never stays dead in ERROR
+    setTimeout(() => {
+      initLimitlessSdkWebSocket().catch(() => {});
+    }, 3000);
+  } finally {
+    isWsConnecting = false;
   }
 }
 
@@ -411,12 +484,21 @@ app.get('/api/limitless/live-stream', (req, res) => {
 
 app.post('/api/limitless/subscribe', async (req, res) => {
   try {
-    const { marketSlug } = req.body || {};
+    let { marketSlug } = req.body || {};
+    const now = Date.now();
+    // Prevent subscribing to resolved or expired slugs
+    if (cachedActiveBtc?.slug && cachedActiveBtc.expirationTimestamp && Number(cachedActiveBtc.expirationTimestamp) > now) {
+      marketSlug = cachedActiveBtc.slug;
+    }
+
     if (marketSlug && limitlessWsInstance && typeof limitlessWsInstance.isConnected === 'function' && limitlessWsInstance.isConnected()) {
-      await limitlessWsInstance.subscribe('subscribe_market_prices', {
-        marketSlugs: [marketSlug],
-      });
-      subscribedSlugs.add(marketSlug);
+      if (!subscribedSlugs.has(marketSlug)) {
+        await limitlessWsInstance.subscribe('subscribe_market_prices', {
+          marketSlugs: [marketSlug],
+        });
+        subscribedSlugs.add(marketSlug);
+        console.log(`[Limitless WS] Subscribed via API for: ${marketSlug}`);
+      }
     }
     res.json({ success: true, subscribed: marketSlug });
   } catch (err) {
@@ -440,13 +522,21 @@ app.get('/api/limitless/live-state', (_req, res) => {
 app.get('/api/limitless/active-btc', async (_req, res) => {
   try {
     const now = Date.now();
-    if (cachedActiveBtc && is15MinBtcMarket(cachedActiveBtc) && now - lastBtcFetchTime < 1500) {
+    if (
+      cachedActiveBtc &&
+      is15MinBtcMarket(cachedActiveBtc) &&
+      (!cachedActiveBtc.expirationTimestamp || Number(cachedActiveBtc.expirationTimestamp) > now) &&
+      now - lastBtcFetchTime < 1500
+    ) {
       return res.json({ success: true, ...cachedActiveBtc });
     }
 
     await pollActiveBtcMarket();
 
-    if (cachedActiveBtc) {
+    if (
+      cachedActiveBtc &&
+      (!cachedActiveBtc.expirationTimestamp || Number(cachedActiveBtc.expirationTimestamp) > now)
+    ) {
       return res.json({ success: true, ...cachedActiveBtc });
     }
 

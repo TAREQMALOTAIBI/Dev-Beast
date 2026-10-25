@@ -55,11 +55,12 @@ export function useTradingBot() {
         if (parsed.limitlessWsUrl && parsed.limitlessWsUrl.includes('api.limitless.exchange')) {
           parsed.limitlessWsUrl = DEFAULT_CONFIG.limitlessWsUrl;
         }
-        // Force migration away from 5-min or weekly markets to 15-min
+        // Force migration away from 5-min, weekly markets, or specific expired timestamp slugs to base 15-min
         if (
           !parsed.limitlessMarketSlug ||
           /(^|[^0-9])5-min/i.test(parsed.limitlessMarketSlug) ||
-          parsed.limitlessMarketSlug.includes('weekly')
+          parsed.limitlessMarketSlug.includes('weekly') ||
+          /\d{8,}/.test(parsed.limitlessMarketSlug)
         ) {
           parsed.limitlessMarketSlug = DEFAULT_CONFIG.limitlessMarketSlug;
         }
@@ -616,22 +617,12 @@ export function useTradingBot() {
       ) {
         setActiveLimitlessMarket(newMarket);
         activeLimitlessMarketRef.current = newMarket;
-        setConfig((prev) => {
-          if (prev.limitlessMarketSlug !== newMarket.slug) {
-            const updated = { ...prev, limitlessMarketSlug: newMarket.slug };
-            try {
-              localStorage.setItem('limitless_live_bot_config', JSON.stringify(updated));
-            } catch {}
-            return updated;
-          }
-          return prev;
-        });
       }
     });
     const unsubOracle = limitlessService.subscribeOracle((orc) => setOracle(orc));
     const unsubPositions = limitlessService.subscribePositions((pos) => setPositions(pos));
 
-    limitlessService.connect(config.limitlessWsUrl, config.limitlessMarketSlug, {
+    limitlessService.connect(config.limitlessWsUrl, 'btc-up-or-down-15-min', {
       apiKey: config.limitlessApiKey,
       tokenId: config.limitlessTokenId,
       secret: config.limitlessTokenSecret,
@@ -746,16 +737,6 @@ export function useTradingBot() {
         ) {
           setActiveLimitlessMarket(data);
           activeLimitlessMarketRef.current = data;
-          setConfig((prev) => {
-            if (prev.limitlessMarketSlug !== data.slug) {
-              const updated = { ...prev, limitlessMarketSlug: data.slug };
-              try {
-                localStorage.setItem('limitless_live_bot_config', JSON.stringify(updated));
-              } catch {}
-              return updated;
-            }
-            return prev;
-          });
         }
       }
     } catch {
