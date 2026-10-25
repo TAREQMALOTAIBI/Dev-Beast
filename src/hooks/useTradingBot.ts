@@ -19,10 +19,10 @@ const DEFAULT_CONFIG: BotConfig = {
   timeframe: '15m',
   periods: 14,
   strategyDirection: 'BOTH', // 'BOTH' | 'LONG_ONLY' | 'SHORT_ONLY'
-  zScoreUpper: 1.5,
-  zScoreEntry: 1.2,
-  zScoreLower: -1.5,
-  zScoreLowerEntry: -1.2,
+  zScoreUpper: 2.0, // Upper threshold: Entry condition when exceeding 2.0 in rise
+  zScoreEntry: 2.0,
+  zScoreLower: -2.0, // Lower threshold: Entry condition when exceeding -2.0 in decline
+  zScoreLowerEntry: -2.0,
   maxPriceCents: 0.85, // Ceiling price
   maxRiskPercent: 0.05, // Strictly capped at 5% maximum
   orderType: 'FAK', // Fill-And-Kill
@@ -66,18 +66,11 @@ export function useTradingBot() {
         if (!parsed.strategyDirection) {
           parsed.strategyDirection = 'BOTH';
         }
-        if (parsed.zScoreUpper === undefined || parsed.zScoreUpper > 1.8) {
-          parsed.zScoreUpper = 1.5;
-        }
-        if (parsed.zScoreEntry === undefined || parsed.zScoreEntry > 1.4) {
-          parsed.zScoreEntry = 1.2;
-        }
-        if (parsed.zScoreLower === undefined || parsed.zScoreLower < -1.8) {
-          parsed.zScoreLower = -1.5;
-        }
-        if (parsed.zScoreLowerEntry === undefined || parsed.zScoreLowerEntry < -1.4) {
-          parsed.zScoreLowerEntry = -1.2;
-        }
+        // Enforce threshold 2.0 and direct entry on exceeding threshold 2
+        parsed.zScoreUpper = 2.0;
+        parsed.zScoreEntry = 2.0;
+        parsed.zScoreLower = -2.0;
+        parsed.zScoreLowerEntry = -2.0;
         // Force orderType to FAK
         if (!parsed.orderType || parsed.orderType === 'GTC') {
           parsed.orderType = 'FAK';
@@ -233,29 +226,29 @@ export function useTradingBot() {
       let signal: 'ARMED_UPPER' | 'ARMED_LOWER' | 'ENTRY_SHORT' | 'ENTRY_LONG' | 'ARMED' | 'ENTRY' | null = null;
       let dir: 'SHORT' | 'LONG' | null = null;
 
-      // Direction 1: Upper (Short / Down)
+      // Direction 1: Upper / Rise (Short / Down) - Entry ONLY when exceeding threshold 2 (>= 2.0σ)
       if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'SHORT_ONLY') {
-        if (stats.zScore > cfg.zScoreUpper) {
-          hadArmedUpper = true;
-          signal = 'ARMED_UPPER';
-          dir = 'SHORT';
-        } else if (hadArmedUpper && stats.zScore <= cfg.zScoreEntry) {
+        if (stats.zScore >= cfg.zScoreUpper) {
+          if (!hadArmedUpper) {
+            hadArmedUpper = true;
+            signal = 'ENTRY_SHORT';
+            dir = 'SHORT';
+          }
+        } else {
           hadArmedUpper = false;
-          signal = 'ENTRY_SHORT';
-          dir = 'SHORT';
         }
       }
 
-      // Direction 2: Lower (Long / Up)
+      // Direction 2: Lower / Decline (Long / Up) - Entry ONLY when exceeding threshold -2 (<= -2.0σ)
       if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'LONG_ONLY') {
-        if (stats.zScore < lowerThresh) {
-          hadArmedLower = true;
-          signal = 'ARMED_LOWER';
-          dir = 'LONG';
-        } else if (hadArmedLower && stats.zScore >= lowerEntryThresh) {
+        if (stats.zScore <= lowerThresh) {
+          if (!hadArmedLower) {
+            hadArmedLower = true;
+            signal = 'ENTRY_LONG';
+            dir = 'LONG';
+          }
+        } else {
           hadArmedLower = false;
-          signal = 'ENTRY_LONG';
-          dir = 'LONG';
         }
       }
 
@@ -501,26 +494,18 @@ export function useTradingBot() {
       const recentOverbought = metricsRef.current.slice(-3).some((m) => m.zScore >= cfg.zScoreUpper);
       const recentOversold = metricsRef.current.slice(-3).some((m) => m.zScore <= lowerThresh);
 
-      // ================= DIRECTION 1: OVERBOUGHT (Short / Down) =================
+      // ================= DIRECTION 1: UPPER / RISE (Short / Down) =================
+      // شرط الدخول: فقط عند تجاوز العتبة 2 في الصعود (Z >= +2.0σ)
       if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'SHORT_ONLY') {
-        // Arm Upper: Price diverges above upper threshold
-        if (zScore > cfg.zScoreUpper) {
+        if (zScore >= cfg.zScoreUpper) {
           if (!crossedUpperThresholdRef.current) {
             crossedUpperThresholdRef.current = true;
             setCrossedUpperThreshold(true);
-            const armMsg = `⚠️ [تأهب هبوط] قيمة Z-Score ارتفعت فوق +${cfg.zScoreUpper}σ (${zScore.toFixed(2)}σ) - الروبوت متأهب لشراء DOWN عند الارتداد.`;
-            console.log(armMsg);
-            limitlessService.logDirect('SYSTEM', armMsg);
           }
-        }
 
-        const isArmedUpper = crossedUpperThresholdRef.current || recentOverbought;
-
-        // Trigger Short: Reversion back below or equal to entry threshold in the same candle
-        if (isArmedUpper && zScore <= cfg.zScoreEntry) {
           if (!botActiveRef.current) {
             // Bot is stopped: warn user why trade was not executed
-            const pauseWarn = `⚠️ تحققت إشارة ارتداد هبوط (Z=${zScore.toFixed(2)}σ) ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
+            const pauseWarn = `⚠️ تم تجاوز العتبة 2 في الصعود (Z=+${zScore.toFixed(2)}σ) ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
             console.warn(pauseWarn);
             limitlessService.logDirect('SYSTEM', pauseWarn);
             setExecutionNotice({
@@ -533,34 +518,34 @@ export function useTradingBot() {
           }
 
           if (!isExecutingRef.current && (!candleTime || lastExecutedCandleTimeRef.current !== candleTime)) {
-            console.log(`🎯 INSTANT LIVE SHORT ENTRY! Z-Score reverted below +${cfg.zScoreEntry}σ (${zScore.toFixed(2)}σ) in the SAME candle. Executing BEARISH REVERSION order!`);
+            if (candleTime) lastExecutedCandleTimeRef.current = candleTime;
+            console.log(`🎯 تنفيذ فوري لصفقة هبوط! تجاوز Z-Score عتبة +${cfg.zScoreUpper}σ (${zScore.toFixed(2)}σ). جاري إرسال أمر DOWN!`);
+            limitlessService.logDirect(
+              'SYSTEM',
+              `🎯 [شرط الدخول متحقق] تجاوزت قيمة Z-Score عتبة +${cfg.zScoreUpper}σ (${zScore.toFixed(2)}σ) في الصعود. تنفيذ فوري لصفقة DOWN!`
+            );
+            executeLiveTrade(zScore, 'SHORT', candleTime);
+          }
+        } else {
+          if (crossedUpperThresholdRef.current) {
             crossedUpperThresholdRef.current = false;
             setCrossedUpperThreshold(false);
-            executeLiveTrade(zScore, 'SHORT', candleTime);
           }
         }
       }
 
-      // ================= DIRECTION 2: OVERSOLD (Long / Up) =================
+      // ================= DIRECTION 2: LOWER / DECLINE (Long / Up) =================
+      // شرط الدخول: فقط عند تجاوز العتبة 2 في الهبوط (Z <= -2.0σ)
       if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'LONG_ONLY') {
-        // Arm Lower: Price plunges below lower threshold
-        if (zScore < lowerThresh) {
+        if (zScore <= lowerThresh) {
           if (!crossedLowerThresholdRef.current) {
             crossedLowerThresholdRef.current = true;
             setCrossedLowerThreshold(true);
-            const armMsg = `⚠️ [تأهب صعود] قيمة Z-Score هبطت تحت ${lowerThresh}σ (${zScore.toFixed(2)}σ) - الروبوت متأهب لشراء UP عند الارتداد.`;
-            console.log(armMsg);
-            limitlessService.logDirect('SYSTEM', armMsg);
           }
-        }
 
-        const isArmedLower = crossedLowerThresholdRef.current || recentOversold;
-
-        // Trigger Long: Rebound back above or equal to lower entry threshold in the same candle
-        if (isArmedLower && zScore >= lowerEntryThresh) {
           if (!botActiveRef.current) {
             // Bot is stopped: warn user why trade was not executed
-            const pauseWarn = `⚠️ تحققت إشارة ارتداد صعود (Z=${zScore.toFixed(2)}σ) ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
+            const pauseWarn = `⚠️ تم تجاوز العتبة 2 في الهبوط (Z=${zScore.toFixed(2)}σ) ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
             console.warn(pauseWarn);
             limitlessService.logDirect('SYSTEM', pauseWarn);
             setExecutionNotice({
@@ -573,10 +558,18 @@ export function useTradingBot() {
           }
 
           if (!isExecutingRef.current && (!candleTime || lastExecutedCandleTimeRef.current !== candleTime)) {
-            console.log(`🎯 INSTANT LIVE LONG ENTRY! Z-Score bounced above ${lowerEntryThresh}σ (${zScore.toFixed(2)}σ) in the SAME candle. Executing BULLISH REVERSION order!`);
+            if (candleTime) lastExecutedCandleTimeRef.current = candleTime;
+            console.log(`🎯 تنفيذ فوري لصفقة صعود! تجاوز Z-Score عتبة ${lowerThresh}σ (${zScore.toFixed(2)}σ). جاري إرسال أمر UP!`);
+            limitlessService.logDirect(
+              'SYSTEM',
+              `🎯 [شرط الدخول متحقق] تجاوزت قيمة Z-Score عتبة ${lowerThresh}σ (${zScore.toFixed(2)}σ) في الهبوط. تنفيذ فوري لصفقة UP!`
+            );
+            executeLiveTrade(zScore, 'LONG', candleTime);
+          }
+        } else {
+          if (crossedLowerThresholdRef.current) {
             crossedLowerThresholdRef.current = false;
             setCrossedLowerThreshold(false);
-            executeLiveTrade(zScore, 'LONG', candleTime);
           }
         }
       }

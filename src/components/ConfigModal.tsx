@@ -33,10 +33,10 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
       periods: 14,
       strategyDirection: 'BOTH',
       zScoreUpper: 2.0,
-      zScoreEntry: 1.9,
+      zScoreEntry: 2.0,
       zScoreLower: -2.0,
-      zScoreLowerEntry: -1.9,
-      maxPriceCents: 0.2,
+      zScoreLowerEntry: -2.0,
+      maxPriceCents: 0.85,
       maxRiskPercent: 0.05,
       orderType: 'FAK',
       fractionChunks: 1,
@@ -237,103 +237,63 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
             </div>
 
             {/* Quick Sensitivity Presets */}
+            {/* Quick Sensitivity Presets */}
             <div className="flex flex-wrap items-center gap-2 pt-1 pb-1">
-              <span className="text-[11px] text-slate-400">{isAr ? 'قوالب الحساسية وسرعة الدخول:' : 'Sensitivity Presets:'}</span>
-              <button
-                type="button"
-                onClick={() => setDraft({
-                  ...draft,
-                  zScoreUpper: 1.8,
-                  zScoreEntry: 1.5,
-                  zScoreLower: -1.8,
-                  zScoreLowerEntry: -1.5,
-                })}
-                className="px-2.5 py-1 rounded text-[11px] font-bold bg-emerald-950/80 hover:bg-emerald-900/90 text-emerald-300 border border-emerald-600/50 cursor-pointer"
-              >
-                {isAr ? '⚡ سريع ونشط (±1.8σ / ±1.5σ) - صفقات متكررة' : '⚡ Active (±1.8σ / ±1.5σ)'}
-              </button>
+              <span className="text-[11px] text-slate-400">{isAr ? 'قالب الاستراتيجية المعتمد:' : 'Strategy Preset:'}</span>
               <button
                 type="button"
                 onClick={() => setDraft({
                   ...draft,
                   zScoreUpper: 2.0,
-                  zScoreEntry: 1.9,
+                  zScoreEntry: 2.0,
                   zScoreLower: -2.0,
-                  zScoreLowerEntry: -1.9,
+                  zScoreLowerEntry: -2.0,
                 })}
-                className="px-2.5 py-1 rounded text-[11px] font-bold bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 cursor-pointer"
+                className="px-2.5 py-1 rounded text-[11px] font-bold bg-emerald-950/80 hover:bg-emerald-900/90 text-emerald-300 border border-emerald-600/50 cursor-pointer"
               >
-                {isAr ? '🛡️ محافظ (±2.0σ / ±1.9σ) - ارتداد أقصى' : '🛡️ Conservative (±2.0σ / ±1.9σ)'}
+                {isAr ? '🎯 العتبة المعتمدة (±2.0σ) - شرط الدخول فور تجاوز العتبة 2' : '🎯 Approved (±2.0σ) - Entry on Exceeding 2'}
               </button>
             </div>
 
             {/* Thresholds Grid: Upper & Lower */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-              {/* Upper Arm */}
+              {/* Upper Threshold (Rise) */}
               <div className="p-2.5 rounded-lg bg-slate-950/60 border border-rose-900/40">
                 <label className="block text-rose-300 mb-1 font-semibold">
-                  {isAr ? 'عتبة التأهب للقمة (Upper Arm):' : 'Upper Arm (Z_SCORE_UPPER):'}
+                  {isAr ? 'عتبة شرط الدخول في الصعود (Z_SCORE_UPPER):' : 'Upper Entry Threshold (Z_SCORE_UPPER):'}
                 </label>
                 <input
                   type="number"
                   step="0.05"
                   value={draft.zScoreUpper}
-                  onChange={(e) => setDraft({ ...draft, zScoreUpper: parseFloat(e.target.value) || 1.8 })}
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value) || 2.0;
+                    setDraft({ ...draft, zScoreUpper: val, zScoreEntry: val });
+                  }}
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
                 />
-                <span className="text-[10px] text-slate-500 mt-1 block">
-                  {isAr ? 'التأهب لصفقة هبوط عند تجاوز +1.8σ' : 'Arms Short when Z crosses above upper bound'}
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  {isAr ? 'تنفيذ فوري لصفقة هبوط (DOWN) بمجرد تجاوز +2.0σ' : 'Fires Short / DOWN order when Z exceeds +2.0σ'}
                 </span>
               </div>
 
-              {/* Upper Trigger */}
-              <div className="p-2.5 rounded-lg bg-slate-950/60 border border-amber-900/40">
-                <label className="block text-amber-300 mb-1 font-semibold">
-                  {isAr ? 'عتبة دخول الهبوط (Short Trigger):' : 'Short Trigger (Z_SCORE_ENTRY):'}
-                </label>
-                <input
-                  type="number"
-                  step="0.05"
-                  value={draft.zScoreEntry}
-                  onChange={(e) => setDraft({ ...draft, zScoreEntry: parseFloat(e.target.value) || 1.9 })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
-                />
-                <span className="text-[10px] text-slate-500 mt-1 block">
-                  {isAr ? 'تنفيذ صفقة DOWN فور ارتداد السعر دون +1.9σ' : 'Fires Short / DOWN order when price pulls back below entry'}
-                </span>
-              </div>
-
-              {/* Lower Arm */}
+              {/* Lower Threshold (Decline) */}
               <div className="p-2.5 rounded-lg bg-slate-950/60 border border-emerald-900/40">
                 <label className="block text-emerald-300 mb-1 font-semibold">
-                  {isAr ? 'عتبة التأهب للقاع (Lower Arm):' : 'Lower Arm (Z_SCORE_LOWER):'}
+                  {isAr ? 'عتبة شرط الدخول في الهبوط (Z_SCORE_LOWER):' : 'Lower Entry Threshold (Z_SCORE_LOWER):'}
                 </label>
                 <input
                   type="number"
                   step="0.05"
                   value={draft.zScoreLower ?? -2.0}
-                  onChange={(e) => setDraft({ ...draft, zScoreLower: parseFloat(e.target.value) || -2.0 })}
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value) || -2.0;
+                    setDraft({ ...draft, zScoreLower: val, zScoreLowerEntry: val });
+                  }}
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
                 />
-                <span className="text-[10px] text-slate-500 mt-1 block">
-                  {isAr ? 'التأهب لصفقة صعود عند انخفاض السعر دون -2.0σ' : 'Arms Long when Z drops below lower oversold bound'}
-                </span>
-              </div>
-
-              {/* Lower Trigger */}
-              <div className="p-2.5 rounded-lg bg-slate-950/60 border border-teal-900/40">
-                <label className="block text-teal-300 mb-1 font-semibold">
-                  {isAr ? 'عتبة دخول الصعود (Long Trigger):' : 'Long Trigger (Z_SCORE_LOWER_ENTRY):'}
-                </label>
-                <input
-                  type="number"
-                  step="0.05"
-                  value={draft.zScoreLowerEntry ?? -1.9}
-                  onChange={(e) => setDraft({ ...draft, zScoreLowerEntry: parseFloat(e.target.value) || -1.9 })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
-                />
-                <span className="text-[10px] text-slate-500 mt-1 block">
-                  {isAr ? 'تنفيذ صفقة UP فور ارتداد السعر للأعلى فوق -1.9σ' : 'Fires Long / UP order when price bounces back above entry'}
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  {isAr ? 'تنفيذ فوري لصفقة صعود (UP) بمجرد تجاوز -2.0σ' : 'Fires Long / UP order when Z drops below -2.0σ'}
                 </span>
               </div>
             </div>

@@ -322,34 +322,19 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
               14-PERIOD BIDIRECTIONAL Z-SCORE OSCILLATOR (σ)
             </text>
 
-            {/* Upper Bound Line (+2.0σ) */}
+            {/* Upper Entry Threshold Line (+2.0σ) */}
             <line
               x1={padding.left}
               y1={zY(upperThreshold)}
               x2={width - padding.right}
               y2={zY(upperThreshold)}
               stroke="#f43f5e"
-              strokeWidth="1"
+              strokeWidth="1.5"
               strokeDasharray="4 2"
-              opacity="0.8"
-            />
-            <text x={width - padding.right + 8} y={zY(upperThreshold) + 3} fill="#f43f5e" fontSize="9" fontFamily="JetBrains Mono, monospace">
-              +{upperThreshold.toFixed(1)}σ (Arm Down)
-            </text>
-
-            {/* Upper Entry Trigger Line (+1.90σ) */}
-            <line
-              x1={padding.left}
-              y1={zY(entryThreshold)}
-              x2={width - padding.right}
-              y2={zY(entryThreshold)}
-              stroke="#f59e0b"
-              strokeWidth="1"
-              strokeDasharray="2 2"
               opacity="0.9"
             />
-            <text x={width - padding.right + 8} y={zY(entryThreshold) + 3} fill="#f59e0b" fontSize="9" fontFamily="JetBrains Mono, monospace">
-              +{entryThreshold.toFixed(2)}σ (Trigger Short)
+            <text x={width - padding.right + 8} y={zY(upperThreshold) + 3} fill="#f43f5e" fontSize="9" fontWeight="bold" fontFamily="JetBrains Mono, monospace">
+              +{upperThreshold.toFixed(1)}σ (Short Entry)
             </text>
 
             {/* Zero Baseline */}
@@ -366,34 +351,19 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
               0.0σ Mean
             </text>
 
-            {/* Lower Entry Trigger Line (-1.90σ) */}
-            <line
-              x1={padding.left}
-              y1={zY(lowerEntryThreshold)}
-              x2={width - padding.right}
-              y2={zY(lowerEntryThreshold)}
-              stroke="#2dd4bf"
-              strokeWidth="1"
-              strokeDasharray="2 2"
-              opacity="0.9"
-            />
-            <text x={width - padding.right + 8} y={zY(lowerEntryThreshold) + 3} fill="#2dd4bf" fontSize="9" fontFamily="JetBrains Mono, monospace">
-              {lowerEntryThreshold.toFixed(2)}σ (Trigger Long)
-            </text>
-
-            {/* Lower Bound Line (-2.0σ) */}
+            {/* Lower Entry Threshold Line (-2.0σ) */}
             <line
               x1={padding.left}
               y1={zY(lowerThreshold)}
               x2={width - padding.right}
               y2={zY(lowerThreshold)}
               stroke="#10b981"
-              strokeWidth="1"
+              strokeWidth="1.5"
               strokeDasharray="4 2"
-              opacity="0.7"
+              opacity="0.9"
             />
-            <text x={width - padding.right + 8} y={zY(lowerThreshold) + 3} fill="#10b981" fontSize="9" fontFamily="JetBrains Mono, monospace">
-              {lowerThreshold.toFixed(1)}σ (Arm Up)
+            <text x={width - padding.right + 8} y={zY(lowerThreshold) + 3} fill="#10b981" fontSize="9" fontWeight="bold" fontFamily="JetBrains Mono, monospace">
+              {lowerThreshold.toFixed(1)}σ (Long Entry)
             </text>
 
             {/* Z-Score Curve */}

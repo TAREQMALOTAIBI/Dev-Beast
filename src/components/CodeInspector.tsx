@@ -273,38 +273,22 @@ class LimitlessTradingBot {
 
         const currentZScore = this.calculateZScore(prices);
 
-        // الاتجاه الأول: الارتداد من ذروة الشراء (SHORT / DOWN)
+        // الاتجاه الأول: تجاوز عتبة الصعود +2.0σ (SHORT / DOWN)
         if (CONFIG.STRATEGY_DIRECTION === 'BOTH' || CONFIG.STRATEGY_DIRECTION === 'SHORT_ONLY') {
-            if (currentZScore > CONFIG.Z_SCORE_UPPER) {
-                if (!this.crossedUpperThreshold) {
-                    console.log(\`⚠️ Z-Score crossed above +\${CONFIG.Z_SCORE_UPPER}σ (\${currentZScore.toFixed(2)}σ)! ARMED for Short/DOWN.\`);
-                    this.crossedUpperThreshold = true;
-                }
-            }
-
-            if (this.crossedUpperThreshold && currentZScore <= CONFIG.Z_SCORE_ENTRY) {
+            if (currentZScore >= CONFIG.Z_SCORE_UPPER) {
                 if (!this.isExecutingTrade && (!candleTime || this.lastExecutedCandleTime !== candleTime)) {
-                    console.log(\`🎯 LIVE SHORT ENTRY! Z-Score reverted below +\${CONFIG.Z_SCORE_ENTRY}σ (\${currentZScore.toFixed(2)}σ). Executing DOWN order!\`);
-                    this.crossedUpperThreshold = false;
+                    console.log(\`🎯 إشارة دخول هبوط فورية! تجاوز Z-Score عتبة +\${CONFIG.Z_SCORE_UPPER}σ (\${currentZScore.toFixed(2)}σ). تنفيذ أمر DOWN!\`);
                     if (candleTime) this.lastExecutedCandleTime = candleTime;
                     this.executeTrade('SHORT');
                 }
             }
         }
 
-        // الاتجاه الثاني: الارتداد من ذروة البيع (LONG / UP)
+        // الاتجاه الثاني: تجاوز عتبة الهبوط -2.0σ (LONG / UP)
         if (CONFIG.STRATEGY_DIRECTION === 'BOTH' || CONFIG.STRATEGY_DIRECTION === 'LONG_ONLY') {
-            if (currentZScore < CONFIG.Z_SCORE_LOWER) {
-                if (!this.crossedLowerThreshold) {
-                    console.log(\`⚠️ Z-Score dropped below \${CONFIG.Z_SCORE_LOWER}σ (\${currentZScore.toFixed(2)}σ)! ARMED for Long/UP.\`);
-                    this.crossedLowerThreshold = true;
-                }
-            }
-
-            if (this.crossedLowerThreshold && currentZScore >= CONFIG.Z_SCORE_LOWER_ENTRY) {
+            if (currentZScore <= CONFIG.Z_SCORE_LOWER) {
                 if (!this.isExecutingTrade && (!candleTime || this.lastExecutedCandleTime !== candleTime)) {
-                    console.log(\`🎯 LIVE LONG ENTRY! Z-Score bounced above \${CONFIG.Z_SCORE_LOWER_ENTRY}σ (\${currentZScore.toFixed(2)}σ). Executing UP order!\`);
-                    this.crossedLowerThreshold = false;
+                    console.log(\`🎯 إشارة دخول صعود فورية! تجاوز Z-Score عتبة \${CONFIG.Z_SCORE_LOWER}σ (\${currentZScore.toFixed(2)}σ). تنفيذ أمر UP!\`);
                     if (candleTime) this.lastExecutedCandleTime = candleTime;
                     this.executeTrade('LONG');
                 }
