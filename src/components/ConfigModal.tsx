@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { BotConfig } from '../types/bot';
-import { Settings, X, RotateCcw, Save, KeyRound, Radio, ShieldCheck } from 'lucide-react';
+import { Settings, X, RotateCcw, Save, KeyRound, Radio, ShieldCheck, Eye, EyeOff, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 interface ConfigModalProps {
   config: BotConfig;
@@ -23,6 +23,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
 }) => {
   const isAr = lang === 'ar';
   const [draft, setDraft] = useState<BotConfig>({ ...config });
+  const [showKeys, setShowKeys] = useState(false);
 
   if (!isOpen) return null;
 
@@ -85,37 +86,30 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
         {/* Form Body */}
         <div className="p-6 overflow-y-auto space-y-5 text-xs text-slate-300">
           {/* Live Wallet & Secrets Status Banner */}
-          <div className="p-3.5 rounded-xl bg-slate-950/80 border border-emerald-800/40 space-y-3">
+          <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-3">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 font-bold text-emerald-400 text-xs uppercase tracking-wider">
-                <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                <span>{isAr ? 'حالة المحفظة وبيانات التوثيق (Environment Secrets)' : 'Wallet & Environment Secrets Status'}</span>
+              <div className="flex items-center gap-2 font-bold text-xs uppercase tracking-wider">
+                <ShieldCheck className={`w-4 h-4 ${liveWallet?.isLive ? 'text-emerald-400' : 'text-amber-400'}`} />
+                <span className={liveWallet?.isLive ? 'text-emerald-400' : 'text-amber-300'}>
+                  {isAr ? 'حالة محفظة التداول الحي (Limitless EIP-712)' : 'Live Trading Wallet Status (Limitless EIP-712)'}
+                </span>
               </div>
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-600/60 shadow-sm">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-                {isAr ? 'المفاتيح مربوطة ومؤمنة' : 'Connected via Secrets'}
+              <span
+                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold border shadow-sm ${
+                  liveWallet?.isLive
+                    ? 'bg-emerald-950/80 text-emerald-300 border-emerald-600/60'
+                    : 'bg-amber-950/80 text-amber-300 border-amber-600/60'
+                }`}
+              >
+                <span className={`w-2 h-2 rounded-full ${liveWallet?.isLive ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
+                {liveWallet?.isLive
+                  ? isAr ? 'المحفظة متصلة (تداول حي)' : 'Live Wallet Connected'
+                  : isAr ? 'وضع المعاينة (المفاتيح غير مربوطة)' : 'Preview Mode (Keys Missing)'}
               </span>
             </div>
 
-            <div className="text-[11px] text-slate-300 leading-relaxed bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
-              {isAr ? (
-                <>
-                  <p className="text-emerald-300 font-semibold mb-1">
-                    ✓ الربط المباشر مؤمن بالكامل من بيئة النظام (Google AI Studio Secrets):
-                  </p>
-                  <p className="text-slate-400">
-                    تم إخفاء وتأمين حقول المفاتيح الخاصة. الخادم يقرأ تلقائياً مفتاحك الخاص <code>PRIVATE_KEY</code> ومفاتيح <code>LMTS_TOKEN_ID</code> و <code>LMTS_TOKEN_SECRET</code> ورابط <code>BASE_RPC_URL</code> دون الحاجة لإدخالها في المتصفح.
-                  </p>
-                </>
-              ) : (
-                <p className="text-slate-300">
-                  Wallet and API credentials are automatically read from the platform Environment Secrets. No sensitive private keys are exposed or required in the UI.
-                </p>
-              )}
-            </div>
-
-            {liveWallet && (
-              <div className="p-3 rounded-lg bg-emerald-950/30 border border-emerald-700/30 flex flex-wrap items-center justify-between gap-3 shadow-sm">
+            {liveWallet?.isLive ? (
+              <div className="p-3 rounded-lg bg-emerald-950/30 border border-emerald-700/40 flex flex-wrap items-center justify-between gap-3 shadow-sm">
                 <div className="flex items-center gap-2.5">
                   <span className="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
                   <div>
@@ -135,9 +129,93 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                   <div className="text-base font-bold font-mono text-emerald-300">${liveWallet.usdcBalance.toFixed(2)} USDC</div>
                 </div>
               </div>
+            ) : (
+              <div className="p-3 rounded-lg bg-amber-950/40 border border-amber-600/50 space-y-2 text-[11px]">
+                <div className="flex items-start gap-2 text-amber-200">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-bold text-amber-300 mb-0.5">
+                      {isAr
+                        ? 'تنبيه: الصفقات لن تنفذ على محفظتك في Limitless حتى تضيف المفاتيح الحية'
+                        : 'Notice: Live on-chain orders will not execute until live keys are configured'}
+                    </div>
+                    <p className="text-amber-200/90 leading-relaxed">
+                      {isAr
+                        ? 'لكي يقوم الروبوت بتوقيع وإرسال أوامر الشراء مباشرة لحسابك في منصة Limitless، يجب توفر المفتاح الخاص (PRIVATE_KEY) وتوثيق HMAC. يمكنك إدخالها أدناه مباشرة أو كتابتها في ملف .env في الخادم.'
+                        : 'To execute signed EIP-712 orders directly to Limitless, provide your PRIVATE_KEY and HMAC credentials below or in your server .env file.'}
+                    </p>
+                  </div>
+                </div>
+              </div>
             )}
 
-            <div>
+            {/* Live Credentials Inputs Section */}
+            <div className="space-y-3 pt-2 border-t border-slate-800">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                  <KeyRound className="w-3.5 h-3.5 text-sky-400" />
+                  <span>{isAr ? 'مفاتيح التداول الحي وتوثيق HMAC:' : 'Live Trading Credentials & HMAC:'}</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowKeys(!showKeys)}
+                  className="text-[11px] text-sky-400 hover:text-sky-300 flex items-center gap-1 cursor-pointer"
+                >
+                  {showKeys ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  <span>{showKeys ? (isAr ? 'إخفاء المفاتيح' : 'Hide Keys') : (isAr ? 'إظهار / تعديل المفاتيح' : 'Show / Edit Keys')}</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 gap-2.5">
+                <div>
+                  <label className="block text-slate-400 mb-1 text-[11px]">
+                    {isAr ? 'المفتاح الخاص للمحفظة (PRIVATE_KEY):' : 'Wallet Private Key (PRIVATE_KEY):'}
+                  </label>
+                  <input
+                    type={showKeys ? 'text' : 'password'}
+                    placeholder="0x... أو في ملف .env"
+                    value={draft.privateKey || ''}
+                    onChange={(e) => setDraft({ ...draft, privateKey: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono text-xs focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-slate-400 mb-1 text-[11px]">
+                      {isAr ? 'معرف توكن Limitless (LMTS_TOKEN_ID):' : 'Limitless Token ID (LMTS_TOKEN_ID):'}
+                    </label>
+                    <input
+                      type={showKeys ? 'text' : 'password'}
+                      placeholder="e.g. 172... أو في .env"
+                      value={draft.limitlessTokenId || ''}
+                      onChange={(e) => setDraft({ ...draft, limitlessTokenId: e.target.value })}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono text-xs focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 mb-1 text-[11px]">
+                      {isAr ? 'الرمز السري لتوكن Limitless (LMTS_TOKEN_SECRET):' : 'Limitless Token Secret (LMTS_TOKEN_SECRET):'}
+                    </label>
+                    <input
+                      type={showKeys ? 'text' : 'password'}
+                      placeholder="HMAC Secret أو في .env"
+                      value={draft.limitlessTokenSecret || ''}
+                      onChange={(e) => setDraft({ ...draft, limitlessTokenSecret: e.target.value })}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono text-xs focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="text-[10px] text-slate-400 leading-normal">
+                {isAr
+                  ? '💡 ملاحظة: عند حفظ المفاتيح هنا، يتم استخدامها لتوقيع صفقات EIP-712 الحية فوراً، أو يمكنك وضعها في ملف .env في الخادم كمتغيرات بيئة ثابتة.'
+                  : '💡 Tip: Saved keys are used directly for live EIP-712 order signing, or you can specify them in your server .env file.'}
+              </div>
+            </div>
+
+            <div className="pt-2 border-t border-slate-800">
               <label className="block text-slate-400 mb-1 font-semibold">
                 {isAr ? 'رمز سوق التوقع (15 دقيقة حصراً):' : 'Prediction Market Slug (15m Only):'}
               </label>

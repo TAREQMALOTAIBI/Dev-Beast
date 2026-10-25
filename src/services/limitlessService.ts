@@ -517,7 +517,7 @@ export class LimitlessService {
         body: JSON.stringify(orderPayload),
       });
       const orderResult = await orderRes.json().catch(() => null);
-      if (!orderRes.ok || (orderResult && orderResult.success === false)) {
+      if (!orderRes.ok || (orderResult && orderResult.success === false) || orderResult?.mode === 'DRY_RUN_EIP712_PREVIEW' || orderResult?.mode === 'MISSING_CREDENTIALS') {
         const errMessage = orderResult?.error || orderResult?.message || `HTTP ${orderRes.status}: Order rejected by Limitless exchange`;
         chunkState.status = 'FAILED';
         chunkState.timestamp = Date.now();

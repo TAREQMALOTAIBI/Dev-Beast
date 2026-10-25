@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
@@ -499,10 +500,10 @@ function setupApiMiddlewares(middlewares: any) {
     req.on('end', async () => {
       try {
         const body = rawBody ? JSON.parse(rawBody) : {};
-        const { market, direction, outcome, type, price, size, chunkId } = body;
-        const pk = process.env.PRIVATE_KEY?.trim();
-        const tokenId = process.env.LMTS_TOKEN_ID?.trim();
-        const secret = process.env.LMTS_TOKEN_SECRET?.trim();
+        const { market, direction, outcome, type, price, size, chunkId, privateKey, tokenId: bodyTokenId, secret: bodySecret } = body;
+        const pk = (privateKey || process.env.PRIVATE_KEY || '').trim();
+        const tokenId = (bodyTokenId || process.env.LMTS_TOKEN_ID || '').trim();
+        const secret = (bodySecret || process.env.LMTS_TOKEN_SECRET || '').trim();
         const hasLiveAuth = Boolean(pk && tokenId && secret);
 
         let activeMarketSlug = (market || '').trim();
@@ -585,109 +586,104 @@ function setupApiMiddlewares(middlewares: any) {
           }));
         }
 
+        // Require live credentials for on-chain execution - do not silently fake execution!
+        if (!hasLiveAuth) {
+          res.statusCode = 400;
+          return res.end(JSON.stringify({
+            success: false,
+            mode: 'MISSING_CREDENTIALS',
+            error: 'تعذر تنفيذ الصفقة: المفتاح الخاص PRIVATE_KEY أو توثيق HMAC (LMTS_TOKEN_ID و LMTS_TOKEN_SECRET) غير موجود في ملف .env في الخادم! يرجى إدخال هذه المفاتيح في ملف .env في الخادم ليتم توقيع وإرسال الصفقات الحية مباشرة إلى Limitless.',
+            missing: {
+              privateKey: !pk,
+              tokenId: !tokenId,
+              secret: !secret,
+            },
+          }));
+        }
+
         // Extract market ask price for this outcome so FAK orders fill immediately
         const marketAsk = isLong
           ? (marketData?.tradePrices?.buy?.market?.[0] ?? marketData?.prices?.[0] ?? 0.50)
           : (marketData?.tradePrices?.buy?.market?.[1] ?? marketData?.prices?.[1] ?? 0.50);
 
         let inputPrice = Number(price) > 1 ? Number(price) / 100 : (Number(price) || marketAsk);
-        // If price is lower than market ask and order is FAK, bump to marketAsk to prevent immediate kill
-        if (type === 'FAK' && inputPrice < marketAsk) {
-          inputPrice = marketAsk;
+        // Add 1.5% slippage buffer for FAK to guarantee execution against book movements
+        if (type === 'FAK' && inputPrice <= marketAsk) {
+          inputPrice = Math.min(0.999, marketAsk * 1.015);
         }
         // Price must have max 3 decimal places for Limitless SDK tick alignment (0.001)
         const tickAlignedPrice = Math.max(0.001, Math.min(0.999, parseFloat(Number(inputPrice).toFixed(3))));
         const contractCount = Math.max(1, Math.round(Number(size) || 1));
 
-        if (hasLiveAuth && pk && tokenId && secret) {
-          const { ethers } = await import('ethers');
-          const sdk = await import('@limitless-exchange/sdk');
-          const formattedPk = pk.startsWith('0x') ? pk : `0x${pk}`;
-          const wallet = new ethers.Wallet(formattedPk);
-          const httpClient = new sdk.HttpClient({
-            baseURL: sdk.DEFAULT_API_URL,
-            hmacCredentials: { tokenId, secret },
-          });
+        const { ethers } = await import('ethers');
+        const sdk = await import('@limitless-exchange/sdk');
+        const formattedPk = pk.startsWith('0x') ? pk : `0x${pk}`;
+        const wallet = new ethers.Wallet(formattedPk);
+        const httpClient = new sdk.HttpClient({
+          baseURL: sdk.DEFAULT_API_URL,
+          hmacCredentials: { tokenId, secret },
+        });
 
-          try {
-            const axiosClient = (httpClient as any).http?.client;
-            if (axiosClient && typeof axiosClient.put === 'function') {
-              await axiosClient.put('/profiles', { tradeWalletOption: 'eoa' });
-            }
-          } catch {
-            // safe continuation
+        try {
+          const axiosClient = (httpClient as any).http?.client;
+          if (axiosClient && typeof axiosClient.put === 'function') {
+            await axiosClient.put('/profiles', { tradeWalletOption: 'eoa' });
           }
-
-          const orderClient = new sdk.OrderClient({
-            httpClient,
-            wallet,
-            logger: new sdk.ConsoleLogger(),
-          });
-
-          const orderTypeEnum = type === 'GTC' ? sdk.OrderType.GTC : sdk.OrderType.FAK;
-          const result: any = await orderClient.createOrder({
-            marketSlug: activeMarketSlug,
-            tokenId: String(targetTokenId),
-            side: sdk.Side.BUY,
-            orderType: orderTypeEnum,
-            price: tickAlignedPrice,
-            size: contractCount,
-          });
-
-          return res.end(JSON.stringify({
-            success: true,
-            mode: 'LIVE_EIP712_EXECUTED',
-            orderId: result?.id || `ord_${Date.now()}`,
-            marketSlug: activeMarketSlug,
-            direction: isLong ? 'LONG' : 'SHORT',
-            outcome: isLong ? 'UP' : 'DOWN',
-            tokenId: targetTokenId,
-            price: tickAlignedPrice,
-            size: contractCount,
-            chunkId,
-            details: result,
-          }));
-        } else {
-          const { ethers } = await import('ethers');
-          const dummyWallet = ethers.Wallet.createRandom();
-          const domain = {
-            name: 'Limitless CTF Exchange',
-            version: '1',
-            chainId: 8453,
-            verifyingContract: venueExchange,
-          };
-          const makerAmount = Math.round(tickAlignedPrice * contractCount * 1e6);
-          const takerAmount = Math.round(contractCount * 1e6);
-
-          const eip712Order = {
-            salt: String(Date.now()),
-            maker: dummyWallet.address,
-            signer: dummyWallet.address,
-            taker: '0x0000000000000000000000000000000000000000',
-            tokenId: String(targetTokenId),
-            makerAmount: String(makerAmount),
-            takerAmount: String(takerAmount),
-            expiration: '0',
-            nonce: '0',
-            feeRateBps: '0',
-            side: 0,
-            signatureType: 0,
-          };
-
-          return res.end(JSON.stringify({
-            success: true,
-            mode: 'DRY_RUN_EIP712_PREVIEW',
-            notice: 'Order built and validated against Limitless EIP-712 standard. Add PRIVATE_KEY, LMTS_TOKEN_ID, and LMTS_TOKEN_SECRET to .env for live on-chain submission.',
-            marketSlug: activeMarketSlug,
-            direction: isLong ? 'LONG' : 'SHORT',
-            outcome: isLong ? 'UP' : 'DOWN',
-            tokenId: targetTokenId,
-            verifyingContract: venueExchange,
-            domain,
-            order: eip712Order,
-            chunkId,
-          }));
+        } catch {
+          // safe continuation
         }
+
+        const orderClient = new sdk.OrderClient({
+          httpClient,
+          wallet,
+          logger: new sdk.ConsoleLogger(),
+        });
+
+        const orderTypeEnum = type === 'GTC'
+          ? sdk.OrderType.GTC
+          : type === 'FOK'
+          ? sdk.OrderType.FOK
+          : sdk.OrderType.FAK;
+
+        const orderArgs: any = {
+          marketSlug: activeMarketSlug,
+          tokenId: String(targetTokenId),
+          side: sdk.Side.BUY,
+          orderType: orderTypeEnum,
+          price: tickAlignedPrice,
+          size: contractCount,
+        };
+
+        if (orderTypeEnum === sdk.OrderType.FOK) {
+          orderArgs.makerAmount = Math.max(0.1, Number((contractCount * tickAlignedPrice).toFixed(2)));
+          delete orderArgs.price;
+          delete orderArgs.size;
+        }
+
+        console.log(`[Limitless LIVE ORDER] Sending order via SDK...`, {
+          account: wallet.address,
+          slug: activeMarketSlug,
+          outcome: isLong ? 'UP' : 'DOWN',
+          type: orderTypeEnum,
+          price: tickAlignedPrice,
+          contracts: contractCount,
+        });
+
+        const result: any = await orderClient.createOrder(orderArgs);
+
+        return res.end(JSON.stringify({
+          success: true,
+          mode: 'LIVE_EIP712_EXECUTED',
+          orderId: result?.id || result?.order?.id || `ord_${Date.now()}`,
+          marketSlug: activeMarketSlug,
+          direction: isLong ? 'LONG' : 'SHORT',
+          outcome: isLong ? 'UP' : 'DOWN',
+          tokenId: targetTokenId,
+          price: tickAlignedPrice,
+          size: contractCount,
+          chunkId,
+          details: result,
+        }));
       } catch (err: any) {
         const errorDetail = err?.response?.data?.message || err?.response?.data?.error || err?.message || String(err);
         console.warn('[EIP-712 ORDER NOTICE]', errorDetail);

@@ -21,6 +21,7 @@ import {
   Wallet,
   ExternalLink,
   Power,
+  AlertCircle,
 } from 'lucide-react';
 
 export default function App() {
@@ -219,7 +220,7 @@ export default function App() {
                 <span className="text-[11px] font-semibold">{isAr ? 'تحديث الرصيد' : 'Refresh'}</span>
               </button>
             </div>
-            {liveWallet?.address && (
+            {liveWallet?.address ? (
               <>
                 <span className="text-slate-700">·</span>
                 <div className="flex items-center gap-1.5 text-[11px] text-slate-300 font-mono">
@@ -244,6 +245,18 @@ export default function App() {
                     </span>
                   )}
                 </div>
+              </>
+            ) : (
+              <>
+                <span className="text-slate-700">·</span>
+                <button
+                  onClick={() => setIsConfigOpen(true)}
+                  className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] bg-amber-950/70 text-amber-300 border border-amber-600/50 hover:bg-amber-900/80 cursor-pointer transition-colors"
+                  title={isAr ? 'اضغط لربط المحفظة الحية' : 'Click to configure live wallet'}
+                >
+                  <AlertCircle className="w-3 h-3 text-amber-400" />
+                  <span>{isAr ? 'المحفظة غير مربوطة (وضع المعاينة)' : 'Wallet Not Linked (Preview Mode)'}</span>
+                </button>
               </>
             )}
           </div>
