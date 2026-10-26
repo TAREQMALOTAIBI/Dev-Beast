@@ -40,6 +40,52 @@ let recentTxEvents = [];
 const sseClients = new Set();
 let subscribedSlugs = new Set();
 
+// ============================================================================
+// VM Persistent Trade Guard (RAM + Disk: trade-guard.json)
+// ============================================================================
+const TRADE_GUARD_FILE = path.join(process.cwd(), 'trade-guard.json');
+let inMemoryTradeGuard = null;
+
+function loadTradeGuardFromDisk() {
+  try {
+    if (fs.existsSync(TRADE_GUARD_FILE)) {
+      const raw = fs.readFileSync(TRADE_GUARD_FILE, 'utf8');
+      inMemoryTradeGuard = JSON.parse(raw);
+      console.log(`[VM Trade Guard] Loaded persistent lock from disk: ${inMemoryTradeGuard?.marketSlug || 'none'}`);
+      return inMemoryTradeGuard;
+    }
+  } catch (err) {
+    console.warn('[VM Trade Guard] Error reading trade-guard.json:', err.message);
+  }
+  inMemoryTradeGuard = null;
+  return null;
+}
+
+function persistTradeGuard(guard) {
+  inMemoryTradeGuard = guard;
+  try {
+    fs.writeFileSync(TRADE_GUARD_FILE, JSON.stringify(guard, null, 2), 'utf8');
+    console.log(`[VM Trade Guard] Persisted trade lock on VM disk: ${guard?.marketSlug}`);
+  } catch (err) {
+    console.warn('[VM Trade Guard] Error writing trade-guard.json:', err.message);
+  }
+}
+
+function clearTradeGuardFromDisk() {
+  inMemoryTradeGuard = null;
+  try {
+    if (fs.existsSync(TRADE_GUARD_FILE)) {
+      fs.unlinkSync(TRADE_GUARD_FILE);
+      console.log('[VM Trade Guard] Cleared trade lock from VM disk.');
+    }
+  } catch (err) {
+    console.warn('[VM Trade Guard] Error removing trade-guard.json:', err.message);
+  }
+}
+
+// Initial load into RAM on server boot
+loadTradeGuardFromDisk();
+
 function is15MinBtcMarket(m) {
   if (!m) return false;
   const slug = (m.slug || '').toLowerCase();
@@ -463,6 +509,10 @@ app.get('/api/limitless/live-stream', (req, res) => {
   if (latestPositionsData) {
     res.write(`event: positions\ndata: ${JSON.stringify(latestPositionsData)}\n\n`);
   }
+  const initGuard = inMemoryTradeGuard || loadTradeGuardFromDisk();
+  if (initGuard) {
+    res.write(`event: tradeGuardUpdate\ndata: ${JSON.stringify(initGuard)}\n\n`);
+  }
 
   // Keepalive ping every 5 seconds to prevent Google Cloud VM / Nginx proxy timeouts
   const pingTimer = setInterval(() => {
@@ -480,6 +530,45 @@ app.get('/api/limitless/live-stream', (req, res) => {
     clearInterval(pingTimer);
     sseClients.delete(res);
   });
+});
+
+// ============================================================================
+// VM Persistent Trade Guard REST Endpoints
+// ============================================================================
+app.get('/api/trade-guard', (_req, res) => {
+  const guard = inMemoryTradeGuard || loadTradeGuardFromDisk();
+  res.json({ success: true, guard });
+});
+
+app.post('/api/trade-guard', (req, res) => {
+  try {
+    const { marketSlug, timestamp, candleTime, direction, outcome, price, size, orderId } = req.body || {};
+    const guard = {
+      marketSlug: String(marketSlug || '').trim(),
+      timestamp: Number(timestamp) || Date.now(),
+      candleTime: Number(candleTime) || Date.now(),
+      direction: direction || 'LONG',
+      outcome: outcome || 'UP',
+      price: price ? Number(price) : undefined,
+      size: size ? Number(size) : undefined,
+      orderId: orderId || undefined,
+    };
+    persistTradeGuard(guard);
+    broadcastSse('tradeGuardUpdate', guard);
+    res.json({ success: true, guard });
+  } catch (err) {
+    res.status(500).json({ success: false, error: String(err) });
+  }
+});
+
+app.post('/api/trade-guard/clear', (_req, res) => {
+  try {
+    clearTradeGuardFromDisk();
+    broadcastSse('tradeGuardUpdate', null);
+    res.json({ success: true, message: 'Trade guard cleared from VM disk and RAM' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: String(err) });
+  }
 });
 
 app.post('/api/limitless/subscribe', async (req, res) => {
@@ -732,6 +821,22 @@ app.post('/api/limitless/order', async (req, res) => {
           delete orderArgs.size;
         }
 
+        // Check VM persistent trade lock to prevent duplicate trades across any client
+        const currentGuard = inMemoryTradeGuard || loadTradeGuardFromDisk();
+        const nowMs = Date.now();
+        if (!req.body?.ignoreLock && currentGuard && currentGuard.marketSlug === activeMarketSlug) {
+          const timeSinceLast = nowMs - (currentGuard.timestamp || 0);
+          const cooldownMs = 15 * 60 * 1000;
+          if (timeSinceLast < cooldownMs) {
+            return res.status(400).json({
+              success: false,
+              mode: 'VM_TRADE_LOCKED',
+              error: `حماية خادم VM: تم تنفيذ صفقة بالفعل على هذا العقد [${activeMarketSlug}] ومسجلة في قرص الـ VM لمنع التكرار (متبقي ${Math.ceil((cooldownMs - timeSinceLast) / 60000)} دقيقة فك قفل).`,
+              lockedGuard: currentGuard,
+            });
+          }
+        }
+
         console.log(`[Limitless LIVE ORDER] Sending order via SDK...`, {
           account: wallet.address,
           slug: activeMarketSlug,
@@ -744,10 +849,26 @@ app.post('/api/limitless/order', async (req, res) => {
         const result = await orderClient.createOrder(orderArgs);
 
         console.log(`[EIP-712 LIVE ORDER] Order submitted successfully! ID: ${result?.id || 'OK'}`);
+
+        // Automatically persist execution to VM RAM & disk (trade-guard.json)
+        const orderIdResolved = result?.id || result?.order?.id || `ord_${Date.now()}`;
+        const guardRecord = {
+          marketSlug: activeMarketSlug,
+          candleTime: req.body?.candleTime || Date.now(),
+          timestamp: Date.now(),
+          direction: isLong ? 'LONG' : 'SHORT',
+          outcome: isLong ? 'UP' : 'DOWN',
+          price: tickAlignedPrice,
+          size: contractCount,
+          orderId: orderIdResolved,
+        };
+        persistTradeGuard(guardRecord);
+        broadcastSse('tradeGuardUpdate', guardRecord);
+
         return res.json({
           success: true,
           mode: 'LIVE_EIP712_EXECUTED',
-          orderId: result?.id || result?.order?.id || `ord_${Date.now()}`,
+          orderId: orderIdResolved,
           marketSlug: activeMarketSlug,
           direction: isLong ? 'LONG' : 'SHORT',
           outcome: isLong ? 'UP' : 'DOWN',
@@ -756,6 +877,7 @@ app.post('/api/limitless/order', async (req, res) => {
           size: contractCount,
           chunkId,
           details: result,
+          guard: guardRecord,
         });
   } catch (err) {
     const errorDetail = err?.response?.data?.message || err?.response?.data?.error || err?.message || String(err);

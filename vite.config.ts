@@ -2,6 +2,7 @@ import 'dotenv/config';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import fs from 'fs';
 import {defineConfig} from 'vite';
 
 async function fetchLiveWalletAndBalance() {
@@ -138,6 +139,52 @@ let latestPositionsData: any = null;
 const recentOrderEvents: any[] = [];
 const recentTxEvents: any[] = [];
 const sseClients = new Set<any>();
+
+// ============================================================================
+// VM Persistent Trade Guard (RAM + Disk: trade-guard.json)
+// ============================================================================
+const TRADE_GUARD_FILE = path.join(process.cwd(), 'trade-guard.json');
+let inMemoryTradeGuard: any = null;
+
+function loadTradeGuardFromDisk(): any {
+  try {
+    if (fs.existsSync(TRADE_GUARD_FILE)) {
+      const raw = fs.readFileSync(TRADE_GUARD_FILE, 'utf8');
+      inMemoryTradeGuard = JSON.parse(raw);
+      console.log(`[VM Trade Guard Dev] Loaded persistent lock from disk: ${inMemoryTradeGuard?.marketSlug || 'none'}`);
+      return inMemoryTradeGuard;
+    }
+  } catch (err: any) {
+    console.warn('[VM Trade Guard Dev] Error reading trade-guard.json:', err?.message);
+  }
+  inMemoryTradeGuard = null;
+  return null;
+}
+
+function persistTradeGuard(guard: any) {
+  inMemoryTradeGuard = guard;
+  try {
+    fs.writeFileSync(TRADE_GUARD_FILE, JSON.stringify(guard, null, 2), 'utf8');
+    console.log(`[VM Trade Guard Dev] Persisted trade lock on VM disk: ${guard?.marketSlug}`);
+  } catch (err: any) {
+    console.warn('[VM Trade Guard Dev] Error writing trade-guard.json:', err?.message);
+  }
+}
+
+function clearTradeGuardFromDisk() {
+  inMemoryTradeGuard = null;
+  try {
+    if (fs.existsSync(TRADE_GUARD_FILE)) {
+      fs.unlinkSync(TRADE_GUARD_FILE);
+      console.log('[VM Trade Guard Dev] Cleared trade lock from VM disk.');
+    }
+  } catch (err: any) {
+    console.warn('[VM Trade Guard Dev] Error removing trade-guard.json:', err?.message);
+  }
+}
+
+// Initial boot load
+loadTradeGuardFromDisk();
 
 function broadcastSse(eventType: string, payload: any) {
   const msg = `event: ${eventType}\ndata: ${JSON.stringify(payload)}\n\n`;
@@ -361,6 +408,10 @@ function setupApiMiddlewares(middlewares: any) {
     if (latestPositionsData) {
       res.write(`event: positions\ndata: ${JSON.stringify(latestPositionsData)}\n\n`);
     }
+    const initGuard = inMemoryTradeGuard || loadTradeGuardFromDisk();
+    if (initGuard) {
+      res.write(`event: tradeGuardUpdate\ndata: ${JSON.stringify(initGuard)}\n\n`);
+    }
 
     // Keepalive ping every 10 seconds to prevent proxy drops
     const pingTimer = setInterval(() => {
@@ -376,6 +427,56 @@ function setupApiMiddlewares(middlewares: any) {
       clearInterval(pingTimer);
       sseClients.delete(res);
     });
+  });
+
+  // ============================================================================
+  // VM Persistent Trade Guard REST Endpoints
+  // ============================================================================
+  middlewares.use('/api/trade-guard/clear', (req: any, res: any) => {
+    res.setHeader('Content-Type', 'application/json');
+    if (req.method !== 'POST') {
+      res.statusCode = 405;
+      return res.end(JSON.stringify({ error: 'Method not allowed' }));
+    }
+    clearTradeGuardFromDisk();
+    broadcastSse('tradeGuardUpdate', null);
+    res.end(JSON.stringify({ success: true, message: 'Trade guard cleared from VM disk and RAM' }));
+  });
+
+  middlewares.use('/api/trade-guard', (req: any, res: any) => {
+    res.setHeader('Content-Type', 'application/json');
+    if (req.method === 'GET') {
+      const guard = inMemoryTradeGuard || loadTradeGuardFromDisk();
+      return res.end(JSON.stringify({ success: true, guard }));
+    }
+    if (req.method === 'POST') {
+      let raw = '';
+      req.on('data', (c: any) => { raw += c; });
+      req.on('end', () => {
+        try {
+          const body = raw ? JSON.parse(raw) : {};
+          const guard = {
+            marketSlug: String(body.marketSlug || '').trim(),
+            timestamp: Number(body.timestamp) || Date.now(),
+            candleTime: Number(body.candleTime) || Date.now(),
+            direction: body.direction || 'LONG',
+            outcome: body.outcome || 'UP',
+            price: body.price ? Number(body.price) : undefined,
+            size: body.size ? Number(body.size) : undefined,
+            orderId: body.orderId || undefined,
+          };
+          persistTradeGuard(guard);
+          broadcastSse('tradeGuardUpdate', guard);
+          res.end(JSON.stringify({ success: true, guard }));
+        } catch (err: any) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ success: false, error: err.message }));
+        }
+      });
+      return;
+    }
+    res.statusCode = 405;
+    res.end(JSON.stringify({ error: 'Method not allowed' }));
   });
 
   middlewares.use('/api/limitless/subscribe', async (req: any, res: any) => {
@@ -693,6 +794,23 @@ function setupApiMiddlewares(middlewares: any) {
           delete orderArgs.size;
         }
 
+        // Check VM persistent trade lock to prevent duplicate trades across any client
+        const currentGuard = inMemoryTradeGuard || loadTradeGuardFromDisk();
+        const nowMs = Date.now();
+        if (!body?.ignoreLock && currentGuard && currentGuard.marketSlug === activeMarketSlug) {
+          const timeSinceLast = nowMs - (currentGuard.timestamp || 0);
+          const cooldownMs = 15 * 60 * 1000;
+          if (timeSinceLast < cooldownMs) {
+            res.statusCode = 400;
+            return res.end(JSON.stringify({
+              success: false,
+              mode: 'VM_TRADE_LOCKED',
+              error: `حماية خادم VM: تم تنفيذ صفقة بالفعل على هذا العقد [${activeMarketSlug}] ومسجلة في قرص الـ VM لمنع التكرار (متبقي ${Math.ceil((cooldownMs - timeSinceLast) / 60000)} دقيقة فك قفل).`,
+              lockedGuard: currentGuard,
+            }));
+          }
+        }
+
         console.log(`[Limitless LIVE ORDER] Sending order via SDK...`, {
           account: wallet.address,
           slug: activeMarketSlug,
@@ -704,10 +822,25 @@ function setupApiMiddlewares(middlewares: any) {
 
         const result: any = await orderClient.createOrder(orderArgs);
 
+        // Automatically persist execution to VM RAM & disk (trade-guard.json)
+        const orderIdResolved = result?.id || result?.order?.id || `ord_${Date.now()}`;
+        const guardRecord = {
+          marketSlug: activeMarketSlug,
+          candleTime: body?.candleTime || Date.now(),
+          timestamp: Date.now(),
+          direction: isLong ? 'LONG' : 'SHORT',
+          outcome: isLong ? 'UP' : 'DOWN',
+          price: tickAlignedPrice,
+          size: contractCount,
+          orderId: orderIdResolved,
+        };
+        persistTradeGuard(guardRecord);
+        broadcastSse('tradeGuardUpdate', guardRecord);
+
         return res.end(JSON.stringify({
           success: true,
           mode: 'LIVE_EIP712_EXECUTED',
-          orderId: result?.id || result?.order?.id || `ord_${Date.now()}`,
+          orderId: orderIdResolved,
           marketSlug: activeMarketSlug,
           direction: isLong ? 'LONG' : 'SHORT',
           outcome: isLong ? 'UP' : 'DOWN',
@@ -716,6 +849,7 @@ function setupApiMiddlewares(middlewares: any) {
           size: contractCount,
           chunkId,
           details: result,
+          guard: guardRecord,
         }));
       } catch (err: any) {
         const errorDetail = err?.response?.data?.message || err?.response?.data?.error || err?.message || String(err);

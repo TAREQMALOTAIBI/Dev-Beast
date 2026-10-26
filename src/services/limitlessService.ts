@@ -23,7 +23,9 @@ export class LimitlessService {
   private orderEventListeners: ((event: OrderEvent) => void)[] = [];
   private priceListeners: ((data: { marketSlug: string; prices: [number, number] }) => void)[] = [];
   private marketChangeListeners: ((market: any) => void)[] = [];
+  private tradeGuardListeners: ((guard: any) => void)[] = [];
 
+  private currentTradeGuard: any = null;
   private currentOrderbook: OrderbookUpdate | null = null;
   private currentOracle: OraclePriceData | null = null;
   private currentPositions: PositionItem[] = [];
@@ -169,6 +171,60 @@ export class LimitlessService {
     return () => {
       this.marketChangeListeners = this.marketChangeListeners.filter((l) => l !== listener);
     };
+  }
+
+  public subscribeTradeGuard(listener: (guard: any) => void) {
+    this.tradeGuardListeners.push(listener);
+    if (this.currentTradeGuard !== undefined) {
+      listener(this.currentTradeGuard);
+    }
+    return () => {
+      this.tradeGuardListeners = this.tradeGuardListeners.filter((l) => l !== listener);
+    };
+  }
+
+  public async fetchTradeGuard(): Promise<any> {
+    try {
+      const res = await fetch('/api/trade-guard');
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (data && data.success) {
+        this.currentTradeGuard = data.guard || null;
+        this.tradeGuardListeners.forEach((l) => l(this.currentTradeGuard));
+        return this.currentTradeGuard;
+      }
+    } catch (err: any) {
+      console.warn('[LimitlessService] fetchTradeGuard error:', err?.message);
+    }
+    return null;
+  }
+
+  public async saveTradeGuardOnVm(guard: any): Promise<boolean> {
+    try {
+      this.currentTradeGuard = guard;
+      this.tradeGuardListeners.forEach((l) => l(guard));
+      const res = await fetch('/api/trade-guard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(guard),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  public async clearTradeGuardOnVm(): Promise<boolean> {
+    try {
+      this.currentTradeGuard = null;
+      this.tradeGuardListeners.forEach((l) => l(null));
+      const res = await fetch('/api/trade-guard/clear', {
+        method: 'POST',
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
   }
 
   private setStatus(status: LimitlessStatus) {
@@ -322,6 +378,14 @@ export class LimitlessService {
           try {
             const data = JSON.parse(e.data);
             this.log('SYSTEM', data);
+          } catch {}
+        });
+
+        es.addEventListener('tradeGuardUpdate', (e: MessageEvent) => {
+          try {
+            const data = e.data ? JSON.parse(e.data) : null;
+            this.currentTradeGuard = data;
+            this.tradeGuardListeners.forEach((l) => l(data));
           } catch {}
         });
 

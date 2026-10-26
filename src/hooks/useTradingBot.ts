@@ -181,7 +181,7 @@ export function useTradingBot() {
     lastTradedSlug?: string;
   }>({ isLocked: false });
 
-  // Load persistent trade guard on mount
+  // Load persistent trade guard on mount (Sync from VM server disk & RAM first, with localStorage fallback)
   useEffect(() => {
     try {
       const saved = localStorage.getItem('limitless_last_trade_guard');
@@ -192,6 +192,21 @@ export function useTradingBot() {
         if (parsed.candleTime) lastExecutedCandleTimeRef.current = Number(parsed.candleTime);
       }
     } catch {}
+
+    // Fetch authoritative persistent lock from VM server disk & RAM
+    limitlessService
+      .fetchTradeGuard()
+      .then((serverGuard) => {
+        if (serverGuard && serverGuard.marketSlug) {
+          lastExecutedMarketSlugRef.current = serverGuard.marketSlug;
+          lastExecutedTimestampRef.current = Number(serverGuard.timestamp) || 0;
+          lastExecutedCandleTimeRef.current = Number(serverGuard.candleTime) || 0;
+          try {
+            localStorage.setItem('limitless_last_trade_guard', JSON.stringify(serverGuard));
+          } catch {}
+        }
+      })
+      .catch(() => {});
   }, []);
 
   configRef.current = config;
@@ -479,18 +494,24 @@ export function useTradingBot() {
       lastExecutedCandleTimeRef.current = candleTime || now;
       lastExecutedMarketSlugRef.current = resolvedMarketSlug;
       lastExecutedTimestampRef.current = now;
+
+      const guardPayload = {
+        marketSlug: resolvedMarketSlug,
+        candleTime: candleTime || now,
+        timestamp: now,
+        direction,
+        outcome,
+        price: effectiveContractPrice,
+        size: effectiveContracts,
+        orderId: completedTrade.id,
+      };
+
       try {
-        localStorage.setItem(
-          'limitless_last_trade_guard',
-          JSON.stringify({
-            marketSlug: resolvedMarketSlug,
-            candleTime: candleTime || now,
-            timestamp: now,
-            direction,
-            outcome,
-          })
-        );
+        localStorage.setItem('limitless_last_trade_guard', JSON.stringify(guardPayload));
       } catch {}
+
+      // Authoritative VM disk & RAM persistence
+      limitlessService.saveTradeGuardOnVm(guardPayload).catch(() => {});
 
       // Deduct invested funds
       const invested = completedTrade.totalInvestmentUsd;
@@ -575,8 +596,10 @@ export function useTradingBot() {
     try {
       localStorage.removeItem('limitless_last_trade_guard');
     } catch {}
+    // Clear authoritative lock from VM server disk & RAM
+    limitlessService.clearTradeGuardOnVm().catch(() => {});
     setContractLockInfo({ isLocked: false });
-    const unMsg = '🔓 تم إلغاء قفل العقد وفترة التهدئة بنجاح. الروبوت مستعد لفتح صفقة جديدة فور تحقق الشروط.';
+    const unMsg = '🔓 تم إلغاء قفل العقد من قرص وسيرفر الـ VM وفترة التهدئة بنجاح. الروبوت مستعد لفتح صفقة جديدة فور تحقق الشروط.';
     console.log(unMsg);
     limitlessService.logDirect('SYSTEM', unMsg);
     setExecutionNotice({
@@ -773,6 +796,23 @@ export function useTradingBot() {
     });
     const unsubOracle = limitlessService.subscribeOracle((orc) => setOracle(orc));
     const unsubPositions = limitlessService.subscribePositions((pos) => setPositions(pos));
+    const unsubTradeGuard = limitlessService.subscribeTradeGuard((serverGuard) => {
+      if (serverGuard && serverGuard.marketSlug) {
+        lastExecutedMarketSlugRef.current = serverGuard.marketSlug;
+        lastExecutedTimestampRef.current = Number(serverGuard.timestamp) || 0;
+        lastExecutedCandleTimeRef.current = Number(serverGuard.candleTime) || 0;
+        try {
+          localStorage.setItem('limitless_last_trade_guard', JSON.stringify(serverGuard));
+        } catch {}
+      } else if (serverGuard === null) {
+        lastExecutedMarketSlugRef.current = '';
+        lastExecutedTimestampRef.current = 0;
+        lastExecutedCandleTimeRef.current = 0;
+        try {
+          localStorage.removeItem('limitless_last_trade_guard');
+        } catch {}
+      }
+    });
 
     limitlessService.connect(config.limitlessWsUrl, 'btc-up-or-down-15-min', {
       apiKey: config.limitlessApiKey,
@@ -789,6 +829,7 @@ export function useTradingBot() {
       unsubMarketChange();
       unsubOracle();
       unsubPositions();
+      unsubTradeGuard();
       limitlessService.disconnect();
     };
   }, [

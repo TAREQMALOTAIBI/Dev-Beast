@@ -252,6 +252,9 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
               <div className="min-w-0">
                 <div className="font-bold text-amber-300 flex items-center gap-1.5 flex-wrap">
                   <span>🔒 {isAr ? 'تم تأمين العقد الحالي (حظر التكرار نشط)' : 'Contract Locked (Anti-Duplicate Active)'}</span>
+                  <span className="text-[9px] bg-emerald-950/80 text-emerald-300 border border-emerald-600/50 px-1.5 py-0.5 rounded font-mono font-medium">
+                    {isAr ? 'خادم الـ VM + RAM' : 'VM Server + RAM'}
+                  </span>
                   {contractLockInfo.cooldownRemainingMinutes ? (
                     <span className="text-[10px] bg-amber-900/70 text-amber-200 px-1.5 py-0.5 rounded font-mono font-bold">
                       {isAr ? `متبقي ${contractLockInfo.cooldownRemainingMinutes} دقيقة` : `${contractLockInfo.cooldownRemainingMinutes}m left`}
