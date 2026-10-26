@@ -181,15 +181,21 @@ export function useTradingBot() {
     lastTradedSlug?: string;
   }>({ isLocked: false });
 
-  // Load persistent trade guard on mount (Sync from VM server disk & RAM first, with localStorage fallback)
+  // Load persistent trade guard on mount (Sync from VM server disk & RAM with 15-minute auto-expiry)
   useEffect(() => {
     try {
       const saved = localStorage.getItem('limitless_last_trade_guard');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed.marketSlug) lastExecutedMarketSlugRef.current = parsed.marketSlug;
-        if (parsed.timestamp) lastExecutedTimestampRef.current = Number(parsed.timestamp);
-        if (parsed.candleTime) lastExecutedCandleTimeRef.current = Number(parsed.candleTime);
+        const age = Date.now() - (Number(parsed?.timestamp) || 0);
+        if (age < 15 * 60 * 1000) {
+          if (parsed.marketSlug) lastExecutedMarketSlugRef.current = parsed.marketSlug;
+          if (parsed.timestamp) lastExecutedTimestampRef.current = Number(parsed.timestamp);
+          if (parsed.candleTime) lastExecutedCandleTimeRef.current = Number(parsed.candleTime);
+        } else {
+          // Stale local guard (> 15 minutes), clean it up!
+          localStorage.removeItem('limitless_last_trade_guard');
+        }
       }
     } catch {}
 
@@ -198,12 +204,18 @@ export function useTradingBot() {
       .fetchTradeGuard()
       .then((serverGuard) => {
         if (serverGuard && serverGuard.marketSlug) {
-          lastExecutedMarketSlugRef.current = serverGuard.marketSlug;
-          lastExecutedTimestampRef.current = Number(serverGuard.timestamp) || 0;
-          lastExecutedCandleTimeRef.current = Number(serverGuard.candleTime) || 0;
-          try {
-            localStorage.setItem('limitless_last_trade_guard', JSON.stringify(serverGuard));
-          } catch {}
+          const age = Date.now() - (Number(serverGuard.timestamp) || 0);
+          if (age < 15 * 60 * 1000) {
+            lastExecutedMarketSlugRef.current = serverGuard.marketSlug;
+            lastExecutedTimestampRef.current = Number(serverGuard.timestamp) || 0;
+            lastExecutedCandleTimeRef.current = Number(serverGuard.candleTime) || 0;
+            try {
+              localStorage.setItem('limitless_last_trade_guard', JSON.stringify(serverGuard));
+            } catch {}
+          } else {
+            // Previous contract already expired on VM, clear it!
+            limitlessService.clearTradeGuardOnVm().catch(() => {});
+          }
         }
       })
       .catch(() => {});
@@ -581,11 +593,11 @@ export function useTradingBot() {
     }
   }, [liveUsdcBalance]);
 
-  // Anti-Duplicate & Cooldown Guard Checker
+  // Anti-Duplicate Guard: Strictly 1 trade per 15-minute contract cycle (Auto-Expiring)
   const checkTradeLock = useCallback((targetSlug: string, cTime?: number): { locked: boolean; reason?: string } => {
     const cfg = configRef.current;
     const now = Date.now();
-    const cooldownMs = (cfg.cooldownMinutes ?? 15) * 60 * 1000;
+    const cycleDurationMs = (cfg.cooldownMinutes ?? 15) * 60 * 1000;
 
     let persistedGuard: any = null;
     try {
@@ -593,40 +605,33 @@ export function useTradingBot() {
       if (raw) persistedGuard = JSON.parse(raw);
     } catch {}
 
-    const lastSlug = lastExecutedMarketSlugRef.current || persistedGuard?.marketSlug;
     const lastTime = Math.max(lastExecutedTimestampRef.current || 0, persistedGuard?.timestamp || 0);
-    const lastCandle = Math.max(lastExecutedCandleTimeRef.current || 0, persistedGuard?.candleTime || 0);
 
-    // Rule 1: Absolute Minimum Cooldown Period (14-15 minutes) - REGARDLESS OF SLUG!
-    if (lastTime > 0 && (now - lastTime) < cooldownMs) {
-      const remainingMins = Math.ceil((cooldownMs - (now - lastTime)) / 60000);
-      return {
-        locked: true,
-        reason: `⏳ فترة التهدئة نشطة: تم تنفيذ صفقة سابقة منذ ${Math.round((now - lastTime) / 60000)} دقيقة. متبقي ${remainingMins} دقيقة قبل السماح بأي صفقة جديدة لحماية المحفظة.`,
-      };
+    // If no previous trade recorded, completely open
+    if (!lastTime || lastTime <= 0) {
+      return { locked: false };
     }
 
-    // Rule 2: Single Trade per 15-minute Contract (Anti-duplicate by slug or family)
-    if (cfg.singleTradePerContract !== false && targetSlug && lastSlug) {
-      const isSameOrFamily = targetSlug === lastSlug ||
-        (targetSlug.includes('15-min') && lastSlug.includes('15-min'));
-      if (isSameOrFamily) {
-        return {
-          locked: true,
-          reason: `🔒 تم تنفيذ صفقة بالفعل على هذا العقد (${lastSlug}). بانتظار انتهاء الـ 15 دقيقة وبدء العقد القادم لمنع التكرار وحماية المحفظة.`,
-        };
-      }
+    const elapsedMs = now - lastTime;
+
+    // RULE 1: AUTO-EXPIRATION: If 15 minutes have passed since the trade, the lock is AUTOMATICALLY CLEARED!
+    if (elapsedMs >= cycleDurationMs) {
+      lastExecutedMarketSlugRef.current = '';
+      lastExecutedTimestampRef.current = 0;
+      lastExecutedCandleTimeRef.current = 0;
+      try {
+        localStorage.removeItem('limitless_last_trade_guard');
+      } catch {}
+      return { locked: false };
     }
 
-    // Rule 3: Single trade per candle timestamp
-    if (cTime && lastCandle > 0 && cTime === lastCandle) {
-      return {
-        locked: true,
-        reason: `🔒 تم تنفيذ صفقة في نفس شمعة الـ 15 دقيقة الحالية بالفعل.`,
-      };
-    }
-
-    return { locked: false };
+    // RULE 2: WITHIN the 15-minute contract window:
+    // Exactly 1 trade allowed for this 15-minute contract cycle.
+    const remainingMins = Math.max(1, Math.ceil((cycleDurationMs - elapsedMs) / 60000));
+    return {
+      locked: true,
+      reason: `🔒 تم تنفيذ صفقة هذا العقد (متبقي ${remainingMins} دقيقة حتى انتهاء الـ 15 دقيقة والانتقال التلقائي للعقد القادم).`,
+    };
   }, []);
 
   const clearTradeLock = useCallback(() => {
@@ -639,7 +644,7 @@ export function useTradingBot() {
     // Clear authoritative lock from VM server disk & RAM
     limitlessService.clearTradeGuardOnVm().catch(() => {});
     setContractLockInfo({ isLocked: false });
-    const unMsg = '🔓 تم إلغاء قفل العقد من قرص وسيرفر الـ VM وفترة التهدئة بنجاح. الروبوت مستعد لفتح صفقة جديدة فور تحقق الشروط.';
+    const unMsg = '🔓 تم إلغاء قفل العقد يدوياً. الروبوت مستعد لفتح صفقة جديدة.';
     console.log(unMsg);
     limitlessService.logDirect('SYSTEM', unMsg);
     setExecutionNotice({
@@ -649,7 +654,7 @@ export function useTradingBot() {
     });
   }, []);
 
-  // Synchronize lock info periodically
+  // Synchronize lock info periodically with automatic unlocking
   useEffect(() => {
     const updateLockState = () => {
       const slug = activeLimitlessMarketRef.current?.slug || configRef.current.limitlessMarketSlug || 'btc-up-or-down-15-min';
@@ -657,14 +662,14 @@ export function useTradingBot() {
       let cooldownRemainingMinutes = 0;
       if (check.locked) {
         const now = Date.now();
-        const cooldownMs = (configRef.current.cooldownMinutes ?? 15) * 60 * 1000;
+        const cycleDurationMs = (configRef.current.cooldownMinutes ?? 15) * 60 * 1000;
         let lastTime = lastExecutedTimestampRef.current || 0;
         try {
           const raw = localStorage.getItem('limitless_last_trade_guard');
           if (raw) lastTime = Math.max(lastTime, JSON.parse(raw).timestamp || 0);
         } catch {}
-        if (lastTime > 0 && (now - lastTime) < cooldownMs) {
-          cooldownRemainingMinutes = Math.ceil((cooldownMs - (now - lastTime)) / 60000);
+        if (lastTime > 0 && (now - lastTime) < cycleDurationMs) {
+          cooldownRemainingMinutes = Math.ceil((cycleDurationMs - (now - lastTime)) / 60000);
         }
       }
       setContractLockInfo({
@@ -676,7 +681,7 @@ export function useTradingBot() {
     };
 
     updateLockState();
-    const lockTimer = setInterval(updateLockState, 4000);
+    const lockTimer = setInterval(updateLockState, 2000);
     return () => clearInterval(lockTimer);
   }, [checkTradeLock]);
 

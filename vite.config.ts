@@ -151,8 +151,14 @@ function loadTradeGuardFromDisk(): any {
   try {
     if (fs.existsSync(TRADE_GUARD_FILE)) {
       const raw = fs.readFileSync(TRADE_GUARD_FILE, 'utf8');
-      inMemoryTradeGuard = JSON.parse(raw);
-      console.log(`[VM Trade Guard Dev] Loaded persistent lock from disk: ${inMemoryTradeGuard?.marketSlug || 'none'}`);
+      const parsed = JSON.parse(raw);
+      const ageMs = Date.now() - (Number(parsed?.timestamp) || 0);
+      if (ageMs >= 15 * 60 * 1000) {
+        console.log(`[VM Trade Guard Dev] Previous contract lock expired (${Math.round(ageMs / 60000)}m ago). Auto-clearing.`);
+        clearTradeGuardFromDisk();
+        return null;
+      }
+      inMemoryTradeGuard = parsed;
       return inMemoryTradeGuard;
     }
   } catch (err: any) {
@@ -646,30 +652,27 @@ function setupApiMiddlewares(middlewares: any) {
         }));
       }
 
-      // 2. STRICT ANTI-DUPLICATE SHIELD: Check VM persistent trade lock across ALL 15m contracts
+      // 2. ANTI-DUPLICATE SHIELD: Exactly 1 trade per 15-minute contract cycle (Auto-expiring)
       const currentGuard = inMemoryTradeGuard || loadTradeGuardFromDisk();
       const nowMs = Date.now();
-      const COOLDOWN_MS = 14 * 60 * 1000; // 14-minute absolute cooldown
-      const requestedSlug = (body?.market || '').trim();
+      const CONTRACT_CYCLE_MS = 15 * 60 * 1000; // 15-minute contract lifespan
 
       if (!body?.ignoreLock && currentGuard && currentGuard.timestamp > 0) {
         const timeSinceLast = nowMs - Number(currentGuard.timestamp);
-        const isSameSlug = currentGuard.marketSlug && requestedSlug && (
-          currentGuard.marketSlug === requestedSlug ||
-          currentGuard.marketSlug.includes(requestedSlug) ||
-          requestedSlug.includes(currentGuard.marketSlug)
-        );
 
-        // Condition 1: Within 14-minute cooldown window (ABSOLUTE BLOCK)
-        // Condition 2: Or exactly the same contract slug
-        if (timeSinceLast < COOLDOWN_MS || isSameSlug) {
-          const remainingMins = Math.max(1, Math.ceil((COOLDOWN_MS - timeSinceLast) / 60000));
-          console.warn(`[VM STRICT SHIELD BLOCKED] Blocked duplicate order attempt! Last trade was ${Math.round(timeSinceLast / 1000)}s ago (${currentGuard.marketSlug}). Locked for ${remainingMins} more minutes.`);
+        // If 15 minutes have elapsed, the previous contract is over and settled! Automatically clear lock!
+        if (timeSinceLast >= CONTRACT_CYCLE_MS) {
+          console.log(`[VM Guard Auto-Unlock] 15-minute contract window elapsed (${Math.round(timeSinceLast / 60000)}m). Auto-clearing lock for new contract.`);
+          clearTradeGuardFromDisk();
+        } else {
+          // Within the 15-minute window: enforce single trade per contract
+          const remainingMins = Math.max(1, Math.ceil((CONTRACT_CYCLE_MS - timeSinceLast) / 60000));
+          console.warn(`[VM Trade Shield] Contract trade limit reached (1 trade per 15m contract). Remaining: ${remainingMins}m until next contract.`);
           res.statusCode = 429;
           return res.end(JSON.stringify({
             success: false,
             mode: 'VM_TRADE_LOCKED',
-            error: `حظر التكرار الصارم على السيرفر: تم تنفيذ صفقة سابقة منذ ${Math.round(timeSinceLast / 60000)} دقيقة على عقد [${currentGuard.marketSlug}]. غير مسموح بفتح صفقة جديدة إلا بعد انتهاء 15 دقيقة كاملة (متبقي ${remainingMins} دقيقة).`,
+            error: `تم تنفيذ صفقة هذا العقد بنجاح. يفتح الروبوت صفقة واحدة فقط لكل عقد 15 دقيقة وسينتقل تلقائياً للعقد القادم بعد ${remainingMins} دقيقة.`,
             cooldownRemainingMinutes: remainingMins,
             lockedGuard: currentGuard,
           }));

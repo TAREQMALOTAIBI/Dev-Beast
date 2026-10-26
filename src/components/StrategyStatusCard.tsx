@@ -244,35 +244,34 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
           )}
         </button>
 
-        {/* Anti-Duplicate Contract Lock Status */}
+        {/* Anti-Duplicate Contract Lock Status (Auto-transitions every 15 minutes) */}
         {contractLockInfo?.isLocked ? (
-          <div className="mt-2.5 p-2.5 rounded-lg bg-amber-950/40 border border-amber-600/50 flex items-center justify-between gap-2 text-xs text-amber-200">
+          <div className="mt-2.5 p-2.5 rounded-lg bg-sky-950/40 border border-sky-600/40 flex items-center justify-between gap-2 text-xs text-sky-200">
             <div className="flex items-center gap-2 min-w-0">
-              <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0"></span>
+              <span className="w-2 h-2 rounded-full bg-sky-400 shrink-0 animate-pulse"></span>
               <div className="min-w-0">
-                <div className="font-bold text-amber-300 flex items-center gap-1.5 flex-wrap">
-                  <span>🔒 {isAr ? 'تم تأمين العقد الحالي (حظر التكرار نشط)' : 'Contract Locked (Anti-Duplicate Active)'}</span>
-                  <span className="text-[9px] bg-emerald-950/80 text-emerald-300 border border-emerald-600/50 px-1.5 py-0.5 rounded font-mono font-medium">
-                    {isAr ? 'خادم الـ VM + RAM' : 'VM Server + RAM'}
-                  </span>
+                <div className="font-bold text-sky-300 flex items-center gap-1.5 flex-wrap">
+                  <span>🔒 {isAr ? 'تم تنفيذ صفقة هذا العقد (حماية وتأمين تلقائي)' : 'Contract Completed (Auto Protected)'}</span>
                   {contractLockInfo.cooldownRemainingMinutes ? (
-                    <span className="text-[10px] bg-amber-900/70 text-amber-200 px-1.5 py-0.5 rounded font-mono font-bold">
-                      {isAr ? `متبقي ${contractLockInfo.cooldownRemainingMinutes} دقيقة` : `${contractLockInfo.cooldownRemainingMinutes}m left`}
+                    <span className="text-[10px] bg-sky-900/80 text-sky-200 border border-sky-700/60 px-1.5 py-0.5 rounded font-mono font-bold">
+                      {isAr ? `تجديد وانتقال تلقائي بعد ${contractLockInfo.cooldownRemainingMinutes} دقيقة` : `Auto-resets in ${contractLockInfo.cooldownRemainingMinutes}m`}
                     </span>
                   ) : null}
                 </div>
-                <div className="text-[10px] text-amber-200/80 mt-0.5 truncate">
-                  {contractLockInfo.reason || (isAr ? 'تم فتح صفقة بالفعل على هذا العقد' : 'Trade already executed')}
+                <div className="text-[10px] text-slate-300 mt-0.5 truncate">
+                  {isAr
+                    ? 'يفتح الروبوت صفقة واحدة فقط لكل عقد 15 دقيقة، وسينتقل تلقائياً للعقد القادم دون أي حاجة لضغط أي زر.'
+                    : 'Bot opens 1 trade max per 15m contract, then auto-transitions to next contract with zero clicks.'}
                 </div>
               </div>
             </div>
             {onClearTradeLock && (
               <button
                 onClick={onClearTradeLock}
-                className="shrink-0 text-[10px] font-bold px-2 py-1 bg-amber-600/30 hover:bg-amber-600/60 text-amber-100 rounded border border-amber-500/40 cursor-pointer transition-colors"
-                title={isAr ? 'إلغاء قفل العقد يدوياً للسماح بصفقة فورية' : 'Manually unlock contract'}
+                className="shrink-0 text-[10px] font-medium px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700 cursor-pointer transition-colors"
+                title={isAr ? 'تجاوز مؤقت وفتح صفقة جديدة الآن' : 'Manually override and trade immediately'}
               >
-                {isAr ? 'إلغاء القفل' : 'Unlock'}
+                {isAr ? 'تجاوز يدوي' : 'Override'}
               </button>
             )}
           </div>
