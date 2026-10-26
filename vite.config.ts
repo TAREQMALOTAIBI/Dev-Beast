@@ -145,6 +145,7 @@ const sseClients = new Set<any>();
 // ============================================================================
 const TRADE_GUARD_FILE = path.join(process.cwd(), 'trade-guard.json');
 let inMemoryTradeGuard: any = null;
+let isServerExecutingOrder = false;
 
 function loadTradeGuardFromDisk(): any {
   try {
@@ -632,8 +633,52 @@ function setupApiMiddlewares(middlewares: any) {
     let rawBody = '';
     req.on('data', (chunk: any) => { rawBody += chunk; });
     req.on('end', async () => {
+      const body = rawBody ? JSON.parse(rawBody) : {};
+
+      // 1. Concurrency In-Flight Mutex (Immediate 0.1ms rejection of parallel calls)
+      if (isServerExecutingOrder) {
+        console.warn('[VM SHIELD BLOCKED] Concurrent order already in-flight.');
+        res.statusCode = 429;
+        return res.end(JSON.stringify({
+          success: false,
+          mode: 'IN_FLIGHT_LOCKED',
+          error: 'يوجد أمر شراء قيد التنفيذ والتوقيع حالياً على السيرفر. تم حظر الأمر المزدوج.',
+        }));
+      }
+
+      // 2. STRICT ANTI-DUPLICATE SHIELD: Check VM persistent trade lock across ALL 15m contracts
+      const currentGuard = inMemoryTradeGuard || loadTradeGuardFromDisk();
+      const nowMs = Date.now();
+      const COOLDOWN_MS = 14 * 60 * 1000; // 14-minute absolute cooldown
+      const requestedSlug = (body?.market || '').trim();
+
+      if (!body?.ignoreLock && currentGuard && currentGuard.timestamp > 0) {
+        const timeSinceLast = nowMs - Number(currentGuard.timestamp);
+        const isSameSlug = currentGuard.marketSlug && requestedSlug && (
+          currentGuard.marketSlug === requestedSlug ||
+          currentGuard.marketSlug.includes(requestedSlug) ||
+          requestedSlug.includes(currentGuard.marketSlug)
+        );
+
+        // Condition 1: Within 14-minute cooldown window (ABSOLUTE BLOCK)
+        // Condition 2: Or exactly the same contract slug
+        if (timeSinceLast < COOLDOWN_MS || isSameSlug) {
+          const remainingMins = Math.max(1, Math.ceil((COOLDOWN_MS - timeSinceLast) / 60000));
+          console.warn(`[VM STRICT SHIELD BLOCKED] Blocked duplicate order attempt! Last trade was ${Math.round(timeSinceLast / 1000)}s ago (${currentGuard.marketSlug}). Locked for ${remainingMins} more minutes.`);
+          res.statusCode = 429;
+          return res.end(JSON.stringify({
+            success: false,
+            mode: 'VM_TRADE_LOCKED',
+            error: `حظر التكرار الصارم على السيرفر: تم تنفيذ صفقة سابقة منذ ${Math.round(timeSinceLast / 60000)} دقيقة على عقد [${currentGuard.marketSlug}]. غير مسموح بفتح صفقة جديدة إلا بعد انتهاء 15 دقيقة كاملة (متبقي ${remainingMins} دقيقة).`,
+            cooldownRemainingMinutes: remainingMins,
+            lockedGuard: currentGuard,
+          }));
+        }
+      }
+
+      isServerExecutingOrder = true;
+
       try {
-        const body = rawBody ? JSON.parse(rawBody) : {};
         const { market, direction, outcome, type, price, size, chunkId, privateKey, tokenId: bodyTokenId, secret: bodySecret } = body;
         const pk = (privateKey || process.env.PRIVATE_KEY || '').trim();
         const tokenId = (bodyTokenId || process.env.LMTS_TOKEN_ID || '').trim();
@@ -794,23 +839,6 @@ function setupApiMiddlewares(middlewares: any) {
           delete orderArgs.size;
         }
 
-        // Check VM persistent trade lock to prevent duplicate trades across any client
-        const currentGuard = inMemoryTradeGuard || loadTradeGuardFromDisk();
-        const nowMs = Date.now();
-        if (!body?.ignoreLock && currentGuard && currentGuard.marketSlug === activeMarketSlug) {
-          const timeSinceLast = nowMs - (currentGuard.timestamp || 0);
-          const cooldownMs = 15 * 60 * 1000;
-          if (timeSinceLast < cooldownMs) {
-            res.statusCode = 400;
-            return res.end(JSON.stringify({
-              success: false,
-              mode: 'VM_TRADE_LOCKED',
-              error: `حماية خادم VM: تم تنفيذ صفقة بالفعل على هذا العقد [${activeMarketSlug}] ومسجلة في قرص الـ VM لمنع التكرار (متبقي ${Math.ceil((cooldownMs - timeSinceLast) / 60000)} دقيقة فك قفل).`,
-              lockedGuard: currentGuard,
-            }));
-          }
-        }
-
         console.log(`[Limitless LIVE ORDER] Sending order via SDK...`, {
           account: wallet.address,
           slug: activeMarketSlug,
@@ -856,6 +884,8 @@ function setupApiMiddlewares(middlewares: any) {
         console.warn('[EIP-712 ORDER NOTICE]', errorDetail);
         res.statusCode = 500;
         res.end(JSON.stringify({ success: false, error: errorDetail }));
+      } finally {
+        isServerExecutingOrder = false;
       }
     });
   });

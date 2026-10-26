@@ -45,6 +45,7 @@ let subscribedSlugs = new Set();
 // ============================================================================
 const TRADE_GUARD_FILE = path.join(process.cwd(), 'trade-guard.json');
 let inMemoryTradeGuard = null;
+let isServerExecutingOrder = false;
 
 function loadTradeGuardFromDisk() {
   try {
@@ -657,6 +658,47 @@ app.get('/api/limitless/orderbook', async (req, res) => {
 
 // Dedicated EIP-712 Order Execution Endpoint according to Limitless specification
 app.post('/api/limitless/order', async (req, res) => {
+  // 1. Concurrency In-Flight Mutex (Immediate 0.1ms rejection of parallel calls)
+  if (isServerExecutingOrder) {
+    console.warn('[VM SHIELD BLOCKED] Concurrent order already in-flight.');
+    return res.status(429).json({
+      success: false,
+      mode: 'IN_FLIGHT_LOCKED',
+      error: 'يوجد أمر شراء قيد التنفيذ والتوقيع حالياً على السيرفر. تم حظر الأمر المزدوج.',
+    });
+  }
+
+  // 2. STRICT ANTI-DUPLICATE SHIELD: Check VM persistent trade lock across ALL 15m contracts
+  const currentGuard = inMemoryTradeGuard || loadTradeGuardFromDisk();
+  const nowMs = Date.now();
+  const COOLDOWN_MS = 14 * 60 * 1000; // 14-minute absolute cooldown
+  const requestedSlug = (req.body?.market || '').trim();
+
+  if (!req.body?.ignoreLock && currentGuard && currentGuard.timestamp > 0) {
+    const timeSinceLast = nowMs - Number(currentGuard.timestamp);
+    const isSameSlug = currentGuard.marketSlug && requestedSlug && (
+      currentGuard.marketSlug === requestedSlug ||
+      currentGuard.marketSlug.includes(requestedSlug) ||
+      requestedSlug.includes(currentGuard.marketSlug)
+    );
+
+    // Condition 1: Within 14-minute cooldown window (ABSOLUTE BLOCK)
+    // Condition 2: Or exactly the same contract slug
+    if (timeSinceLast < COOLDOWN_MS || isSameSlug) {
+      const remainingMins = Math.max(1, Math.ceil((COOLDOWN_MS - timeSinceLast) / 60000));
+      console.warn(`[VM STRICT SHIELD BLOCKED] Blocked duplicate order attempt! Last trade was ${Math.round(timeSinceLast / 1000)}s ago (${currentGuard.marketSlug}). Locked for ${remainingMins} more minutes.`);
+      return res.status(429).json({
+        success: false,
+        mode: 'VM_TRADE_LOCKED',
+        error: `حظر التكرار الصارم على السيرفر: تم تنفيذ صفقة سابقة منذ ${Math.round(timeSinceLast / 60000)} دقيقة على عقد [${currentGuard.marketSlug}]. غير مسموح بفتح صفقة جديدة إلا بعد انتهاء 15 دقيقة كاملة (متبقي ${remainingMins} دقيقة).`,
+        cooldownRemainingMinutes: remainingMins,
+        lockedGuard: currentGuard,
+      });
+    }
+  }
+
+  isServerExecutingOrder = true;
+
   try {
     const { market, direction, outcome, type, price, size, chunkId, privateKey, tokenId: bodyTokenId, secret: bodySecret } = req.body || {};
     const pk = (privateKey || process.env.PRIVATE_KEY || '').trim();
@@ -741,148 +783,134 @@ app.post('/api/limitless/order', async (req, res) => {
       });
     }
 
-        // Require live credentials for on-chain execution - do not silently fake execution!
-        if (!hasLiveAuth) {
-          return res.status(400).json({
-            success: false,
-            mode: 'MISSING_CREDENTIALS',
-            error: 'تعذر تنفيذ الصفقة: المفتاح الخاص PRIVATE_KEY أو توثيق HMAC (LMTS_TOKEN_ID و LMTS_TOKEN_SECRET) غير موجود في ملف .env في الخادم! يرجى إدخال هذه المفاتيح في ملف .env في الخادم ليتم توقيع وإرسال الصفقات الحية مباشرة إلى Limitless.',
-            missing: {
-              privateKey: !pk,
-              tokenId: !tokenId,
-              secret: !secret,
-            },
+    // Require live credentials for on-chain execution - do not silently fake execution!
+    if (!hasLiveAuth) {
+      return res.status(400).json({
+        success: false,
+        mode: 'MISSING_CREDENTIALS',
+        error: 'تعذر تنفيذ الصفقة: المفتاح الخاص PRIVATE_KEY أو توثيق HMAC (LMTS_TOKEN_ID و LMTS_TOKEN_SECRET) غير موجود في ملف .env في الخادم! يرجى إدخال هذه المفاتيح في ملف .env في الخادم ليتم توقيع وإرسال الصفقات الحية مباشرة إلى Limitless.',
+        missing: {
+          privateKey: !pk,
+          tokenId: !tokenId,
+          secret: !secret,
+        },
+      });
+    }
+
+    // Extract market ask price for this outcome so FAK orders fill immediately
+    const marketAsk = isLong
+      ? (marketData?.tradePrices?.buy?.market?.[0] ?? marketData?.prices?.[0] ?? 0.50)
+      : (marketData?.tradePrices?.buy?.market?.[1] ?? marketData?.prices?.[1] ?? 0.50);
+
+    let inputPrice = Number(price) > 1 ? Number(price) / 100 : (Number(price) || marketAsk);
+    // Add 1.5% slippage buffer for FAK to guarantee execution against book movements
+    if (type === 'FAK' && inputPrice <= marketAsk) {
+      inputPrice = Math.min(0.999, marketAsk * 1.015);
+    }
+    // Price must have max 3 decimal places for Limitless SDK tick alignment (0.001)
+    const tickAlignedPrice = Math.max(0.001, Math.min(0.999, parseFloat(Number(inputPrice).toFixed(3))));
+    const contractCount = Math.max(1, Math.round(Number(size) || 1));
+
+    const { ethers } = await import('ethers');
+    const sdk = await import('@limitless-exchange/sdk');
+
+    const formattedPk = pk.startsWith('0x') ? pk : `0x${pk}`;
+    const wallet = new ethers.Wallet(formattedPk);
+
+    const httpClient = new sdk.HttpClient({
+      baseURL: sdk.DEFAULT_API_URL,
+      hmacCredentials: {
+        tokenId,
+        secret,
+      },
+    });
+
+    // Ensure account is in EOA trading mode as required by Limitless EIP-712 specification
+    try {
+      const axiosClient = httpClient.http?.client;
+      if (axiosClient && typeof axiosClient.put === 'function') {
+        await axiosClient.put('/profiles', { tradeWalletOption: 'eoa' });
+      }
+    } catch {
+      // Safe continuation if already in eoa mode
+    }
+
+    // Initialize official OrderClient with wallet and HMAC HttpClient
+    const orderClient = new sdk.OrderClient({
+      httpClient,
+      wallet,
+      logger: new sdk.ConsoleLogger(),
+    });
+
+    const orderTypeEnum = type === 'GTC'
+      ? sdk.OrderType.GTC
+      : type === 'FOK'
+      ? sdk.OrderType.FOK
+      : sdk.OrderType.FAK;
+
+    const orderArgs = {
+      marketSlug: activeMarketSlug,
+      tokenId: String(targetTokenId),
+      side: sdk.Side.BUY,
+      orderType: orderTypeEnum,
+      price: tickAlignedPrice,
+      size: contractCount,
+    };
+
+    if (orderTypeEnum === sdk.OrderType.FOK) {
+      orderArgs.makerAmount = Math.max(0.1, Number((contractCount * tickAlignedPrice).toFixed(2)));
+      delete orderArgs.price;
+      delete orderArgs.size;
+    }
+
+    console.log(`[Limitless LIVE ORDER] Sending order via SDK...`, {
+            account: wallet.address,
+            slug: activeMarketSlug,
+            outcome: isLong ? 'UP' : 'DOWN',
+            type: orderTypeEnum,
+            price: tickAlignedPrice,
+            contracts: contractCount,
           });
-        }
 
-        // Extract market ask price for this outcome so FAK orders fill immediately
-        const marketAsk = isLong
-          ? (marketData?.tradePrices?.buy?.market?.[0] ?? marketData?.prices?.[0] ?? 0.50)
-          : (marketData?.tradePrices?.buy?.market?.[1] ?? marketData?.prices?.[1] ?? 0.50);
+          const result = await orderClient.createOrder(orderArgs);
 
-        let inputPrice = Number(price) > 1 ? Number(price) / 100 : (Number(price) || marketAsk);
-        // Add 1.5% slippage buffer for FAK to guarantee execution against book movements
-        if (type === 'FAK' && inputPrice <= marketAsk) {
-          inputPrice = Math.min(0.999, marketAsk * 1.015);
-        }
-        // Price must have max 3 decimal places for Limitless SDK tick alignment (0.001)
-        const tickAlignedPrice = Math.max(0.001, Math.min(0.999, parseFloat(Number(inputPrice).toFixed(3))));
-        const contractCount = Math.max(1, Math.round(Number(size) || 1));
+          console.log(`[EIP-712 LIVE ORDER] Order submitted successfully! ID: ${result?.id || 'OK'}`);
 
-        const { ethers } = await import('ethers');
-        const sdk = await import('@limitless-exchange/sdk');
+          // Automatically persist execution to VM RAM & disk (trade-guard.json)
+          const orderIdResolved = result?.id || result?.order?.id || `ord_${Date.now()}`;
+          const guardRecord = {
+            marketSlug: activeMarketSlug,
+            candleTime: req.body?.candleTime || Date.now(),
+            timestamp: Date.now(),
+            direction: isLong ? 'LONG' : 'SHORT',
+            outcome: isLong ? 'UP' : 'DOWN',
+            price: tickAlignedPrice,
+            size: contractCount,
+            orderId: orderIdResolved,
+          };
+          persistTradeGuard(guardRecord);
+          broadcastSse('tradeGuardUpdate', guardRecord);
 
-        const formattedPk = pk.startsWith('0x') ? pk : `0x${pk}`;
-        const wallet = new ethers.Wallet(formattedPk);
-
-        const httpClient = new sdk.HttpClient({
-          baseURL: sdk.DEFAULT_API_URL,
-          hmacCredentials: {
-            tokenId,
-            secret,
-          },
-        });
-
-        // Ensure account is in EOA trading mode as required by Limitless EIP-712 specification
-        try {
-          const axiosClient = httpClient.http?.client;
-          if (axiosClient && typeof axiosClient.put === 'function') {
-            await axiosClient.put('/profiles', { tradeWalletOption: 'eoa' });
-          }
-        } catch {
-          // Safe continuation if already in eoa mode
-        }
-
-        // Initialize official OrderClient with wallet and HMAC HttpClient
-        const orderClient = new sdk.OrderClient({
-          httpClient,
-          wallet,
-          logger: new sdk.ConsoleLogger(),
-        });
-
-        const orderTypeEnum = type === 'GTC'
-          ? sdk.OrderType.GTC
-          : type === 'FOK'
-          ? sdk.OrderType.FOK
-          : sdk.OrderType.FAK;
-
-        const orderArgs = {
-          marketSlug: activeMarketSlug,
-          tokenId: String(targetTokenId),
-          side: sdk.Side.BUY,
-          orderType: orderTypeEnum,
-          price: tickAlignedPrice,
-          size: contractCount,
-        };
-
-        if (orderTypeEnum === sdk.OrderType.FOK) {
-          orderArgs.makerAmount = Math.max(0.1, Number((contractCount * tickAlignedPrice).toFixed(2)));
-          delete orderArgs.price;
-          delete orderArgs.size;
-        }
-
-        // Check VM persistent trade lock to prevent duplicate trades across any client
-        const currentGuard = inMemoryTradeGuard || loadTradeGuardFromDisk();
-        const nowMs = Date.now();
-        if (!req.body?.ignoreLock && currentGuard && currentGuard.marketSlug === activeMarketSlug) {
-          const timeSinceLast = nowMs - (currentGuard.timestamp || 0);
-          const cooldownMs = 15 * 60 * 1000;
-          if (timeSinceLast < cooldownMs) {
-            return res.status(400).json({
-              success: false,
-              mode: 'VM_TRADE_LOCKED',
-              error: `حماية خادم VM: تم تنفيذ صفقة بالفعل على هذا العقد [${activeMarketSlug}] ومسجلة في قرص الـ VM لمنع التكرار (متبقي ${Math.ceil((cooldownMs - timeSinceLast) / 60000)} دقيقة فك قفل).`,
-              lockedGuard: currentGuard,
-            });
-          }
-        }
-
-        console.log(`[Limitless LIVE ORDER] Sending order via SDK...`, {
-          account: wallet.address,
-          slug: activeMarketSlug,
-          outcome: isLong ? 'UP' : 'DOWN',
-          type: orderTypeEnum,
-          price: tickAlignedPrice,
-          contracts: contractCount,
-        });
-
-        const result = await orderClient.createOrder(orderArgs);
-
-        console.log(`[EIP-712 LIVE ORDER] Order submitted successfully! ID: ${result?.id || 'OK'}`);
-
-        // Automatically persist execution to VM RAM & disk (trade-guard.json)
-        const orderIdResolved = result?.id || result?.order?.id || `ord_${Date.now()}`;
-        const guardRecord = {
-          marketSlug: activeMarketSlug,
-          candleTime: req.body?.candleTime || Date.now(),
-          timestamp: Date.now(),
-          direction: isLong ? 'LONG' : 'SHORT',
-          outcome: isLong ? 'UP' : 'DOWN',
-          price: tickAlignedPrice,
-          size: contractCount,
-          orderId: orderIdResolved,
-        };
-        persistTradeGuard(guardRecord);
-        broadcastSse('tradeGuardUpdate', guardRecord);
-
-        return res.json({
-          success: true,
-          mode: 'LIVE_EIP712_EXECUTED',
-          orderId: orderIdResolved,
-          marketSlug: activeMarketSlug,
-          direction: isLong ? 'LONG' : 'SHORT',
-          outcome: isLong ? 'UP' : 'DOWN',
-          tokenId: targetTokenId,
-          price: tickAlignedPrice,
-          size: contractCount,
-          chunkId,
-          details: result,
-          guard: guardRecord,
-        });
+          return res.json({
+            success: true,
+            mode: 'LIVE_EIP712_EXECUTED',
+            orderId: orderIdResolved,
+            marketSlug: activeMarketSlug,
+            direction: isLong ? 'LONG' : 'SHORT',
+            outcome: isLong ? 'UP' : 'DOWN',
+            tokenId: targetTokenId,
+            price: tickAlignedPrice,
+            size: contractCount,
+            chunkId,
+            details: result,
+            guard: guardRecord,
+          });
   } catch (err) {
     const errorDetail = err?.response?.data?.message || err?.response?.data?.error || err?.message || String(err);
     console.warn('[EIP-712 ORDER NOTICE]', errorDetail);
     res.status(500).json({ success: false, error: errorDetail });
+  } finally {
+    isServerExecutingOrder = false;
   }
 });
 
