@@ -252,6 +252,9 @@ export function useTradingBot() {
   const updateConfig = (partial: Partial<BotConfig>) => {
     setConfig((prev) => {
       const next = { ...prev, ...partial };
+      if (next.maxRiskPercent !== undefined) {
+        next.maxRiskPercent = Math.min(Math.max(Number(next.maxRiskPercent) || 0.05, 0.01), 0.05);
+      }
       try {
         localStorage.setItem('limitless_live_bot_config', JSON.stringify(next));
       } catch {
@@ -511,15 +514,40 @@ export function useTradingBot() {
     // Align to 3 decimals as strictly required by Limitless SDK (multiple of 0.001)
     const effectiveContractPrice = parseFloat(Math.max(0.001, Math.min(0.999, liveContractPrice)).toFixed(3));
 
+    // Hard Risk Guard: Total dollar commitment CANNOT exceed 5.0% of balance under any circumstances
+    const maxBudgetUsd = balance * 0.05;
+
     const kelly = calculateKellySizing(balance, {
       maxPriceCents: effectiveContractPrice,
       winProbability: cfg.winProbability,
-      maxRiskPercent: cfg.maxRiskPercent,
-      fractionChunks: cfg.fractionChunks,
+      maxRiskPercent: Math.min(cfg.maxRiskPercent || 0.05, 0.05),
+      fractionChunks: 1,
     });
 
-    // Enforce at least 1 contract for Limitless CLOB order execution
-    const effectiveContracts = Math.max(1, Math.round(kelly.numberOfContracts || 1));
+    // Support fractional contract sizes natively on Limitless CLOB without rounding up
+    let effectiveContracts = kelly.numberOfContracts;
+
+    // Ensure dollar cost strictly never exceeds 5% of balance
+    if (effectiveContracts * effectiveContractPrice > maxBudgetUsd) {
+      effectiveContracts = Math.floor((maxBudgetUsd / effectiveContractPrice) * 100) / 100;
+    }
+
+    // Safety decrement guard to guarantee strict compliance with 5% risk limit
+    while (effectiveContracts > 0 && (effectiveContracts * effectiveContractPrice) > maxBudgetUsd) {
+      effectiveContracts = Math.round((effectiveContracts - 0.01) * 100) / 100;
+    }
+
+    if (effectiveContracts <= 0) {
+      const minWarning = `⚠️ رصيد المحفظة الحالي ($${balance.toFixed(2)} USDC) وسقف المخاطرة 5% ($${maxBudgetUsd.toFixed(2)}) لا يكفي لشراء عقد بسعر $${effectiveContractPrice}. تم حظر الصفقة لحماية رأس المال.`;
+      console.warn(minWarning);
+      limitlessService.logDirect('SYSTEM', minWarning);
+      setExecutionNotice({
+        type: 'WARNING',
+        message: minWarning,
+        timestamp: Date.now(),
+      });
+      return;
+    }
 
     isExecutingRef.current = true;
     setIsExecuting(true);

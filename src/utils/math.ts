@@ -78,21 +78,29 @@ export function calculateKellySizing(
   const { maxPriceCents, winProbability, maxRiskPercent } = config;
 
   // Safe bounds
-  const price = Math.max(0.01, Math.min(0.99, maxPriceCents));
+  const price = Math.max(0.001, Math.min(0.999, maxPriceCents));
   const b = (1.00 - price) / price;
   const p = Math.max(0.01, Math.min(0.99, winProbability));
   const q = 1 - p;
 
   const kellyFraction = (b * p - q) / b;
-  // Strict 5% maximum limit cap as requested by user
-  const effectiveMaxRisk = Math.min(maxRiskPercent > 0 ? maxRiskPercent : 0.05, 0.05);
+  // Strict 5% maximum limit cap as demanded by user (NEVER exceed 0.05)
+  const effectiveMaxRisk = Math.min(Math.max(Number(maxRiskPercent) || 0.05, 0.01), 0.05);
   const riskToTake = Math.min(Math.max(kellyFraction, 0), effectiveMaxRisk);
-  const positionSizeUsd = balance * riskToTake;
 
-  // Contract calculation: Exact contract count according to 5% max risk
-  const numberOfContracts = positionSizeUsd > 0 && price > 0
-    ? parseFloat((positionSizeUsd / price).toFixed(2))
+  // Exact maximum dollar allocation permitted by the 5% cap
+  const maxAllowedUsd = balance > 0 ? balance * effectiveMaxRisk : 0;
+  const positionSizeUsd = Math.min(balance * riskToTake, maxAllowedUsd);
+
+  // Contract calculation: Strict floor down to 2 decimals so (contracts * price) NEVER exceeds maxAllowedUsd
+  let numberOfContracts = positionSizeUsd > 0 && price > 0
+    ? Math.floor((positionSizeUsd / price) * 100) / 100
     : 0;
+
+  // Hard safety check: ensure contract cost never exceeds maxAllowedUsd by even 1 cent
+  while (numberOfContracts > 0 && (numberOfContracts * price) > maxAllowedUsd) {
+    numberOfContracts = Math.round((numberOfContracts - 0.01) * 100) / 100;
+  }
 
   // Single unified order execution (chunking completely eliminated)
   const chunkSize = numberOfContracts;

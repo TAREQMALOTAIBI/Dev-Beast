@@ -812,13 +812,36 @@ app.post('/api/limitless/order', async (req, res) => {
     }
     // Price must have max 3 decimal places for Limitless SDK tick alignment (0.001)
     const tickAlignedPrice = Math.max(0.001, Math.min(0.999, parseFloat(Number(inputPrice).toFixed(3))));
-    const contractCount = Math.max(1, Math.round(Number(size) || 1));
 
     const { ethers } = await import('ethers');
     const sdk = await import('@limitless-exchange/sdk');
 
     const formattedPk = pk.startsWith('0x') ? pk : `0x${pk}`;
     const wallet = new ethers.Wallet(formattedPk);
+
+    // Support fractional contract sizes (floored to 2 decimals) natively supported by Limitless OrderBuilder
+    let rawSize = parseFloat(Number(size || 1).toFixed(2));
+    if (isNaN(rawSize) || rawSize <= 0) rawSize = 1;
+
+    // Server-Side 5% Maximum Risk Shield: Enforce hard 5% dollar ceiling based on live on-chain balance
+    try {
+      const liveBal = await fetchLiveWalletAndBalance(wallet.address);
+      if (liveBal && liveBal.usdcBalance > 0) {
+        const maxRiskBudgetUsd = liveBal.usdcBalance * 0.05;
+        const requestedOrderCost = rawSize * tickAlignedPrice;
+        if (requestedOrderCost > maxRiskBudgetUsd) {
+          const maxAllowedContracts = Math.floor((maxRiskBudgetUsd / tickAlignedPrice) * 100) / 100;
+          console.warn(
+            `[SERVER RISK SHIELD] Requested order cost $${requestedOrderCost.toFixed(2)} exceeds 5% of balance ($${maxRiskBudgetUsd.toFixed(2)}). Strictly capping contracts from ${rawSize} to ${maxAllowedContracts}.`
+          );
+          rawSize = Math.max(0.1, maxAllowedContracts);
+        }
+      }
+    } catch {
+      // safe continuation
+    }
+
+    const contractCount = rawSize;
 
     const httpClient = new sdk.HttpClient({
       baseURL: sdk.DEFAULT_API_URL,
