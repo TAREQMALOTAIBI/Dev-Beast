@@ -86,7 +86,10 @@ export function calculateKellySizing(
   const kellyFraction = (b * p - q) / b;
   // Strict 1% maximum limit cap as demanded by user (NEVER exceed 0.01)
   const effectiveMaxRisk = Math.min(Math.max(Number(maxRiskPercent) || 0.01, 0.001), 0.01);
-  const riskToTake = Math.min(Math.max(kellyFraction, 0), effectiveMaxRisk);
+  // In prediction markets with Z >= 2.0σ statistical trigger, always allocate within the user's 1% safety cap
+  const riskToTake = kellyFraction > 0
+    ? Math.min(kellyFraction, effectiveMaxRisk)
+    : effectiveMaxRisk;
 
   // Exact maximum dollar allocation permitted by the 1% cap
   const maxAllowedUsd = balance > 0 ? balance * effectiveMaxRisk : 0;
@@ -100,6 +103,11 @@ export function calculateKellySizing(
   // Hard safety check: ensure contract cost never exceeds maxAllowedUsd by even 1 cent
   while (numberOfContracts > 0 && (numberOfContracts * price) > maxAllowedUsd) {
     numberOfContracts = Math.round((numberOfContracts - 0.01) * 100) / 100;
+  }
+
+  // Minimum fractional contract threshold if budget permits at least 0.01 contracts
+  if (numberOfContracts < 0.01 && maxAllowedUsd >= (0.01 * price)) {
+    numberOfContracts = 0.01;
   }
 
   // Single unified order execution (chunking completely eliminated)

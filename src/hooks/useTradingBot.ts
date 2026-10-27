@@ -527,26 +527,36 @@ export function useTradingBot() {
     // Support fractional contract sizes natively on Limitless CLOB without rounding up
     let effectiveContracts = kelly.numberOfContracts;
 
+    // Minimum precision threshold: If budget allows at least 0.01 contracts (half a cent), permit 0.01
+    if (effectiveContracts < 0.01 && maxBudgetUsd >= (0.01 * effectiveContractPrice)) {
+      effectiveContracts = 0.01;
+    }
+
     // Ensure dollar cost strictly never exceeds 1% of balance
     if (effectiveContracts * effectiveContractPrice > maxBudgetUsd) {
       effectiveContracts = Math.floor((maxBudgetUsd / effectiveContractPrice) * 100) / 100;
     }
 
     // Safety decrement guard to guarantee strict compliance with 1% risk limit
-    while (effectiveContracts > 0 && (effectiveContracts * effectiveContractPrice) > maxBudgetUsd) {
+    while (effectiveContracts > 0.01 && (effectiveContracts * effectiveContractPrice) > maxBudgetUsd) {
       effectiveContracts = Math.round((effectiveContracts - 0.01) * 100) / 100;
     }
 
     if (effectiveContracts <= 0) {
-      const minWarning = `⚠️ رصيد المحفظة الحالي ($${balance.toFixed(2)} USDC) وسقف أمان المخاطرة 1% ($${maxBudgetUsd.toFixed(2)}) لا يكفي لشراء عقد بسعر $${effectiveContractPrice}. تم حظر الصفقة لحماية رأس المال.`;
-      console.warn(minWarning);
-      limitlessService.logDirect('SYSTEM', minWarning);
-      setExecutionNotice({
-        type: 'WARNING',
-        message: minWarning,
-        timestamp: Date.now(),
-      });
-      return;
+      // If budget permits, set to 0.01 contracts
+      if (maxBudgetUsd >= (0.01 * effectiveContractPrice)) {
+        effectiveContracts = 0.01;
+      } else {
+        const minWarning = `⚠️ رصيد المحفظة الحالي ($${balance.toFixed(2)} USDC) وسقف أمان المخاطرة 1% ($${maxBudgetUsd.toFixed(2)}) لا يكفي لشراء عقد بسعر $${effectiveContractPrice}. تم حظر الصفقة لحماية رأس المال.`;
+        console.warn(minWarning);
+        limitlessService.logDirect('SYSTEM', minWarning);
+        setExecutionNotice({
+          type: 'WARNING',
+          message: minWarning,
+          timestamp: Date.now(),
+        });
+        return;
+      }
     }
 
     isExecutingRef.current = true;
