@@ -214,8 +214,22 @@ export function useTradingBot() {
             } catch {}
           } else {
             // Previous contract already expired on VM, clear it!
+            lastExecutedMarketSlugRef.current = '';
+            lastExecutedTimestampRef.current = 0;
+            lastExecutedCandleTimeRef.current = 0;
+            try {
+              localStorage.removeItem('limitless_last_trade_guard');
+            } catch {}
             limitlessService.clearTradeGuardOnVm().catch(() => {});
           }
+        } else {
+          // VM has no lock, clear any ghost lock in memory and localStorage immediately
+          lastExecutedMarketSlugRef.current = '';
+          lastExecutedTimestampRef.current = 0;
+          lastExecutedCandleTimeRef.current = 0;
+          try {
+            localStorage.removeItem('limitless_last_trade_guard');
+          } catch {}
         }
       })
       .catch(() => {});
@@ -349,12 +363,59 @@ export function useTradingBot() {
     }
   }, []);
 
+  // Anti-Duplicate Guard: Strictly 1 trade per 15-minute contract cycle (Auto-Expiring)
+  const checkTradeLock = useCallback((targetSlug: string, cTime?: number): { locked: boolean; reason?: string } => {
+    const cfg = configRef.current;
+    const now = Date.now();
+    const cycleDurationMs = (cfg.cooldownMinutes ?? 15) * 60 * 1000;
+
+    let persistedGuard: any = null;
+    try {
+      const raw = localStorage.getItem('limitless_last_trade_guard');
+      if (raw) persistedGuard = JSON.parse(raw);
+    } catch {}
+
+    const lastTime = Math.max(lastExecutedTimestampRef.current || 0, persistedGuard?.timestamp || 0);
+
+    // If no previous trade recorded, completely open
+    if (!lastTime || lastTime <= 0) {
+      return { locked: false };
+    }
+
+    const elapsedMs = now - lastTime;
+
+    // RULE 1: AUTO-EXPIRATION: If 15 minutes have passed since the trade, the lock is AUTOMATICALLY CLEARED!
+    if (elapsedMs >= cycleDurationMs) {
+      lastExecutedMarketSlugRef.current = '';
+      lastExecutedTimestampRef.current = 0;
+      lastExecutedCandleTimeRef.current = 0;
+      try {
+        localStorage.removeItem('limitless_last_trade_guard');
+      } catch {}
+      return { locked: false };
+    }
+
+    // RULE 2: WITHIN the 15-minute contract window:
+    // Exactly 1 trade allowed for this 15-minute contract cycle.
+    const remainingMins = Math.max(1, Math.ceil((cycleDurationMs - elapsedMs) / 60000));
+    return {
+      locked: true,
+      reason: `🔒 تم تنفيذ صفقة هذا العقد (متبقي ${remainingMins} دقيقة حتى انتهاء الـ 15 دقيقة والانتقال التلقائي للعقد القادم).`,
+    };
+  }, []);
+
   // Execute LIVE Trade strictly across Limitless
   const executeLiveTrade = useCallback(async (
     triggerZ: number,
     direction: 'SHORT' | 'LONG' = 'SHORT',
     candleTime?: number
   ) => {
+    // 1. Concurrency In-Flight Check: Prevent duplicate sends while order is being signed/sent
+    if (isExecutingRef.current) {
+      console.warn('[CONCURRENCY BLOCKED] An order is already in-flight.');
+      return;
+    }
+
     const cfg = configRef.current;
     let balance = currentBalanceRef.current;
 
@@ -367,7 +428,7 @@ export function useTradingBot() {
         ? cfg.limitlessMarketSlug
         : 'btc-up-or-down-15-min';
 
-    // 1. Strict Anti-Duplicate Guard at the very entry of executeLiveTrade
+    // 2. Strict Anti-Duplicate Guard
     const lock = checkTradeLock(resolvedMarketSlug, candleTime);
     if (lock.locked) {
       console.warn(`[SAFETY GUARD BLOCKED] Trade rejected: ${lock.reason}`);
@@ -379,12 +440,6 @@ export function useTradingBot() {
       return;
     }
 
-    // 2. Concurrency In-Flight Check
-    if (isExecutingRef.current) {
-      console.warn('[CONCURRENCY BLOCKED] An order is already in-flight.');
-      return;
-    }
-
     // Strict Safety Guard: NEVER trade 5-minute contracts
     if (/(^|[^0-9])5-min/i.test(resolvedMarketSlug)) {
       console.error(
@@ -393,11 +448,38 @@ export function useTradingBot() {
       return;
     }
 
-    // If memory balance is zero but liveUsdcBalance has a real value, synchronize immediately
+    // Balance check with on-the-fly live API fetch if balance in memory is 0
     if (balance <= 0 && liveUsdcBalance > 0) {
       balance = liveUsdcBalance;
       currentBalanceRef.current = liveUsdcBalance;
       setCurrentBalance(liveUsdcBalance);
+    }
+
+    if (balance <= 0) {
+      try {
+        const bRes = await fetch('/api/balance');
+        if (bRes.ok) {
+          const bData = await bRes.json();
+          if (bData && bData.usdcBalance > 0) {
+            balance = bData.usdcBalance;
+            currentBalanceRef.current = bData.usdcBalance;
+            setLiveUsdcBalance(bData.usdcBalance);
+            setCurrentBalance(bData.usdcBalance);
+          }
+        }
+      } catch {}
+    }
+
+    if (balance <= 0) {
+      const warnMsg = `⚠️ تعذر إرسال الصفقة: رصيد المحفظة الحالي هو ($0.00 USDC). يرجى التأكد من شحن المحفظة بعملة USDC على شبكة Base.`;
+      console.warn(warnMsg);
+      limitlessService.logDirect('SYSTEM', warnMsg);
+      setExecutionNotice({
+        type: 'WARNING',
+        message: warnMsg,
+        timestamp: Date.now(),
+      });
+      return;
     }
 
     const isLong = direction === 'LONG';
@@ -425,50 +507,12 @@ export function useTradingBot() {
     // Enforce at least 1 contract for Limitless CLOB order execution
     const effectiveContracts = Math.max(1, Math.round(kelly.numberOfContracts || 1));
 
-    if (balance <= 0) {
-      if (liveUsdcBalance > 0) {
-        balance = liveUsdcBalance;
-        currentBalanceRef.current = liveUsdcBalance;
-        setCurrentBalance(liveUsdcBalance);
-      } else {
-        const warnMsg = `⚠️ تعذر إرسال الصفقة: رصيد المحفظة الحالي هو ($0.00 USDC). جاري فحص الرصيد من شبكة Base...`;
-        console.warn(warnMsg);
-        limitlessService.logDirect('SYSTEM', warnMsg);
-        setExecutionNotice({
-          type: 'WARNING',
-          message: warnMsg,
-          timestamp: Date.now(),
-        });
-        return;
-      }
-    }
-
     isExecutingRef.current = true;
     setIsExecuting(true);
     setIsEntrySignal(true);
     setActiveSignal(direction === 'LONG' ? 'ENTRY_LONG' : 'ENTRY_SHORT');
     setLastTradeDirection(direction);
     setLastSignalTime(Date.now());
-
-    // Optimistic Pre-Lock: Persist to memory, localStorage, and VM IMMEDIATELY before starting order dispatch
-    const preLockNow = Date.now();
-    lastExecutedCandleTimeRef.current = candleTime || preLockNow;
-    lastExecutedMarketSlugRef.current = resolvedMarketSlug;
-    lastExecutedTimestampRef.current = preLockNow;
-
-    const preGuardPayload = {
-      marketSlug: resolvedMarketSlug,
-      candleTime: candleTime || preLockNow,
-      timestamp: preLockNow,
-      direction,
-      outcome,
-      price: effectiveContractPrice,
-      size: effectiveContracts,
-    };
-    try {
-      localStorage.setItem('limitless_last_trade_guard', JSON.stringify(preGuardPayload));
-    } catch {}
-    limitlessService.saveTradeGuardOnVm(preGuardPayload).catch(() => {});
 
     const tradeId = `live_trd_${Date.now()}`;
     const initialTrade: TradeOrder = {
@@ -538,6 +582,7 @@ export function useTradingBot() {
         return next;
       });
 
+      // ONLY on successful execution: lock the contract cycle!
       const now = Date.now();
       lastExecutedCandleTimeRef.current = candleTime || now;
       lastExecutedMarketSlugRef.current = resolvedMarketSlug;
@@ -583,6 +628,13 @@ export function useTradingBot() {
         message: `تعذر إرسال الصفقة: ${errMsg}`,
         timestamp: Date.now(),
       });
+      // Do NOT keep lock on failure - let bot retry when ready
+      lastExecutedTimestampRef.current = 0;
+      lastExecutedCandleTimeRef.current = 0;
+      try {
+        localStorage.removeItem('limitless_last_trade_guard');
+      } catch {}
+      limitlessService.clearTradeGuardOnVm().catch(() => {});
     } finally {
       isExecutingRef.current = false;
       setIsExecuting(false);
@@ -591,48 +643,7 @@ export function useTradingBot() {
         setActiveSignal(null);
       }, 4000);
     }
-  }, [liveUsdcBalance]);
-
-  // Anti-Duplicate Guard: Strictly 1 trade per 15-minute contract cycle (Auto-Expiring)
-  const checkTradeLock = useCallback((targetSlug: string, cTime?: number): { locked: boolean; reason?: string } => {
-    const cfg = configRef.current;
-    const now = Date.now();
-    const cycleDurationMs = (cfg.cooldownMinutes ?? 15) * 60 * 1000;
-
-    let persistedGuard: any = null;
-    try {
-      const raw = localStorage.getItem('limitless_last_trade_guard');
-      if (raw) persistedGuard = JSON.parse(raw);
-    } catch {}
-
-    const lastTime = Math.max(lastExecutedTimestampRef.current || 0, persistedGuard?.timestamp || 0);
-
-    // If no previous trade recorded, completely open
-    if (!lastTime || lastTime <= 0) {
-      return { locked: false };
-    }
-
-    const elapsedMs = now - lastTime;
-
-    // RULE 1: AUTO-EXPIRATION: If 15 minutes have passed since the trade, the lock is AUTOMATICALLY CLEARED!
-    if (elapsedMs >= cycleDurationMs) {
-      lastExecutedMarketSlugRef.current = '';
-      lastExecutedTimestampRef.current = 0;
-      lastExecutedCandleTimeRef.current = 0;
-      try {
-        localStorage.removeItem('limitless_last_trade_guard');
-      } catch {}
-      return { locked: false };
-    }
-
-    // RULE 2: WITHIN the 15-minute contract window:
-    // Exactly 1 trade allowed for this 15-minute contract cycle.
-    const remainingMins = Math.max(1, Math.ceil((cycleDurationMs - elapsedMs) / 60000));
-    return {
-      locked: true,
-      reason: `🔒 تم تنفيذ صفقة هذا العقد (متبقي ${remainingMins} دقيقة حتى انتهاء الـ 15 دقيقة والانتقال التلقائي للعقد القادم).`,
-    };
-  }, []);
+  }, [liveUsdcBalance, checkTradeLock]);
 
   const clearTradeLock = useCallback(() => {
     lastExecutedMarketSlugRef.current = '';
@@ -699,12 +710,6 @@ export function useTradingBot() {
 
       const targetMarketSlug = activeLimitlessMarketRef.current?.slug || cfg.limitlessMarketSlug || 'btc-up-or-down-15-min';
 
-      // Early Anti-Duplicate Check: If cooldown is active or candle was already traded, exit immediately!
-      const initialLock = checkTradeLock(targetMarketSlug, candleTime);
-      if (initialLock.locked) {
-        return;
-      }
-
       // ================= DIRECTION 1: UPPER / RISE (Short / Down) =================
       // شرط الدخول: فقط عند تجاوز العتبة 2 في الصعود (Z >= +2.0σ)
       if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'SHORT_ONLY') {
@@ -735,29 +740,10 @@ export function useTradingBot() {
           }
 
           if (!isExecutingRef.current) {
-            isExecutingRef.current = true;
-            const now = Date.now();
-            lastExecutedCandleTimeRef.current = candleTime || now;
-            lastExecutedMarketSlugRef.current = targetMarketSlug;
-            lastExecutedTimestampRef.current = now;
-
-            // Optimistic pre-lock: Save to localStorage and VM IMMEDIATELY before starting network request
-            const guardPayload = {
-              marketSlug: targetMarketSlug,
-              candleTime: candleTime || now,
-              timestamp: now,
-              direction: 'SHORT',
-              outcome: 'DOWN',
-            };
-            try {
-              localStorage.setItem('limitless_last_trade_guard', JSON.stringify(guardPayload));
-            } catch {}
-            limitlessService.saveTradeGuardOnVm(guardPayload).catch(() => {});
-
             console.log(`🎯 تنفيذ فوري لصفقة هبوط! تجاوز Z-Score عتبة +${cfg.zScoreUpper}σ (${zScore.toFixed(2)}σ). جاري إرسال أمر DOWN!`);
             limitlessService.logDirect(
               'SYSTEM',
-              `🎯 [شرط الدخول متحقق] تجاوزت قيمة Z-Score عتبة +${cfg.zScoreUpper}σ (${zScore.toFixed(2)}σ) في الصعود. تنفيذ فوري لصفقة DOWN!`
+              `🎯 [شرط الدخول متحقق] تجاوزت قيمة Z-Score عتبة +${cfg.zScoreUpper}σ (${zScore.toFixed(2)}σ) في الصعود. جاري إرسال أمر DOWN فوراً دون أي تأخير!`
             );
             executeLiveTrade(zScore, 'SHORT', candleTime);
           }
@@ -799,29 +785,10 @@ export function useTradingBot() {
           }
 
           if (!isExecutingRef.current) {
-            isExecutingRef.current = true;
-            const now = Date.now();
-            lastExecutedCandleTimeRef.current = candleTime || now;
-            lastExecutedMarketSlugRef.current = targetMarketSlug;
-            lastExecutedTimestampRef.current = now;
-
-            // Optimistic pre-lock: Save to localStorage and VM IMMEDIATELY before starting network request
-            const guardPayload = {
-              marketSlug: targetMarketSlug,
-              candleTime: candleTime || now,
-              timestamp: now,
-              direction: 'LONG',
-              outcome: 'UP',
-            };
-            try {
-              localStorage.setItem('limitless_last_trade_guard', JSON.stringify(guardPayload));
-            } catch {}
-            limitlessService.saveTradeGuardOnVm(guardPayload).catch(() => {});
-
             console.log(`🎯 تنفيذ فوري لصفقة صعود! تجاوز Z-Score عتبة ${lowerThresh}σ (${zScore.toFixed(2)}σ). جاري إرسال أمر UP!`);
             limitlessService.logDirect(
               'SYSTEM',
-              `🎯 [شرط الدخول متحقق] تجاوزت قيمة Z-Score عتبة ${lowerThresh}σ (${zScore.toFixed(2)}σ) في الهبوط. تنفيذ فوري لصفقة UP!`
+              `🎯 [شرط الدخول متحقق] تجاوزت قيمة Z-Score عتبة ${lowerThresh}σ (${zScore.toFixed(2)}σ) في الهبوط. جاري إرسال أمر UP فوراً دون أي تأخير!`
             );
             executeLiveTrade(zScore, 'LONG', candleTime);
           }
@@ -964,8 +931,9 @@ export function useTradingBot() {
               next = [...prev, tickCandle];
             }
 
-            // Immediate real-time execution in the SAME candle on every price tick
-            const liveCloses = [...closePricesRef.current.slice(1), tickCandle.close];
+            // Immediate real-time execution in the SAME candle on every price tick using the exact candle array
+            const allCloses = next.map((c) => c.close);
+            const liveCloses = allCloses.slice(-configRef.current.periods);
             evaluateLiveStrategy(liveCloses, tickCandle.time);
 
             // Finalize candle close in history buffer
