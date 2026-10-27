@@ -823,16 +823,16 @@ app.post('/api/limitless/order', async (req, res) => {
     let rawSize = parseFloat(Number(size || 1).toFixed(2));
     if (isNaN(rawSize) || rawSize <= 0) rawSize = 1;
 
-    // Server-Side 5% Maximum Risk Shield: Enforce hard 5% dollar ceiling based on live on-chain balance
+    // Server-Side 1% Maximum Risk Shield: Enforce hard 1% dollar ceiling based on live on-chain balance
     try {
       const liveBal = await fetchLiveWalletAndBalance(wallet.address);
       if (liveBal && liveBal.usdcBalance > 0) {
-        const maxRiskBudgetUsd = liveBal.usdcBalance * 0.05;
+        const maxRiskBudgetUsd = liveBal.usdcBalance * 0.01;
         const requestedOrderCost = rawSize * tickAlignedPrice;
         if (requestedOrderCost > maxRiskBudgetUsd) {
           const maxAllowedContracts = Math.floor((maxRiskBudgetUsd / tickAlignedPrice) * 100) / 100;
           console.warn(
-            `[SERVER RISK SHIELD] Requested order cost $${requestedOrderCost.toFixed(2)} exceeds 5% of balance ($${maxRiskBudgetUsd.toFixed(2)}). Strictly capping contracts from ${rawSize} to ${maxAllowedContracts}.`
+            `[SERVER RISK SHIELD] Requested order cost $${requestedOrderCost.toFixed(2)} exceeds 1% of balance ($${maxRiskBudgetUsd.toFixed(2)}). Strictly capping contracts from ${rawSize} to ${maxAllowedContracts}.`
           );
           rawSize = Math.max(0.1, maxAllowedContracts);
         }

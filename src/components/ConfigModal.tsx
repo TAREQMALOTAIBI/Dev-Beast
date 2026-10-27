@@ -38,7 +38,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
       zScoreLower: -2.0,
       zScoreLowerEntry: -2.0,
       maxPriceCents: 0.85,
-      maxRiskPercent: 0.05,
+      maxRiskPercent: 0.01,
       orderType: 'FAK',
       fractionChunks: 1,
       chunkDelayMs: 500,
@@ -382,7 +382,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
           {/* Section 4: Risk Sizing & Direct Order Execution */}
           <div className="border-t border-slate-800 pt-4">
             <h3 className="font-semibold text-slate-100 uppercase tracking-wider text-[11px] mb-3 text-sky-400">
-              {isAr ? 'إدارة المخاطر والتنفيذ المباشر (سقف 5% أقصى)' : 'Risk Management & Direct Execution (5% Max Cap)'}
+              {isAr ? 'إدارة المخاطر والتنفيذ المباشر (سقف أمان المحفظة 1% أقصى)' : 'Risk Management & Direct Execution (1% Max Safety Cap)'}
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
@@ -416,15 +416,15 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
 
               <div>
                 <label className="block text-slate-400 mb-1">
-                  {isAr ? 'سقف المخاطرة المعتمد (5% كحد أقصى)' : 'Enforced Risk Cap (5% Max)'}
+                  {isAr ? 'سقف المخاطرة المعتمد (1% كحد أقصى)' : 'Enforced Risk Cap (1% Max)'}
                 </label>
                 <input
                   type="number"
-                  step="0.005"
-                  min="0.01"
-                  max="0.05"
-                  value={Math.min(draft.maxRiskPercent || 0.05, 0.05)}
-                  onChange={(e) => setDraft({ ...draft, maxRiskPercent: Math.min(parseFloat(e.target.value) || 0.05, 0.05) })}
+                  step="0.001"
+                  min="0.001"
+                  max="0.01"
+                  value={Math.min(draft.maxRiskPercent || 0.01, 0.01)}
+                  onChange={(e) => setDraft({ ...draft, maxRiskPercent: Math.min(parseFloat(e.target.value) || 0.01, 0.01) })}
                   className="w-full bg-slate-950 border border-emerald-500/60 rounded-lg px-3 py-2 text-emerald-300 font-mono font-bold"
                 />
               </div>
@@ -438,8 +438,8 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
               </div>
               <div className="text-sky-300">
                 {isAr
-                  ? '🛡️ سقف المخاطرة محدد ومعتمد بنسبة 5% كحد أقصى من رصيد المحفظة لحماية رأس المال وفق نموذج كيلي الحذر.'
-                  : '🛡️ Risk cap is locked at 5% maximum of account balance for capital preservation under the Kelly Criterion.'}
+                  ? '🛡️ سقف المخاطرة محدد ومعتمد بنسبة 1% كحد أقصى من رصيد المحفظة لحماية رأس المال وفق نموذج كيلي فائق الأمان.'
+                  : '🛡️ Risk cap is locked at 1% maximum of account balance for capital preservation under conservative Kelly Criterion.'}
               </div>
             </div>
           </div>

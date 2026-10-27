@@ -29,11 +29,11 @@ export const KellyLab: React.FC<KellyLabProps> = ({
         <div className="flex items-center gap-2">
           <ShieldCheck className="w-5 h-5 text-emerald-400" />
           <h2 className="font-bold text-slate-100 text-sm tracking-wide">
-            {isAr ? 'إدارة المخاطر وحجم الصفقة (معيار كيلي - سقف 5% أقصى)' : 'Kelly Criterion Risk Management (5% Max Cap)'}
+            {isAr ? 'إدارة المخاطر وحجم الصفقة (معيار كيلي - سقف أمان 1% أقصى)' : 'Kelly Criterion Risk Management (1% Max Safety Cap)'}
           </h2>
         </div>
         <div className="text-xs font-mono text-slate-400">
-          Max Risk Cap: <span className="text-emerald-400 font-bold">5.0%</span>
+          Max Risk Cap: <span className="text-emerald-400 font-bold">1.0%</span>
         </div>
       </div>
 
@@ -83,13 +83,13 @@ export const KellyLab: React.FC<KellyLabProps> = ({
         <div className="p-3 rounded-lg bg-emerald-950/20 border border-emerald-800/40">
           <div className="text-emerald-300 mb-1 flex items-center justify-between font-medium">
             <span>{isAr ? 'المخاطرة الفعلية المطبقة' : 'Enforced Risk Limit'}</span>
-            <span className="text-[10px] bg-emerald-900/60 text-emerald-300 px-1 rounded">5% Max Cap</span>
+            <span className="text-[10px] bg-emerald-900/60 text-emerald-300 px-1 rounded">1% Max Cap</span>
           </div>
           <div className="text-lg font-mono font-bold text-emerald-400">
             {(kelly.riskToTake * 100).toFixed(2)}%
           </div>
           <p className="text-[10px] text-emerald-500/80 mt-1">
-            {isAr ? 'محددة ومعتمدة بسقف 5% كحد أقصى لحماية رأس المال' : 'Strictly capped at 5% max for total capital protection'}
+            {isAr ? 'محددة ومعتمدة بسقف 1% كحد أقصى لحماية رأس المال' : 'Strictly capped at 1% max for total capital protection'}
           </p>
         </div>
       </div>
@@ -187,22 +187,22 @@ export const KellyLab: React.FC<KellyLabProps> = ({
 
         <div>
           <div className="flex justify-between text-slate-300 mb-1 font-medium">
-            <span>{isAr ? 'سقف المخاطرة المعتمد (5% كحد أقصى)' : 'Enforced Risk Cap (5% Max)'}</span>
-            <span className="font-mono text-emerald-400">5.0%</span>
+            <span>{isAr ? 'سقف المخاطرة المعتمد (1% كحد أقصى)' : 'Enforced Risk Cap (1% Max)'}</span>
+            <span className="font-mono text-emerald-400">1.0%</span>
           </div>
           <input
             type="range"
-            min="0.01"
-            max="0.05"
-            step="0.005"
-            value={Math.min(config.maxRiskPercent || 0.05, 0.05)}
-            onChange={(e) => onUpdateConfig({ maxRiskPercent: Math.min(parseFloat(e.target.value), 0.05) })}
+            min="0.002"
+            max="0.01"
+            step="0.001"
+            value={Math.min(config.maxRiskPercent || 0.01, 0.01)}
+            onChange={(e) => onUpdateConfig({ maxRiskPercent: Math.min(parseFloat(e.target.value), 0.01) })}
             className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
           />
           <div className="flex justify-between text-[10px] text-slate-500 mt-1">
-            <span>1% (Ultra Safe)</span>
-            <span>3% (Conservative)</span>
-            <span className="text-emerald-400 font-bold">5% (سقف أقصى)</span>
+            <span>0.2% (Ultra Safe)</span>
+            <span>0.5% (Conservative)</span>
+            <span className="text-emerald-400 font-bold">1% (سقف أمان أقصى)</span>
           </div>
         </div>
       </div>

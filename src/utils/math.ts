@@ -61,14 +61,14 @@ export function calculateZScore(
 }
 
 /**
- * Calculates Kelly Criterion position sizing with the 5% max risk cap
+ * Calculates Kelly Criterion position sizing with the 1% max risk cap
  * and contract fractionalization.
  * 
  * b: payout odds = (1.00 - MAX_PRICE_CENTS) / MAX_PRICE_CENTS (at $0.20, b = 4.0)
  * p: win probability (e.g. 0.55)
  * q: 1 - p (0.45)
  * kellyFraction: (b * p - q) / b
- * riskToTake: clamp between 0 and 5% max risk (0.05 maximum limit)
+ * riskToTake: clamp between 0 and 1% max risk (0.01 maximum limit)
  * Unified single order execution (chunking eliminated)
  */
 export function calculateKellySizing(
@@ -84,11 +84,11 @@ export function calculateKellySizing(
   const q = 1 - p;
 
   const kellyFraction = (b * p - q) / b;
-  // Strict 5% maximum limit cap as demanded by user (NEVER exceed 0.05)
-  const effectiveMaxRisk = Math.min(Math.max(Number(maxRiskPercent) || 0.05, 0.01), 0.05);
+  // Strict 1% maximum limit cap as demanded by user (NEVER exceed 0.01)
+  const effectiveMaxRisk = Math.min(Math.max(Number(maxRiskPercent) || 0.01, 0.001), 0.01);
   const riskToTake = Math.min(Math.max(kellyFraction, 0), effectiveMaxRisk);
 
-  // Exact maximum dollar allocation permitted by the 5% cap
+  // Exact maximum dollar allocation permitted by the 1% cap
   const maxAllowedUsd = balance > 0 ? balance * effectiveMaxRisk : 0;
   const positionSizeUsd = Math.min(balance * riskToTake, maxAllowedUsd);
 
