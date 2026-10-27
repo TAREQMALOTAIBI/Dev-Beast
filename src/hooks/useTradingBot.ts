@@ -420,7 +420,21 @@ export function useTradingBot() {
     let balance = currentBalanceRef.current;
 
     // Determine target 15-minute market slug using latest live ref first
-    const currentMarket = activeLimitlessMarketRef.current;
+    let currentMarket = activeLimitlessMarketRef.current;
+    if (!currentMarket?.slug || !currentMarket.slug.includes('15-min')) {
+      try {
+        const mRes = await fetch('/api/limitless/active-btc');
+        if (mRes.ok) {
+          const mData = await mRes.json();
+          if (mData && mData.slug && mData.slug.includes('15-min')) {
+            currentMarket = mData;
+            activeLimitlessMarketRef.current = mData;
+            setActiveLimitlessMarket(mData);
+          }
+        }
+      } catch {}
+    }
+
     const resolvedMarketSlug =
       currentMarket?.slug && currentMarket.slug.includes('15-min')
         ? currentMarket.slug
@@ -736,6 +750,13 @@ export function useTradingBot() {
           // Check if market or cooldown is locked
           const lock = checkTradeLock(targetMarketSlug, candleTime);
           if (lock.locked) {
+            console.warn(`[SAFETY GUARD ACTIVE] Signal detected (Z=${zScore.toFixed(2)}σ) but trade locked: ${lock.reason}`);
+            limitlessService.logDirect('SYSTEM', `🔒 تم رصد إشارة دخول هبوط (Z=${zScore.toFixed(2)}σ) ولكن العقد مقفل: ${lock.reason}`);
+            setExecutionNotice({
+              type: 'WARNING',
+              message: `تم رصد إشارة هبوط (Z=${zScore.toFixed(2)}σ) ولكن: ${lock.reason}`,
+              timestamp: Date.now(),
+            });
             return;
           }
 
@@ -781,6 +802,13 @@ export function useTradingBot() {
           // Check if market or cooldown is locked
           const lock = checkTradeLock(targetMarketSlug, candleTime);
           if (lock.locked) {
+            console.warn(`[SAFETY GUARD ACTIVE] Signal detected (Z=${zScore.toFixed(2)}σ) but trade locked: ${lock.reason}`);
+            limitlessService.logDirect('SYSTEM', `🔒 تم رصد إشارة دخول صعود (Z=${zScore.toFixed(2)}σ) ولكن العقد مقفل: ${lock.reason}`);
+            setExecutionNotice({
+              type: 'WARNING',
+              message: `تم رصد إشارة صعود (Z=${zScore.toFixed(2)}σ) ولكن: ${lock.reason}`,
+              timestamp: Date.now(),
+            });
             return;
           }
 
@@ -896,7 +924,12 @@ export function useTradingBot() {
     }
   }, [config.limitlessMarketSlug]);
 
-  // Load real Binance Historical Data & Live WebSocket
+  const evaluateLiveStrategyRef = useRef(evaluateLiveStrategy);
+  evaluateLiveStrategyRef.current = evaluateLiveStrategy;
+  const rebuildMetricsRef = useRef(rebuildMetrics);
+  rebuildMetricsRef.current = rebuildMetrics;
+
+  // Load real Binance Historical Data & Live WebSocket with permanent connection
   useEffect(() => {
     let isCancelled = false;
 
@@ -914,36 +947,44 @@ export function useTradingBot() {
         setCandles(realCandles);
         const closes = realCandles.map((c) => c.close);
         closePricesRef.current = closes.slice(-config.periods);
-        rebuildMetrics(realCandles, config);
+        rebuildMetricsRef.current(realCandles, configRef.current);
+
+        // Immediate evaluation of the current in-progress candle on initial data load
+        if (realCandles.length >= config.periods) {
+          const latestCandle = realCandles[realCandles.length - 1];
+          const liveCloses = closes.slice(-config.periods);
+          evaluateLiveStrategyRef.current(liveCloses, latestCandle.time);
+        }
       }
 
-      // Connect real Binance WebSocket
+      // Connect real Binance WebSocket with stable listeners (no 12s reconnect loop)
       binanceService.connectWebSocket(
         config.symbol,
         config.timeframe,
         (tickCandle, isClosed) => {
+          let updatedCandles: CandleData[] = [];
           setCandles((prev) => {
             const last = prev[prev.length - 1];
-            let next: CandleData[];
             if (last && last.time === tickCandle.time) {
-              next = [...prev.slice(0, -1), tickCandle];
+              updatedCandles = [...prev.slice(0, -1), tickCandle];
             } else {
-              next = [...prev, tickCandle];
+              updatedCandles = [...prev, tickCandle];
             }
+            return updatedCandles;
+          });
 
-            // Immediate real-time execution in the SAME candle on every price tick using the exact candle array
-            const allCloses = next.map((c) => c.close);
+          // Immediate real-time execution in the SAME candle on every price tick
+          if (updatedCandles.length >= configRef.current.periods) {
+            const allCloses = updatedCandles.map((c) => c.close);
             const liveCloses = allCloses.slice(-configRef.current.periods);
-            evaluateLiveStrategy(liveCloses, tickCandle.time);
+            evaluateLiveStrategyRef.current(liveCloses, tickCandle.time);
 
-            // Finalize candle close in history buffer
             if (isClosed) {
               closePricesRef.current = liveCloses;
             }
 
-            rebuildMetrics(next, configRef.current);
-            return next;
-          });
+            rebuildMetricsRef.current(updatedCandles, configRef.current);
+          }
         },
         (status) => setBinanceStatus(status)
       );
@@ -955,7 +996,7 @@ export function useTradingBot() {
       isCancelled = true;
       binanceService.disconnect();
     };
-  }, [config.symbol, config.timeframe, config.periods, config.binanceRestUrl, rebuildMetrics, evaluateLiveStrategy]);
+  }, [config.symbol, config.timeframe, config.periods, config.binanceRestUrl]);
 
   const [hasEnvCredentials, setHasEnvCredentials] = useState<boolean>(() => {
     return Boolean(config.limitlessTokenId && config.limitlessTokenSecret);
