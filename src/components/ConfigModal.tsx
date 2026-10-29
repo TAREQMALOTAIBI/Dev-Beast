@@ -37,7 +37,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
       zScoreEntry: 2.0,
       zScoreLower: -2.0,
       zScoreLowerEntry: -2.0,
-      maxPriceCents: 0.85,
+      maxPriceCents: 0.20,
       maxRiskPercent: 0.10,
       orderType: 'GTC',
       fractionChunks: 1,
@@ -403,13 +403,15 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
 
               <div>
                 <label className="block text-slate-400 mb-1">
-                  {isAr ? 'سقف سعر الشراء الأقصى للعقد ($)' : 'Max Price Ceiling ($)'}
+                  {isAr ? 'سقف سعر الدخول (20 سنت وتحت) ($)' : 'Max Entry Price Ceiling (≤ $0.20)'}
                 </label>
                 <input
                   type="number"
-                  step="0.05"
+                  step="0.01"
+                  min="0.01"
+                  max="1.00"
                   value={draft.maxPriceCents}
-                  onChange={(e) => setDraft({ ...draft, maxPriceCents: parseFloat(e.target.value) || 0.85 })}
+                  onChange={(e) => setDraft({ ...draft, maxPriceCents: parseFloat(e.target.value) || 0.20 })}
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
                 />
               </div>

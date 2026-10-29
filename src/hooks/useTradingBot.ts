@@ -23,7 +23,7 @@ const DEFAULT_CONFIG: BotConfig = {
   zScoreEntry: 2.0,
   zScoreLower: -2.0, // Lower threshold: Entry condition when exceeding -2.0 in decline
   zScoreLowerEntry: -2.0,
-  maxPriceCents: 0.85, // Ceiling price
+  maxPriceCents: 0.20, // Ceiling price (20 cents and below)
   maxRiskPercent: 0.10, // Strictly capped at 10% maximum (wallet safety limit)
   orderType: 'GTC', // Good-Til-Cancelled
   fractionChunks: 1, // 1 unified single direct order (chunking eliminated)
@@ -86,8 +86,8 @@ export function useTradingBot() {
         if (!parsed.orderType || parsed.orderType === 'FAK') {
           parsed.orderType = 'GTC';
         }
-        if (parsed.maxPriceCents === undefined || parsed.maxPriceCents < 0.3) {
-          parsed.maxPriceCents = 0.85;
+        if (parsed.maxPriceCents === undefined || parsed.maxPriceCents > 0.20) {
+          parsed.maxPriceCents = 0.20;
         }
         // Strictly eliminate chunking: set to 1 instant single order
         parsed.fractionChunks = 1;
@@ -485,8 +485,10 @@ export function useTradingBot() {
       ?? currentMarketData?.prices?.[1]
       ?? (1 - yesPrice);
     const liveContractPrice = isLong ? yesPrice : noPrice;
+    // Enforce entry ceiling: 20 cents and below (≤ $0.20)
+    const priceCeiling = cfg.maxPriceCents !== undefined ? cfg.maxPriceCents : 0.20;
     // Align to 3 decimals as strictly required by Limitless SDK (multiple of 0.001)
-    const effectiveContractPrice = parseFloat(Math.max(0.001, Math.min(0.999, liveContractPrice)).toFixed(3));
+    const effectiveContractPrice = parseFloat(Math.max(0.001, Math.min(priceCeiling, liveContractPrice)).toFixed(3));
 
     // Hard Risk Guard: Total dollar commitment CANNOT exceed 10.0% of balance under any circumstances
     const maxRiskCap = Math.min(cfg.maxRiskPercent || 0.10, 0.10);

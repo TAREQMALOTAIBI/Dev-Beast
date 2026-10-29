@@ -38,7 +38,7 @@ const CONFIG = {
     Z_SCORE_ENTRY: ${config.zScoreEntry.toFixed(2)},
     Z_SCORE_LOWER: ${(config.zScoreLower ?? -2.0).toFixed(2)},
     Z_SCORE_LOWER_ENTRY: ${(config.zScoreLowerEntry ?? -1.9).toFixed(2)},
-    MAX_PRICE_CENTS: ${config.maxPriceCents.toFixed(2)}, // أقصى سعر للدخول (${Math.round(config.maxPriceCents * 100)} سنت)
+    MAX_PRICE_CENTS: ${config.maxPriceCents.toFixed(2)}, // سقف سعر الدخول (20 سنت وتحت)
     MAX_RISK_PERCENT: 0.10, // الحد الأقصى للمخاطرة 10% كحد أقصى لحماية رأس المال
     ORDER_TYPE: '${config.orderType}',
     EXECUTION_MODE: 'DIRECT_UNIFIED', // أمر موحد مباشر (تم إلغاء التجزئة)
