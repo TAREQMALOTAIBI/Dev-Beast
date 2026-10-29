@@ -24,7 +24,7 @@ const DEFAULT_CONFIG: BotConfig = {
   zScoreLower: -2.0, // Lower threshold: Entry condition when exceeding -2.0 in decline
   zScoreLowerEntry: -2.0,
   maxPriceCents: 0.85, // Ceiling price
-  maxRiskPercent: 0.01, // Strictly capped at 1% maximum (wallet safety limit)
+  maxRiskPercent: 0.10, // Strictly capped at 10% maximum (wallet safety limit)
   orderType: 'FAK', // Fill-And-Kill
   fractionChunks: 1, // 1 unified single direct order (chunking eliminated)
   chunkDelayMs: 0,
@@ -92,8 +92,8 @@ export function useTradingBot() {
         // Strictly eliminate chunking: set to 1 instant single order
         parsed.fractionChunks = 1;
         parsed.chunkDelayMs = 0;
-        // Strictly cap maxRiskPercent at 1% (0.01) wallet safety limit
-        parsed.maxRiskPercent = 0.01;
+        // Set maxRiskPercent to 10% (0.10) wallet safety limit
+        parsed.maxRiskPercent = 0.10;
         // Ensure single trade per 1-hour contract is active
         if (parsed.singleTradePerContract === undefined) {
           parsed.singleTradePerContract = true;
@@ -261,7 +261,7 @@ export function useTradingBot() {
     setConfig((prev) => {
       const next = { ...prev, ...partial };
       if (next.maxRiskPercent !== undefined) {
-        next.maxRiskPercent = Math.min(Math.max(Number(next.maxRiskPercent) || 0.01, 0.001), 0.01);
+        next.maxRiskPercent = Math.min(Math.max(Number(next.maxRiskPercent) || 0.10, 0.001), 0.10);
       }
       try {
         localStorage.setItem('limitless_live_bot_config', JSON.stringify(next));
@@ -488,13 +488,14 @@ export function useTradingBot() {
     // Align to 3 decimals as strictly required by Limitless SDK (multiple of 0.001)
     const effectiveContractPrice = parseFloat(Math.max(0.001, Math.min(0.999, liveContractPrice)).toFixed(3));
 
-    // Hard Risk Guard: Total dollar commitment CANNOT exceed 1.0% of balance under any circumstances
-    const maxBudgetUsd = balance * 0.01;
+    // Hard Risk Guard: Total dollar commitment CANNOT exceed 10.0% of balance under any circumstances
+    const maxRiskCap = Math.min(cfg.maxRiskPercent || 0.10, 0.10);
+    const maxBudgetUsd = balance * maxRiskCap;
 
     const kelly = calculateKellySizing(balance, {
       maxPriceCents: effectiveContractPrice,
       winProbability: cfg.winProbability,
-      maxRiskPercent: Math.min(cfg.maxRiskPercent || 0.01, 0.01),
+      maxRiskPercent: maxRiskCap,
       fractionChunks: 1,
     });
 
@@ -506,12 +507,12 @@ export function useTradingBot() {
       effectiveContracts = 0.01;
     }
 
-    // Ensure dollar cost strictly never exceeds 1% of balance
+    // Ensure dollar cost strictly never exceeds 10% of balance
     if (effectiveContracts * effectiveContractPrice > maxBudgetUsd) {
       effectiveContracts = Math.floor((maxBudgetUsd / effectiveContractPrice) * 100) / 100;
     }
 
-    // Safety decrement guard to guarantee strict compliance with 1% risk limit
+    // Safety decrement guard to guarantee strict compliance with 10% risk limit
     while (effectiveContracts > 0.01 && (effectiveContracts * effectiveContractPrice) > maxBudgetUsd) {
       effectiveContracts = Math.round((effectiveContracts - 0.01) * 100) / 100;
     }
@@ -521,7 +522,7 @@ export function useTradingBot() {
       if (maxBudgetUsd >= (0.01 * effectiveContractPrice)) {
         effectiveContracts = 0.01;
       } else {
-        const minWarning = `⚠️ رصيد المحفظة الحالي ($${balance.toFixed(2)} USDC) وسقف أمان المخاطرة 1% ($${maxBudgetUsd.toFixed(2)}) لا يكفي لشراء عقد بسعر $${effectiveContractPrice}. تم حظر الصفقة لحماية رأس المال.`;
+        const minWarning = `⚠️ رصيد المحفظة الحالي ($${balance.toFixed(2)} USDC) وسقف أمان المخاطرة 10% ($${maxBudgetUsd.toFixed(2)}) لا يكفي لشراء عقد بسعر $${effectiveContractPrice}. تم حظر الصفقة لحماية رأس المال.`;
         console.warn(minWarning);
         limitlessService.logDirect('SYSTEM', minWarning);
         setExecutionNotice({
@@ -563,12 +564,12 @@ export function useTradingBot() {
       console.log(
         `[LIVE DIRECT EXECUTION - ${direction}] Sending unified order of ${effectiveContracts} contracts to Limitless (${resolvedMarketSlug} - ${outcome} / ${
           direction === 'LONG' ? 'BUY UP/YES' : 'BUY DOWN/NO'
-        }) @ $${effectiveContractPrice} [1% Max Risk - No Chunking]...`
+        }) @ $${effectiveContractPrice} [10% Max Risk - No Chunking]...`
       );
 
       limitlessService.logDirect(
         'OUTGOING',
-        `🚀 [تنفيذ صفقة مباشرة] إرسال أمر موحد لعدد ${effectiveContracts} عقود ${outcome} (${direction}) بسعر $${effectiveContractPrice} إلى سوق ${resolvedMarketSlug} (سقف مخاطرة 1% كحد أقصى دون تجزئة)...`
+        `🚀 [تنفيذ صفقة مباشرة] إرسال أمر موحد لعدد ${effectiveContracts} عقود ${outcome} (${direction}) بسعر $${effectiveContractPrice} إلى سوق ${resolvedMarketSlug} (سقف مخاطرة 10% كحد أقصى دون تجزئة)...`
       );
 
       const executed = await limitlessService.executeChunkedOrder(
@@ -608,36 +609,17 @@ export function useTradingBot() {
         return next;
       });
 
-      // ONLY on successful execution: lock the contract cycle!
       const now = Date.now();
       lastExecutedCandleTimeRef.current = candleTime || now;
       lastExecutedMarketSlugRef.current = resolvedMarketSlug;
       lastExecutedTimestampRef.current = now;
-
-      const guardPayload = {
-        marketSlug: resolvedMarketSlug,
-        candleTime: candleTime || now,
-        timestamp: now,
-        direction,
-        outcome,
-        price: effectiveContractPrice,
-        size: effectiveContracts,
-        orderId: completedTrade.id,
-      };
-
-      try {
-        localStorage.setItem('limitless_last_trade_guard', JSON.stringify(guardPayload));
-      } catch {}
-
-      // Authoritative VM disk & RAM persistence
-      limitlessService.saveTradeGuardOnVm(guardPayload).catch(() => {});
 
       // Deduct invested funds
       const invested = completedTrade.totalInvestmentUsd;
       setCurrentBalance((prev) => Math.max(0, prev - invested));
       currentBalanceRef.current = Math.max(0, currentBalanceRef.current - invested);
 
-      const successNotice = `✅ تم إرسال الصفقة بنجاح: أمر موحد لشراء ${outcome} (${direction}) لعدد ${effectiveContracts} عقد بقيمة $${invested.toFixed(2)} (سقف مخاطرة 1% دون تجزئة) على سوق ${resolvedMarketSlug}`;
+      const successNotice = `✅ تم إرسال الصفقة بنجاح: أمر موحد لشراء ${outcome} (${direction}) لعدد ${effectiveContracts} عقد بقيمة $${invested.toFixed(2)} (سقف مخاطرة 10% دون تجزئة) على سوق ${resolvedMarketSlug}`;
       limitlessService.logDirect('SYSTEM', successNotice);
       setExecutionNotice({
         type: 'SUCCESS',

@@ -234,8 +234,8 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
                     <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
                     <span>
                       {isAr
-                        ? 'تنفيذ فوري مباشر للأمر كاملاً دفعة واحدة بنوع FAK دون أي تجزئة (سقف أمان المحفظة 1% كحد أقصى)'
-                        : 'Direct instant execution for full order via FAK with 1% max risk safety cap (No chunking)'}
+                        ? 'تنفيذ فوري مباشر للأمر كاملاً دفعة واحدة بنوع FAK دون أي تجزئة (سقف أمان المحفظة 10% كحد أقصى)'
+                        : 'Direct instant execution for full order via FAK with 10% max risk safety cap (No chunking)'}
                     </span>
                   </div>
                   {activeTrade && (

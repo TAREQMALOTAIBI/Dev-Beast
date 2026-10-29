@@ -292,7 +292,7 @@ export default function App() {
             </div>
             <span className="text-slate-700">·</span>
             <div className="text-slate-300">
-              Kelly 1% Cap: <span className="text-emerald-400 font-bold">{formatUsd(kelly.positionSizeUsd)}</span>
+              Kelly 10% Cap: <span className="text-emerald-400 font-bold">{formatUsd(kelly.positionSizeUsd)}</span>
             </div>
             <span className="text-slate-700">·</span>
             <div className="flex items-center gap-1">
@@ -417,7 +417,7 @@ export default function App() {
                     <div className="flex justify-between text-slate-400">
                       <span>{isAr ? 'نسبة المخاطرة:' : 'Risk Percentage:'}</span>
                       <span className="text-emerald-400 font-bold">
-                        {(kelly.riskToTake * 100).toFixed(2)}% (Max 1%)
+                        {(kelly.riskToTake * 100).toFixed(2)}% (Max 10%)
                       </span>
                     </div>
                     <div className="flex justify-between text-slate-400">
@@ -498,7 +498,7 @@ export default function App() {
                   : 'In live prediction market execution, contracts are placed at a maximum price of $0.20 per contract. Upon successful mean reversion, contracts settle at $1.00, yielding a net return of $0.80 per contract with odds ratio b = 4.0.'}
               </p>
               <div className="p-3 bg-slate-950 font-mono text-emerald-400 rounded-lg border border-slate-800">
-                Formula: Kelly% = (b·p - q) / b | Enforced Cap: Math.min(Kelly%, 0.01)
+                Formula: Kelly% = (b·p - q) / b | Enforced Cap: Math.min(Kelly%, 0.10)
               </div>
             </div>
           </div>

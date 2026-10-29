@@ -39,7 +39,7 @@ const CONFIG = {
     Z_SCORE_LOWER: ${(config.zScoreLower ?? -2.0).toFixed(2)},
     Z_SCORE_LOWER_ENTRY: ${(config.zScoreLowerEntry ?? -1.9).toFixed(2)},
     MAX_PRICE_CENTS: ${config.maxPriceCents.toFixed(2)}, // أقصى سعر للدخول (${Math.round(config.maxPriceCents * 100)} سنت)
-    MAX_RISK_PERCENT: 0.01, // الحد الأقصى للمخاطرة 1% كحد أقصى لحماية رأس المال
+    MAX_RISK_PERCENT: 0.10, // الحد الأقصى للمخاطرة 10% كحد أقصى لحماية رأس المال
     ORDER_TYPE: '${config.orderType}',
     EXECUTION_MODE: 'DIRECT_UNIFIED', // أمر موحد مباشر (تم إلغاء التجزئة)
     
@@ -297,7 +297,7 @@ class LimitlessTradingBot {
     }
 
     // ==========================================
-    // 7. إدارة المخاطر (Kelly Criterion) 1% Max
+    // 7. إدارة المخاطر (Kelly Criterion) 10% Max
     // ==========================================
     private calculatePositionSize(): number {
         // نسبة العائد إلى المخاطرة (شراء بـ 0.20$ والربح الصافي 0.80$ -> النسبة = 4)
@@ -308,7 +308,7 @@ class LimitlessTradingBot {
         // معادلة كيلي: (bp - q) / b
         const kellyFraction = (b * p - q) / b;
         
-        // تطبيق الحد الأقصى للمخاطرة (لا يتجاوز 1% لحماية رأس المال)
+        // تطبيق الحد الأقصى للمخاطرة (لا يتجاوز 10% لحماية رأس المال)
         const riskToTake = Math.min(Math.max(kellyFraction, 0), CONFIG.MAX_RISK_PERCENT);
         
         const positionSizeUsd = this.currentBalance * riskToTake;
@@ -329,7 +329,7 @@ class LimitlessTradingBot {
         }
 
         const outcome = direction === 'LONG' ? 'UP' : 'DOWN';
-        console.log(\`🛒 Executing \${numberOfContracts} contracts for \${outcome} (\${direction}) via Direct EIP-712 Signing [1% Max Risk - No Chunking]...\`);
+        console.log(\`🛒 Executing \${numberOfContracts} contracts for \${outcome} (\${direction}) via Direct EIP-712 Signing [10% Max Risk - No Chunking]...\`);
 
         try {
             // توقيع وتنفيذ العقد كاملاً دفعة واحدة وفق معيار EIP-712 دون أي تجزئة

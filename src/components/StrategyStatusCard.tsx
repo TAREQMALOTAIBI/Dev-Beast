@@ -292,7 +292,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             <div className="text-[11px] text-slate-300 font-semibold mb-2 flex items-center justify-between">
               <span className="flex items-center gap-1.5">
                 <Zap className="w-3.5 h-3.5 text-amber-400" />
-                <span>{isAr ? 'تنفيذ فوري وتجربة صفقة الآن (سقف أمان المحفظة 1%):' : 'Instant Trade / Direct Execution (1% Max Safety):'}</span>
+                <span>{isAr ? 'تنفيذ فوري وتجربة صفقة الآن (سقف أمان المحفظة 10%):' : 'Instant Trade / Direct Execution (10% Max Safety):'}</span>
               </span>
               <span className="text-[10px] text-emerald-400 font-mono">Real CLOB</span>
             </div>
