@@ -31,7 +31,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
     setDraft({
       symbol: 'BTCUSDT',
       timeframe: '15m',
-      periods: 14,
+      periods: 30,
       strategyDirection: 'BOTH',
       zScoreUpper: 2.0,
       zScoreEntry: 2.0,
@@ -265,13 +265,13 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-400 mb-1">Rolling Periods (N)</label>
+                <label className="block text-slate-400 mb-1">{isAr ? 'عدد الشمعات التاريخية (N)' : 'Rolling Periods (N)'}</label>
                 <input
                   type="number"
                   min="5"
-                  max="50"
+                  max="100"
                   value={draft.periods}
-                  onChange={(e) => setDraft({ ...draft, periods: parseInt(e.target.value) || 14 })}
+                  onChange={(e) => setDraft({ ...draft, periods: parseInt(e.target.value) || 30 })}
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
                 />
               </div>

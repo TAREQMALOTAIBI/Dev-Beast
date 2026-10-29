@@ -319,7 +319,7 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
           <g transform={`translate(0, ${candleHeight})`}>
             {/* Title / Indicator Label */}
             <text x={padding.left} y={16} fill="#94a3b8" fontSize="11" fontWeight="600">
-              14-PERIOD BIDIRECTIONAL Z-SCORE OSCILLATOR (σ)
+              {periods}-PERIOD BIDIRECTIONAL Z-SCORE OSCILLATOR (σ)
             </text>
 
             {/* Upper Entry Threshold Line (+2.0σ) */}

@@ -203,7 +203,7 @@ class LimitlessTradingBot {
                 params: {
                     symbol: CONFIG.SYMBOL,
                     interval: CONFIG.TIMEFRAME,
-                    limit: CONFIG.PERIODS + 1
+                    limit: CONFIG.PERIODS + 35
                 }
             });
 

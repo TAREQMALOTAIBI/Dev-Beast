@@ -17,7 +17,7 @@ import { soundController } from '../utils/audio';
 const DEFAULT_CONFIG: BotConfig = {
   symbol: 'BTCUSDT',
   timeframe: '15m',
-  periods: 14,
+  periods: 30,
   strategyDirection: 'BOTH', // 'BOTH' | 'LONG_ONLY' | 'SHORT_ONLY'
   zScoreUpper: 2.0, // Upper threshold: Entry condition when exceeding 2.0 in rise
   zScoreEntry: 2.0,
@@ -68,6 +68,10 @@ export function useTradingBot() {
         }
         if (!parsed.strategyDirection) {
           parsed.strategyDirection = 'BOTH';
+        }
+        // Migrate candle periods from 14 to 30
+        if (!parsed.periods || parsed.periods === 14) {
+          parsed.periods = 30;
         }
         // Enforce threshold 2.0 and direct entry on exceeding threshold 2
         parsed.zScoreUpper = 2.0;
