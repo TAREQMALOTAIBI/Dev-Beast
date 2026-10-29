@@ -244,7 +244,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
           )}
         </button>
 
-        {/* Anti-Duplicate Contract Lock Status (Auto-transitions every 15 minutes) */}
+        {/* Anti-Duplicate Contract Lock Status (Auto-transitions every 1 hour) */}
         {contractLockInfo?.isLocked ? (
           <div className="mt-2.5 p-2.5 rounded-lg bg-sky-950/40 border border-sky-600/40 flex items-center justify-between gap-2 text-xs text-sky-200">
             <div className="flex items-center gap-2 min-w-0">
@@ -260,8 +260,8 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
                 </div>
                 <div className="text-[10px] text-slate-300 mt-0.5 truncate">
                   {isAr
-                    ? 'يفتح الروبوت صفقة واحدة فقط لكل عقد 15 دقيقة، وسينتقل تلقائياً للعقد القادم دون أي حاجة لضغط أي زر.'
-                    : 'Bot opens 1 trade max per 15m contract, then auto-transitions to next contract with zero clicks.'}
+                    ? 'يفتح الروبوت صفقة واحدة فقط لكل عقد ساعة (1 Hour)، وسينتقل تلقائياً للعقد القادم دون أي حاجة لضغط أي زر.'
+                    : 'Bot opens 1 trade max per 1h contract, then auto-transitions to next contract with zero clicks.'}
                 </div>
               </div>
             </div>

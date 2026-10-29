@@ -516,7 +516,7 @@ export default function App() {
           <div className="flex items-center gap-2">
             <span>{isAr ? 'نظام التداول الحي المباشر' : 'Live Trading System'}</span>
             <span>·</span>
-            <span>Binance 15m Z-Score Mean Reversion</span>
+            <span>Binance 1h Z-Score Mean Reversion</span>
             <span>·</span>
             <span>Limitless Exchange Execution</span>
           </div>

@@ -153,7 +153,7 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
           </div>
           <span className="text-slate-600">·</span>
           <span className="text-emerald-400 text-[11px] font-medium hidden sm:inline">
-            → إشارات التداول الفورية لعقد Limitless (15 Min)
+            → إشارات التداول الفورية لعقد Limitless (1 Hour)
           </span>
           <span className="text-slate-600 hidden sm:inline">·</span>
           <div className="text-slate-400">

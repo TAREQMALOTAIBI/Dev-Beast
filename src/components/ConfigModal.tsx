@@ -30,7 +30,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
   const handleResetDefaults = () => {
     setDraft({
       symbol: 'BTCUSDT',
-      timeframe: '15m',
+      timeframe: '1h',
       periods: 30,
       strategyDirection: 'BOTH',
       zScoreUpper: 2.0,
@@ -45,14 +45,14 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
       winProbability: 0.55,
       initialBalance: 1000,
       binanceRestUrl: 'https://api.binance.com/api/v3/klines',
-      binanceWsUrl: 'wss://stream.binance.com/ws/btcusdt@kline_15m',
+      binanceWsUrl: 'wss://stream.binance.com/ws/btcusdt@kline_1h',
       limitlessWsUrl: 'wss://ws.limitless.exchange',
-      limitlessMarketSlug: 'btc-up-or-down-15-min',
+      limitlessMarketSlug: 'btc-up-or-down-hourly',
       limitlessApiKey: '',
       limitlessTokenId: '',
       limitlessTokenSecret: '',
       singleTradePerContract: true,
-      cooldownMinutes: 15,
+      cooldownMinutes: 60,
     });
   };
 
@@ -70,7 +70,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
             <Radio className="w-5 h-5 text-emerald-400 animate-pulse" />
             <div>
               <h2 className="text-base font-bold text-slate-100">
-                {isAr ? 'إعدادات استراتيجية التداول (15 Min BTC)' : 'Trading Strategy Configuration (15m BTC)'}
+                {isAr ? 'إعدادات استراتيجية التداول (1-Hour BTC)' : 'Trading Strategy Configuration (1h BTC)'}
               </h2>
               <div className="text-[11px] text-slate-400">
                 {isAr ? 'ضبط معايير Z-Score ونموذج كيلي للأحجام الجزئية وسوق العقود' : 'Z-Score Thresholds, Fractional Kelly Sizing & Market Settings'}
@@ -219,17 +219,17 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
 
             <div className="pt-2 border-t border-slate-800">
               <label className="block text-slate-400 mb-1 font-semibold">
-                {isAr ? 'رمز سوق التوقع (15 دقيقة حصراً):' : 'Prediction Market Slug (15m Only):'}
+                {isAr ? 'رمز سوق التوقع (عقد الساعة حصراً):' : 'Prediction Market Slug (Hourly Only):'}
               </label>
               <input
                 type="text"
-                placeholder="btc-up-or-down-15-min"
+                placeholder="btc-up-or-down-hourly"
                 value={draft.limitlessMarketSlug}
                 onChange={(e) => setDraft({ ...draft, limitlessMarketSlug: e.target.value })}
                 className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono text-xs focus:outline-none focus:border-emerald-500"
               />
               <span className="text-[10px] text-emerald-400 mt-1 block">
-                {isAr ? '✓ مؤمّن تلقائياً: يتم اكتشاف وتحديث عقد الـ 15 دقيقة النشط فوراً' : '✓ Auto-secured: 15-minute active market is dynamically tracked'}
+                {isAr ? '✓ مؤمّن تلقائياً: يتم اكتشاف وتحديث عقد الساعة النشط فوراً' : '✓ Auto-secured: 1-hour active market is dynamically tracked'}
               </span>
             </div>
           </div>
@@ -259,8 +259,8 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 >
                   <option value="1m">1m</option>
                   <option value="5m">5m</option>
-                  <option value="15m">15m (Default)</option>
-                  <option value="1h">1h</option>
+                  <option value="15m">15m</option>
+                  <option value="1h">1h (Default - عقود الساعة)</option>
                 </select>
               </div>
 
@@ -468,13 +468,13 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 <label htmlFor="singleTradeToggle" className="cursor-pointer">
                   <div className="font-bold text-slate-100 text-xs">
                     {isAr
-                      ? 'قفل العقد: صفقة واحدة فقط كحد أقصى لكل عقد 15 دقيقة (موصى به)'
-                      : 'Lock Contract: Maximum 1 Trade Per 15-Minute Contract (Recommended)'}
+                      ? 'قفل العقد: صفقة واحدة فقط كحد أقصى لكل عقد ساعة (موصى به)'
+                      : 'Lock Contract: Maximum 1 Trade Per 1-Hour Contract (Recommended)'}
                   </div>
                   <div className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
                     {isAr
-                      ? 'يمنع الروبوت تماماً من فتح صفقة ثانية على نفس العقد حتى لو استمرت إشارة Z-Score أو تم تحديث الصفحة (Refresh). ينتظر الروبوت انتهاء الـ 15 دقيقة وبدء العقد التالي.'
-                      : 'Strictly blocks opening duplicate trades on the active contract even across page reloads. The bot waits for the 15-minute expiration before considering new setups.'}
+                      ? 'يمنع الروبوت تماماً من فتح صفقة ثانية على نفس العقد حتى لو استمرت إشارة Z-Score أو تم تحديث الصفحة (Refresh). ينتظر الروبوت انتهاء الساعة وبدء العقد التالي.'
+                      : 'Strictly blocks opening duplicate trades on the active contract even across page reloads. The bot waits for the 1-hour expiration before considering new setups.'}
                   </div>
                 </label>
               </div>
@@ -487,16 +487,16 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                   <input
                     type="number"
                     min="1"
-                    max="60"
-                    value={draft.cooldownMinutes ?? 15}
-                    onChange={(e) => setDraft({ ...draft, cooldownMinutes: Math.max(1, parseInt(e.target.value) || 15) })}
+                    max="120"
+                    value={draft.cooldownMinutes ?? 60}
+                    onChange={(e) => setDraft({ ...draft, cooldownMinutes: Math.max(1, parseInt(e.target.value) || 60) })}
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-100 font-mono text-xs focus:outline-none focus:border-amber-500"
                   />
                 </div>
                 <div className="text-[10px] text-slate-400 leading-normal">
                   {isAr
-                    ? '💡 القيمة الافتراضية 15 دقيقة مطابقة لزمن شمعة التوقع لمنع تراكم الصفقات المتزامنة.'
-                    : '💡 Default 15m matches the candle duration to prevent over-trading in prediction markets.'}
+                    ? '💡 القيمة الافتراضية 60 دقيقة مطابقة لزمن شمعة التوقع لمنع تراكم الصفقات المتزامنة.'
+                    : '💡 Default 60m matches the candle duration to prevent over-trading in prediction markets.'}
                 </div>
               </div>
             </div>

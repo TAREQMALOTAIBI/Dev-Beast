@@ -53,8 +53,8 @@ function loadTradeGuardFromDisk() {
       const raw = fs.readFileSync(TRADE_GUARD_FILE, 'utf8');
       const parsed = JSON.parse(raw);
       const ageMs = Date.now() - (Number(parsed?.timestamp) || 0);
-      if (ageMs >= 15 * 60 * 1000) {
-        console.log(`[VM Trade Guard] Previous contract lock expired (${Math.round(ageMs / 60000)}m ago). Auto-clearing.`);
+      if (ageMs >= 60 * 60 * 1000) {
+        console.log(`[VM Trade Guard] Previous hourly contract lock expired (${Math.round(ageMs / 60000)}m ago). Auto-clearing.`);
         clearTradeGuardFromDisk();
         return null;
       }
@@ -93,17 +93,20 @@ function clearTradeGuardFromDisk() {
 // Initial load into RAM on server boot
 loadTradeGuardFromDisk();
 
-function is15MinBtcMarket(m) {
+function isHourlyBtcMarket(m) {
   if (!m) return false;
   const slug = (m.slug || '').toLowerCase();
   const title = (m.title || '').toLowerCase();
   const isBtc = slug.includes('btc') || title.includes('btc') || title.includes('bitcoin');
   if (!isBtc) return false;
-  const is15 = /(^|[^0-9])15-min/i.test(slug) || /15\s*min/i.test(title) || /(^|[^0-9])15m/i.test(slug);
-  const is5 = /(^|[^0-9])5-min/i.test(slug) || /(^|[^0-9])5\s*min/i.test(title);
-  if (slug.includes('hourly') || slug.includes('daily')) return false;
-  return is15 && !is5;
+  const isHourly = /hourly/i.test(slug) || /hourly/i.test(title) || /(^|[^0-9])1-hour/i.test(slug) || /1\s*hour/i.test(title) || /(^|[^0-9])1h/i.test(slug) || /(^|[^0-9])60m/i.test(slug);
+  const isOther = /(^|[^0-9])5-min/i.test(slug) || /(^|[^0-9])15-min/i.test(slug) || /5\s*min/i.test(title) || /15\s*min/i.test(title);
+  if (slug.includes('daily') || slug.includes('weekly')) return false;
+  return isHourly && !isOther;
 }
+
+// Backward-compatible alias
+const is15MinBtcMarket = isHourlyBtcMarket;
 
 function broadcastSse(eventType, payload) {
   const msg = `event: ${eventType}\ndata: ${JSON.stringify(payload)}\n\n`;
@@ -117,28 +120,30 @@ function broadcastSse(eventType, payload) {
   }
 }
 
-async function fetchLive15MinBtcMarket() {
+async function fetchLiveHourlyBtcMarket() {
   try {
     const response = await fetch('https://api.limitless.exchange/markets/active');
     if (!response.ok) return null;
     const json = await response.json();
     const list = json?.data || [];
     const now = Date.now();
-    // Strictly require unexpired 15-minute BTC market (expirationTimestamp > now)
-    const valid15mMkts = list.filter((m) => is15MinBtcMarket(m) && m.expirationTimestamp && Number(m.expirationTimestamp) > now);
+    // Strictly require unexpired hourly BTC market (expirationTimestamp > now)
+    const validHourlyMkts = list.filter((m) => isHourlyBtcMarket(m) && m.expirationTimestamp && Number(m.expirationTimestamp) > now);
     
     // Sort so the currently active (closing soonest, but in the future) or funded market is first
-    valid15mMkts.sort((a, b) => {
+    validHourlyMkts.sort((a, b) => {
       if (a.status === 'FUNDED' && b.status !== 'FUNDED') return -1;
       if (b.status === 'FUNDED' && a.status !== 'FUNDED') return 1;
       return (Number(a.expirationTimestamp) || 0) - (Number(b.expirationTimestamp) || 0);
     });
 
-    return valid15mMkts[0] || null;
+    return validHourlyMkts[0] || null;
   } catch {
     return null;
   }
 }
+
+const fetchLive15MinBtcMarket = fetchLiveHourlyBtcMarket;
 
 async function pollActiveBtcMarket() {
   try {
@@ -152,7 +157,7 @@ async function pollActiveBtcMarket() {
       subscribedSlugs.clear();
     }
 
-    const market = await fetchLive15MinBtcMarket();
+    const market = await fetchLiveHourlyBtcMarket();
     if (!market) {
       // If no new market found yet, ensure socket is still healthy
       if (!limitlessWsInstance || typeof limitlessWsInstance.isConnected !== 'function' || !limitlessWsInstance.isConnected()) {
@@ -229,7 +234,7 @@ async function pollActiveBtcMarket() {
     if (slugChanged) {
       latestOrderbookData = null;
       subscribedSlugs.clear();
-      console.log(`[Limitless Rollover] New 15m contract active on VM: ${market.slug}`);
+      console.log(`[Limitless Rollover] New hourly contract active on VM: ${market.slug}`);
       broadcastSse('marketChange', cachedActiveBtc);
     }
 
@@ -620,7 +625,7 @@ app.get('/api/limitless/active-btc', async (_req, res) => {
     const now = Date.now();
     if (
       cachedActiveBtc &&
-      is15MinBtcMarket(cachedActiveBtc) &&
+      isHourlyBtcMarket(cachedActiveBtc) &&
       (!cachedActiveBtc.expirationTimestamp || Number(cachedActiveBtc.expirationTimestamp) > now) &&
       now - lastBtcFetchTime < 1500
     ) {
@@ -636,7 +641,7 @@ app.get('/api/limitless/active-btc', async (_req, res) => {
       return res.json({ success: true, ...cachedActiveBtc });
     }
 
-    res.json({ success: false, message: 'No active 15-minute BTC prediction market found' });
+    res.json({ success: false, message: 'No active 1-hour BTC prediction market found' });
   } catch (err) {
     res.status(500).json({ success: false, error: String(err) });
   }
@@ -645,7 +650,7 @@ app.get('/api/limitless/active-btc', async (_req, res) => {
 // Orderbook endpoint for specific market slug
 app.get('/api/limitless/orderbook', async (req, res) => {
   try {
-    const slug = req.query.slug || cachedActiveBtc?.slug || 'btc-up-or-down-15-min';
+    const slug = req.query.slug || cachedActiveBtc?.slug || 'btc-up-or-down-hourly';
     if (latestOrderbookData && latestOrderbookData.marketSlug === slug) {
       return res.json(latestOrderbookData.orderbook || latestOrderbookData);
     }
@@ -674,26 +679,26 @@ app.post('/api/limitless/order', async (req, res) => {
     });
   }
 
-  // 2. ANTI-DUPLICATE SHIELD: Exactly 1 trade per 15-minute contract cycle (Auto-expiring)
+  // 2. ANTI-DUPLICATE SHIELD: Exactly 1 trade per 1-hour contract cycle (Auto-expiring)
   const currentGuard = inMemoryTradeGuard || loadTradeGuardFromDisk();
   const nowMs = Date.now();
-  const CONTRACT_CYCLE_MS = 15 * 60 * 1000; // 15-minute contract lifespan
+  const CONTRACT_CYCLE_MS = 60 * 60 * 1000; // 1-hour (60-minute) contract lifespan
 
   if (!req.body?.ignoreLock && currentGuard && currentGuard.timestamp > 0) {
     const timeSinceLast = nowMs - Number(currentGuard.timestamp);
 
-    // If 15 minutes have elapsed, the previous contract is over and settled! Automatically clear lock!
+    // If 60 minutes have elapsed, the previous contract is over and settled! Automatically clear lock!
     if (timeSinceLast >= CONTRACT_CYCLE_MS) {
-      console.log(`[VM Guard Auto-Unlock] 15-minute contract window elapsed (${Math.round(timeSinceLast / 60000)}m). Auto-clearing lock for new contract.`);
+      console.log(`[VM Guard Auto-Unlock] 1-hour contract window elapsed (${Math.round(timeSinceLast / 60000)}m). Auto-clearing lock for new contract.`);
       clearTradeGuardFromDisk();
     } else {
-      // Within the 15-minute window: enforce single trade per contract
+      // Within the 1-hour window: enforce single trade per contract
       const remainingMins = Math.max(1, Math.ceil((CONTRACT_CYCLE_MS - timeSinceLast) / 60000));
-      console.warn(`[VM Trade Shield] Contract trade limit reached (1 trade per 15m contract). Remaining: ${remainingMins}m until next contract.`);
+      console.warn(`[VM Trade Shield] Contract trade limit reached (1 trade per 1h contract). Remaining: ${remainingMins}m until next contract.`);
       return res.status(429).json({
         success: false,
         mode: 'VM_TRADE_LOCKED',
-        error: `تم تنفيذ صفقة هذا العقد بنجاح. يفتح الروبوت صفقة واحدة فقط لكل عقد 15 دقيقة وسينتقل تلقائياً للعقد القادم بعد ${remainingMins} دقيقة.`,
+        error: `تم تنفيذ صفقة هذا العقد بنجاح. يفتح الروبوت صفقة واحدة فقط لكل عقد ساعة (1 Hour) وسينتقل تلقائياً للعقد القادم بعد ${remainingMins} دقيقة.`,
         cooldownRemainingMinutes: remainingMins,
         lockedGuard: currentGuard,
       });
@@ -712,12 +717,12 @@ app.post('/api/limitless/order', async (req, res) => {
     const hasLiveAuth = Boolean(pk && tokenId && secret);
 
     // Fetch market data to obtain token IDs and venue contract address
-    let activeMarketSlug = market || 'btc-100k-weekly';
+    let activeMarketSlug = market || 'btc-up-or-down-hourly';
     let marketData = null;
 
     // Check if market exists, and verify it has not expired or resolved
     let isExpiredOrResolved = false;
-    if (activeMarketSlug && is15MinBtcMarket({ slug: activeMarketSlug })) {
+    if (activeMarketSlug && isHourlyBtcMarket({ slug: activeMarketSlug })) {
       try {
         const mRes = await fetch(`https://api.limitless.exchange/markets/${encodeURIComponent(activeMarketSlug)}`);
         if (mRes.ok) {
@@ -744,21 +749,21 @@ app.post('/api/limitless/order', async (req, res) => {
         const activeJson = await activeRes.json();
         const list = activeJson?.data || [];
         const now = Date.now();
-        const live15 = list.find((m) => is15MinBtcMarket(m) && m.status === 'FUNDED' && (!m.expirationTimestamp || m.expirationTimestamp > now))
-          || list.find((m) => is15MinBtcMarket(m) && (!m.expirationTimestamp || m.expirationTimestamp > now));
-        if (live15) {
-          activeMarketSlug = live15.slug;
-          marketData = live15;
-          cachedActiveBtcServer = live15;
-          console.log(`[ORDER ROUTER] Market was expired/inactive. Auto-routed to current live 15m market: '${live15.slug}'`);
+        const liveHourly = list.find((m) => isHourlyBtcMarket(m) && m.status === 'FUNDED' && (!m.expirationTimestamp || m.expirationTimestamp > now))
+          || list.find((m) => isHourlyBtcMarket(m) && (!m.expirationTimestamp || m.expirationTimestamp > now));
+        if (liveHourly) {
+          activeMarketSlug = liveHourly.slug;
+          marketData = liveHourly;
+          cachedActiveBtcServer = liveHourly;
+          console.log(`[ORDER ROUTER] Market was expired/inactive. Auto-routed to current live hourly market: '${liveHourly.slug}'`);
         }
       }
     }
 
-    if (!marketData || !is15MinBtcMarket(marketData)) {
+    if (!marketData || !isHourlyBtcMarket(marketData)) {
       return res.status(400).json({
         success: false,
-        error: `Safety Guard Blocked: No active, unexpired 15-minute BTC market was found on Limitless Exchange. Order aborted.`,
+        error: `Safety Guard Blocked: No active, unexpired 1-hour BTC market was found on Limitless Exchange. Order aborted.`,
       });
     }
 

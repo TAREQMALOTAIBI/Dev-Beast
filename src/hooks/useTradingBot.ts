@@ -16,7 +16,7 @@ import { soundController } from '../utils/audio';
 
 const DEFAULT_CONFIG: BotConfig = {
   symbol: 'BTCUSDT',
-  timeframe: '15m',
+  timeframe: '1h',
   periods: 30,
   strategyDirection: 'BOTH', // 'BOTH' | 'LONG_ONLY' | 'SHORT_ONLY'
   zScoreUpper: 2.0, // Upper threshold: Entry condition when exceeding 2.0 in rise
@@ -31,14 +31,14 @@ const DEFAULT_CONFIG: BotConfig = {
   winProbability: 0.55,
   initialBalance: 1000,
   binanceRestUrl: 'https://api.binance.com/api/v3/klines',
-  binanceWsUrl: 'wss://stream.binance.com/ws/btcusdt@kline_15m',
+  binanceWsUrl: 'wss://stream.binance.com/ws/btcusdt@kline_1h',
   limitlessWsUrl: 'wss://ws.limitless.exchange',
-  limitlessMarketSlug: 'btc-up-or-down-15-min',
+  limitlessMarketSlug: 'btc-up-or-down-hourly',
   limitlessApiKey: (typeof process !== 'undefined' && process.env?.LIMITLESS_API_KEY) || '',
   limitlessTokenId: (typeof process !== 'undefined' && process.env?.LMTS_TOKEN_ID) || '',
   limitlessTokenSecret: (typeof process !== 'undefined' && process.env?.LMTS_TOKEN_SECRET) || '',
-  singleTradePerContract: true, // Strictly max 1 trade per 15-minute contract
-  cooldownMinutes: 15, // 15-minute cooldown guard between trades
+  singleTradePerContract: true, // Strictly max 1 trade per 1-hour contract
+  cooldownMinutes: 60, // 60-minute cooldown guard between trades
 };
 
 export function useTradingBot() {
@@ -48,7 +48,7 @@ export function useTradingBot() {
       const saved = localStorage.getItem('limitless_live_bot_config');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed.binanceWsUrl && parsed.binanceWsUrl.includes(':9443')) {
+        if (parsed.binanceWsUrl && (parsed.binanceWsUrl.includes(':9443') || parsed.binanceWsUrl.includes('15m'))) {
           parsed.binanceWsUrl = DEFAULT_CONFIG.binanceWsUrl;
         }
         if (parsed.binanceRestUrl && parsed.binanceRestUrl.includes('binance.vision')) {
@@ -57,14 +57,18 @@ export function useTradingBot() {
         if (parsed.limitlessWsUrl && parsed.limitlessWsUrl.includes('api.limitless.exchange')) {
           parsed.limitlessWsUrl = DEFAULT_CONFIG.limitlessWsUrl;
         }
-        // Force migration away from 5-min, weekly markets, or specific expired timestamp slugs to base 15-min
+        // Force migration away from 5-min, 15-min, weekly markets, or specific expired timestamp slugs to base hourly
         if (
           !parsed.limitlessMarketSlug ||
           /(^|[^0-9])5-min/i.test(parsed.limitlessMarketSlug) ||
+          /(^|[^0-9])15-min/i.test(parsed.limitlessMarketSlug) ||
           parsed.limitlessMarketSlug.includes('weekly') ||
           /\d{8,}/.test(parsed.limitlessMarketSlug)
         ) {
           parsed.limitlessMarketSlug = DEFAULT_CONFIG.limitlessMarketSlug;
+        }
+        if (!parsed.timeframe || parsed.timeframe === '15m') {
+          parsed.timeframe = '1h';
         }
         if (!parsed.strategyDirection) {
           parsed.strategyDirection = 'BOTH';
@@ -90,12 +94,12 @@ export function useTradingBot() {
         parsed.chunkDelayMs = 0;
         // Strictly cap maxRiskPercent at 1% (0.01) wallet safety limit
         parsed.maxRiskPercent = 0.01;
-        // Ensure single trade per 15-minute contract is active
+        // Ensure single trade per 1-hour contract is active
         if (parsed.singleTradePerContract === undefined) {
           parsed.singleTradePerContract = true;
         }
-        if (parsed.cooldownMinutes === undefined || parsed.cooldownMinutes < 1) {
-          parsed.cooldownMinutes = 15;
+        if (parsed.cooldownMinutes === undefined || parsed.cooldownMinutes < 1 || parsed.cooldownMinutes === 15) {
+          parsed.cooldownMinutes = 60;
         }
 
         // Auto-inject env secrets if persisted config has empty credentials
@@ -185,19 +189,19 @@ export function useTradingBot() {
     lastTradedSlug?: string;
   }>({ isLocked: false });
 
-  // Load persistent trade guard on mount (Sync from VM server disk & RAM with 15-minute auto-expiry)
+  // Load persistent trade guard on mount (Sync from VM server disk & RAM with 1-hour auto-expiry)
   useEffect(() => {
     try {
       const saved = localStorage.getItem('limitless_last_trade_guard');
       if (saved) {
         const parsed = JSON.parse(saved);
         const age = Date.now() - (Number(parsed?.timestamp) || 0);
-        if (age < 15 * 60 * 1000) {
+        if (age < 60 * 60 * 1000) {
           if (parsed.marketSlug) lastExecutedMarketSlugRef.current = parsed.marketSlug;
           if (parsed.timestamp) lastExecutedTimestampRef.current = Number(parsed.timestamp);
           if (parsed.candleTime) lastExecutedCandleTimeRef.current = Number(parsed.candleTime);
         } else {
-          // Stale local guard (> 15 minutes), clean it up!
+          // Stale local guard (> 60 minutes), clean it up!
           localStorage.removeItem('limitless_last_trade_guard');
         }
       }
@@ -209,7 +213,7 @@ export function useTradingBot() {
       .then((serverGuard) => {
         if (serverGuard && serverGuard.marketSlug) {
           const age = Date.now() - (Number(serverGuard.timestamp) || 0);
-          if (age < 15 * 60 * 1000) {
+          if (age < 60 * 60 * 1000) {
             lastExecutedMarketSlugRef.current = serverGuard.marketSlug;
             lastExecutedTimestampRef.current = Number(serverGuard.timestamp) || 0;
             lastExecutedCandleTimeRef.current = Number(serverGuard.candleTime) || 0;
@@ -370,11 +374,11 @@ export function useTradingBot() {
     }
   }, []);
 
-  // Anti-Duplicate Guard: Strictly 1 trade per 15-minute contract cycle (Auto-Expiring)
+  // Anti-Duplicate Guard: Strictly 1 trade per 1-hour contract cycle (Auto-Expiring)
   const checkTradeLock = useCallback((targetSlug: string, cTime?: number): { locked: boolean; reason?: string } => {
     const cfg = configRef.current;
     const now = Date.now();
-    const cycleDurationMs = (cfg.cooldownMinutes ?? 15) * 60 * 1000;
+    const cycleDurationMs = (cfg.cooldownMinutes ?? 60) * 60 * 1000;
 
     let persistedGuard: any = null;
     try {
@@ -391,7 +395,7 @@ export function useTradingBot() {
 
     const elapsedMs = now - lastTime;
 
-    // RULE 1: AUTO-EXPIRATION: If 15 minutes have passed since the trade, the lock is AUTOMATICALLY CLEARED!
+    // RULE 1: AUTO-EXPIRATION: If 60 minutes have passed since the trade, the lock is AUTOMATICALLY CLEARED!
     if (elapsedMs >= cycleDurationMs) {
       lastExecutedMarketSlugRef.current = '';
       lastExecutedTimestampRef.current = 0;
@@ -402,12 +406,12 @@ export function useTradingBot() {
       return { locked: false };
     }
 
-    // RULE 2: WITHIN the 15-minute contract window:
-    // Exactly 1 trade allowed for this 15-minute contract cycle.
+    // RULE 2: WITHIN the 1-hour contract window:
+    // Exactly 1 trade allowed for this 1-hour contract cycle.
     const remainingMins = Math.max(1, Math.ceil((cycleDurationMs - elapsedMs) / 60000));
     return {
       locked: true,
-      reason: `🔒 تم تنفيذ صفقة هذا العقد (متبقي ${remainingMins} دقيقة حتى انتهاء الـ 15 دقيقة والانتقال التلقائي للعقد القادم).`,
+      reason: `🔒 تم تنفيذ صفقة هذا العقد (متبقي ${remainingMins} دقيقة حتى انتهاء نافذة الساعة والانتقال التلقائي للعقد القادم).`,
     };
   }, []);
 
@@ -426,14 +430,16 @@ export function useTradingBot() {
     const cfg = configRef.current;
     let balance = currentBalanceRef.current;
 
-    // Determine target 15-minute market slug using latest live ref first
+    // Determine target 1-hour market slug using latest live ref first
     let currentMarket = activeLimitlessMarketRef.current;
-    if (!currentMarket?.slug || !currentMarket.slug.includes('15-min')) {
+    const isHourlyMarket = (s?: string) => Boolean(s && (/hourly/i.test(s) || s.includes('1-hour') || s.includes('1h')));
+
+    if (!currentMarket?.slug || !isHourlyMarket(currentMarket.slug)) {
       try {
         const mRes = await fetch('/api/limitless/active-btc');
         if (mRes.ok) {
           const mData = await mRes.json();
-          if (mData && mData.slug && mData.slug.includes('15-min')) {
+          if (mData && mData.slug && isHourlyMarket(mData.slug)) {
             currentMarket = mData;
             activeLimitlessMarketRef.current = mData;
             setActiveLimitlessMarket(mData);
@@ -443,11 +449,11 @@ export function useTradingBot() {
     }
 
     const resolvedMarketSlug =
-      currentMarket?.slug && currentMarket.slug.includes('15-min')
+      currentMarket?.slug && isHourlyMarket(currentMarket.slug)
         ? currentMarket.slug
-        : cfg.limitlessMarketSlug && cfg.limitlessMarketSlug.includes('15-min')
+        : cfg.limitlessMarketSlug && isHourlyMarket(cfg.limitlessMarketSlug)
         ? cfg.limitlessMarketSlug
-        : 'btc-up-or-down-15-min';
+        : 'btc-up-or-down-hourly';
 
     // 2. Strict Anti-Duplicate Guard
     const lock = checkTradeLock(resolvedMarketSlug, candleTime);
@@ -461,10 +467,10 @@ export function useTradingBot() {
       return;
     }
 
-    // Strict Safety Guard: NEVER trade 5-minute contracts
-    if (/(^|[^0-9])5-min/i.test(resolvedMarketSlug)) {
+    // Strict Safety Guard: NEVER trade 5-minute or 15-minute contracts
+    if (/(^|[^0-9])5-min/i.test(resolvedMarketSlug) || /(^|[^0-9])15-min/i.test(resolvedMarketSlug)) {
       console.error(
-        `[SAFETY SHIELD] 5-Minute contract '${resolvedMarketSlug}' blocked! Trading bot is locked strictly to 15-minute contracts.`
+        `[SAFETY SHIELD] Contract '${resolvedMarketSlug}' blocked! Trading bot is locked strictly to 1-hour contracts (BTC Up or Down Hourly).`
       );
       return;
     }
@@ -724,12 +730,12 @@ export function useTradingBot() {
   // Synchronize lock info periodically with automatic unlocking
   useEffect(() => {
     const updateLockState = () => {
-      const slug = activeLimitlessMarketRef.current?.slug || configRef.current.limitlessMarketSlug || 'btc-up-or-down-15-min';
+      const slug = activeLimitlessMarketRef.current?.slug || configRef.current.limitlessMarketSlug || 'btc-up-or-down-hourly';
       const check = checkTradeLock(slug);
       let cooldownRemainingMinutes = 0;
       if (check.locked) {
         const now = Date.now();
-        const cycleDurationMs = (configRef.current.cooldownMinutes ?? 15) * 60 * 1000;
+        const cycleDurationMs = (configRef.current.cooldownMinutes ?? 60) * 60 * 1000;
         let lastTime = lastExecutedTimestampRef.current || 0;
         try {
           const raw = localStorage.getItem('limitless_last_trade_guard');
@@ -764,7 +770,7 @@ export function useTradingBot() {
       const { zScore } = calculateZScore(prices, cfg.zScoreUpper, cfg.zScoreEntry, lowerThresh, lowerEntryThresh);
       setCurrentZScore(zScore);
 
-      const targetMarketSlug = activeLimitlessMarketRef.current?.slug || cfg.limitlessMarketSlug || 'btc-up-or-down-15-min';
+      const targetMarketSlug = activeLimitlessMarketRef.current?.slug || cfg.limitlessMarketSlug || 'btc-up-or-down-hourly';
 
       // ================= DIRECTION 1: UPPER / RISE (Short / Down) =================
       // شرط الدخول: فقط عند تجاوز العتبة 2 في الصعود (Z >= +2.0σ)
@@ -890,8 +896,8 @@ export function useTradingBot() {
         setActiveLimitlessMarket((prev) => {
           if (!prev) {
             return {
-              slug: data.marketSlug || 'btc-up-or-down-15-min',
-              title: 'BTC Up or Down - 15 Min',
+              slug: data.marketSlug || 'btc-up-or-down-hourly',
+              title: 'BTC Up or Down Hourly',
               status: 'FUNDED',
               prices: [data.prices[0], data.prices[1]],
             } as any;
@@ -907,8 +913,9 @@ export function useTradingBot() {
       if (
         newMarket &&
         newMarket.slug &&
-        (/(^|[^0-9])15-min/i.test(newMarket.slug) || /15\s*min/i.test(newMarket.title || '')) &&
-        !/(^|[^0-9])5-min/i.test(newMarket.slug)
+        (/hourly/i.test(newMarket.slug) || /hourly/i.test(newMarket.title || '') || /(^|[^0-9])1-hour/i.test(newMarket.slug) || /1\s*hour/i.test(newMarket.title || '') || /(^|[^0-9])1h/i.test(newMarket.slug)) &&
+        !/(^|[^0-9])5-min/i.test(newMarket.slug) &&
+        !/(^|[^0-9])15-min/i.test(newMarket.slug)
       ) {
         setActiveLimitlessMarket(newMarket);
         activeLimitlessMarketRef.current = newMarket;
@@ -934,7 +941,7 @@ export function useTradingBot() {
       }
     });
 
-    limitlessService.connect(config.limitlessWsUrl, 'btc-up-or-down-15-min', {
+    limitlessService.connect(config.limitlessWsUrl, 'btc-up-or-down-hourly', {
       apiKey: config.limitlessApiKey,
       tokenId: config.limitlessTokenId,
       secret: config.limitlessTokenSecret,
@@ -1059,8 +1066,9 @@ export function useTradingBot() {
           data &&
           data.success &&
           data.slug &&
-          (/(^|[^0-9])15-min/i.test(data.slug) || /15\s*min/i.test(data.title || '')) &&
-          !/(^|[^0-9])5-min/i.test(data.slug)
+          (/hourly/i.test(data.slug) || /hourly/i.test(data.title || '') || /(^|[^0-9])1-hour/i.test(data.slug) || /1\s*hour/i.test(data.title || '') || /(^|[^0-9])1h/i.test(data.slug)) &&
+          !/(^|[^0-9])5-min/i.test(data.slug) &&
+          !/(^|[^0-9])15-min/i.test(data.slug)
         ) {
           setActiveLimitlessMarket(data);
           activeLimitlessMarketRef.current = data;
