@@ -679,31 +679,8 @@ app.post('/api/limitless/order', async (req, res) => {
     });
   }
 
-  // 2. ANTI-DUPLICATE SHIELD: Exactly 1 trade per 1-hour contract cycle (Auto-expiring)
-  const currentGuard = inMemoryTradeGuard || loadTradeGuardFromDisk();
-  const nowMs = Date.now();
-  const CONTRACT_CYCLE_MS = 60 * 60 * 1000; // 1-hour (60-minute) contract lifespan
-
-  if (!req.body?.ignoreLock && currentGuard && currentGuard.timestamp > 0) {
-    const timeSinceLast = nowMs - Number(currentGuard.timestamp);
-
-    // If 60 minutes have elapsed, the previous contract is over and settled! Automatically clear lock!
-    if (timeSinceLast >= CONTRACT_CYCLE_MS) {
-      console.log(`[VM Guard Auto-Unlock] 1-hour contract window elapsed (${Math.round(timeSinceLast / 60000)}m). Auto-clearing lock for new contract.`);
-      clearTradeGuardFromDisk();
-    } else {
-      // Within the 1-hour window: enforce single trade per contract
-      const remainingMins = Math.max(1, Math.ceil((CONTRACT_CYCLE_MS - timeSinceLast) / 60000));
-      console.warn(`[VM Trade Shield] Contract trade limit reached (1 trade per 1h contract). Remaining: ${remainingMins}m until next contract.`);
-      return res.status(429).json({
-        success: false,
-        mode: 'VM_TRADE_LOCKED',
-        error: `تم تنفيذ صفقة هذا العقد بنجاح. يفتح الروبوت صفقة واحدة فقط لكل عقد ساعة (1 Hour) وسينتقل تلقائياً للعقد القادم بعد ${remainingMins} دقيقة.`,
-        cooldownRemainingMinutes: remainingMins,
-        lockedGuard: currentGuard,
-      });
-    }
-  }
+  // Contract lock check removed per user request: unrestricted trading on valid signals
+  // (In-flight mutex above remains to prevent concurrent double-clicks)
 
   isServerExecutingOrder = true;
 

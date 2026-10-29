@@ -276,12 +276,12 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             )}
           </div>
         ) : (
-          <div className="mt-2.5 pt-2 border-t border-slate-800/80 text-[11px] text-slate-400 text-center flex items-center justify-center gap-1.5">
+          <div className="mt-2.5 pt-2 border-t border-slate-800/80 text-[11px] text-slate-400 text-center flex items-center justify-center gap-1.5 flex-wrap">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
             <span>
               {isAr
-                ? (botActive ? '⚡ محرك التداول الآلي يعمل بنشاط: جاهز لتنفيذ الصفقة القادمة تلقائياً عند تحقق إشارات Z-Score' : 'التنفيذ التلقائي متوقف حالياً. اضغط الزر أعلاه لتشغيل الروبوت.')
-                : (botActive ? '⚡ Automated engine active: Ready for next trade on Z-Score reversal.' : 'Automated execution is paused. Click above to start.')}
+                ? (botActive ? '⚡ محرك التداول الآلي نشط (بدون قفل عقد): جاهز للتنفيذ الفوري عند كل إشارة Z-Score' : 'التنفيذ التلقائي متوقف حالياً. اضغط الزر أعلاه لتشغيل الروبوت.')
+                : (botActive ? '⚡ Automated engine active (No contract lock): Ready for immediate execution on every Z-Score signal.' : 'Automated execution is paused. Click above to start.')}
             </span>
           </div>
         )}

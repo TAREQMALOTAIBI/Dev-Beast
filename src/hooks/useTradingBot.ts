@@ -374,45 +374,9 @@ export function useTradingBot() {
     }
   }, []);
 
-  // Anti-Duplicate Guard: Strictly 1 trade per 1-hour contract cycle (Auto-Expiring)
-  const checkTradeLock = useCallback((targetSlug: string, cTime?: number): { locked: boolean; reason?: string } => {
-    const cfg = configRef.current;
-    const now = Date.now();
-    const cycleDurationMs = (cfg.cooldownMinutes ?? 60) * 60 * 1000;
-
-    let persistedGuard: any = null;
-    try {
-      const raw = localStorage.getItem('limitless_last_trade_guard');
-      if (raw) persistedGuard = JSON.parse(raw);
-    } catch {}
-
-    const lastTime = Math.max(lastExecutedTimestampRef.current || 0, persistedGuard?.timestamp || 0);
-
-    // If no previous trade recorded, completely open
-    if (!lastTime || lastTime <= 0) {
-      return { locked: false };
-    }
-
-    const elapsedMs = now - lastTime;
-
-    // RULE 1: AUTO-EXPIRATION: If 60 minutes have passed since the trade, the lock is AUTOMATICALLY CLEARED!
-    if (elapsedMs >= cycleDurationMs) {
-      lastExecutedMarketSlugRef.current = '';
-      lastExecutedTimestampRef.current = 0;
-      lastExecutedCandleTimeRef.current = 0;
-      try {
-        localStorage.removeItem('limitless_last_trade_guard');
-      } catch {}
-      return { locked: false };
-    }
-
-    // RULE 2: WITHIN the 1-hour contract window:
-    // Exactly 1 trade allowed for this 1-hour contract cycle.
-    const remainingMins = Math.max(1, Math.ceil((cycleDurationMs - elapsedMs) / 60000));
-    return {
-      locked: true,
-      reason: `🔒 تم تنفيذ صفقة هذا العقد (متبقي ${remainingMins} دقيقة حتى انتهاء نافذة الساعة والانتقال التلقائي للعقد القادم).`,
-    };
+  // Contract Lock removed per user request: trading is unrestricted on valid signals
+  const checkTradeLock = useCallback((_targetSlug?: string, _cTime?: number): { locked: boolean; reason?: string } => {
+    return { locked: false };
   }, []);
 
   // Execute LIVE Trade strictly across Limitless
@@ -727,36 +691,19 @@ export function useTradingBot() {
     });
   }, []);
 
-  // Synchronize lock info periodically with automatic unlocking
+  // Contract lock is permanently removed per user request
   useEffect(() => {
-    const updateLockState = () => {
-      const slug = activeLimitlessMarketRef.current?.slug || configRef.current.limitlessMarketSlug || 'btc-up-or-down-hourly';
-      const check = checkTradeLock(slug);
-      let cooldownRemainingMinutes = 0;
-      if (check.locked) {
-        const now = Date.now();
-        const cycleDurationMs = (configRef.current.cooldownMinutes ?? 60) * 60 * 1000;
-        let lastTime = lastExecutedTimestampRef.current || 0;
-        try {
-          const raw = localStorage.getItem('limitless_last_trade_guard');
-          if (raw) lastTime = Math.max(lastTime, JSON.parse(raw).timestamp || 0);
-        } catch {}
-        if (lastTime > 0 && (now - lastTime) < cycleDurationMs) {
-          cooldownRemainingMinutes = Math.ceil((cycleDurationMs - (now - lastTime)) / 60000);
-        }
-      }
-      setContractLockInfo({
-        isLocked: check.locked,
-        reason: check.reason,
-        cooldownRemainingMinutes,
-        lastTradedSlug: lastExecutedMarketSlugRef.current,
-      });
-    };
-
-    updateLockState();
-    const lockTimer = setInterval(updateLockState, 2000);
-    return () => clearInterval(lockTimer);
-  }, [checkTradeLock]);
+    // Clear any remnant lock on boot
+    try {
+      localStorage.removeItem('limitless_last_trade_guard');
+    } catch {}
+    limitlessService.clearTradeGuardOnVm().catch(() => {});
+    setContractLockInfo({
+      isLocked: false,
+      reason: undefined,
+      cooldownRemainingMinutes: 0,
+    });
+  }, []);
 
   // Real Market Strategy Evaluation (Evaluates on every tick for immediate same-candle entry)
   const evaluateLiveStrategy = useCallback(
