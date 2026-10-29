@@ -850,11 +850,12 @@ app.post('/api/limitless/order', async (req, res) => {
       logger: new sdk.ConsoleLogger(),
     });
 
-    const orderTypeEnum = type === 'GTC'
-      ? sdk.OrderType.GTC
-      : type === 'FOK'
+    const resolvedType = (type || 'GTC').toUpperCase();
+    const orderTypeEnum = resolvedType === 'FAK'
+      ? sdk.OrderType.FAK
+      : resolvedType === 'FOK'
       ? sdk.OrderType.FOK
-      : sdk.OrderType.FAK;
+      : sdk.OrderType.GTC;
 
     const orderArgs = {
       marketSlug: activeMarketSlug,

@@ -234,8 +234,8 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
                     <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
                     <span>
                       {isAr
-                        ? 'تنفيذ فوري مباشر للأمر كاملاً دفعة واحدة بنوع FAK دون أي تجزئة (سقف أمان المحفظة 10% كحد أقصى)'
-                        : 'Direct instant execution for full order via FAK with 10% max risk safety cap (No chunking)'}
+                        ? 'تنفيذ مباشر للأمر كاملاً دفعة واحدة بنوع GTC دون أي تجزئة (سقف أمان المحفظة 10% كحد أقصى)'
+                        : 'Direct execution for full order via GTC with 10% max risk safety cap (No chunking)'}
                     </span>
                   </div>
                   {activeTrade && (
@@ -273,7 +273,7 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
                         <div className="flex items-center justify-between text-xs mb-2">
                           <div className="flex items-center gap-1.5">
                             <span className="font-bold text-slate-200">
-                              {isAr ? 'الأمر الفوري المباشر (FAK - بدون تجزئة)' : 'Direct Order (FAK - No Chunks)'}
+                              {isAr ? 'الأمر المباشر (GTC - بدون تجزئة)' : 'Direct Order (GTC - No Chunks)'}
                             </span>
                             {chunk?.direction && (
                               <span
@@ -318,7 +318,7 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
                       </span>
                     </div>
                     <div className="flex justify-between text-slate-400">
-                      <span>{isAr ? `السعر (${chunk?.payload?.type || 'FAK'}):` : `Price (${chunk?.payload?.type || 'FAK'}):`}</span>
+                      <span>{isAr ? `السعر (${chunk?.payload?.type || 'GTC'}):` : `Price (${chunk?.payload?.type || 'GTC'}):`}</span>
                       <span className="text-slate-200">
                         {chunk ? `$${chunk.price.toFixed(2)}` : '—'}
                       </span>

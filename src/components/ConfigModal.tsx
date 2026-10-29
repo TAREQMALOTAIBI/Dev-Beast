@@ -39,7 +39,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
       zScoreLowerEntry: -2.0,
       maxPriceCents: 0.85,
       maxRiskPercent: 0.10,
-      orderType: 'FAK',
+      orderType: 'GTC',
       fractionChunks: 1,
       chunkDelayMs: 500,
       winProbability: 0.55,
@@ -394,9 +394,9 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                   onChange={(e) => setDraft({ ...draft, orderType: e.target.value as any })}
                   className="w-full bg-slate-950 border border-emerald-600/60 rounded-lg px-3 py-2 text-emerald-300 font-mono font-bold"
                 >
+                  <option value="GTC">GTC (Good-Til-Cancelled)</option>
                   <option value="FAK">FAK (Fill-And-Kill)</option>
                   <option value="IOC">IOC (Immediate-Or-Cancel)</option>
-                  <option value="GTC">GTC (Good-Til-Cancelled)</option>
                   <option value="FOK">FOK (Fill-Or-Kill)</option>
                 </select>
               </div>
@@ -433,8 +433,8 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
             <div className="mt-2.5 p-2.5 rounded-lg bg-emerald-950/40 border border-emerald-700/50 text-[11px] text-emerald-300 space-y-1.5">
               <div className="font-semibold text-emerald-200">
                 {isAr
-                  ? '✓ تم إلغاء تجزئة العقود: يتم تنفيذ الصفقة مباشرة كأمر موحد كامل دفعة واحدة بنوع FAK دون تقسيم.'
-                  : '✓ Contract Chunking Removed: Trade is executed directly as a single unified order via FAK without chunk splits.'}
+                  ? '✓ تم إلغاء تجزئة العقود: يتم تنفيذ الصفقة مباشرة كأمر موحد كامل دفعة واحدة بنوع GTC دون تقسيم.'
+                  : '✓ Contract Chunking Removed: Trade is executed directly as a single unified order via GTC without chunk splits.'}
               </div>
               <div className="text-sky-300">
                 {isAr

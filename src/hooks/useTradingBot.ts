@@ -25,7 +25,7 @@ const DEFAULT_CONFIG: BotConfig = {
   zScoreLowerEntry: -2.0,
   maxPriceCents: 0.85, // Ceiling price
   maxRiskPercent: 0.10, // Strictly capped at 10% maximum (wallet safety limit)
-  orderType: 'FAK', // Fill-And-Kill
+  orderType: 'GTC', // Good-Til-Cancelled
   fractionChunks: 1, // 1 unified single direct order (chunking eliminated)
   chunkDelayMs: 0,
   winProbability: 0.55,
@@ -82,9 +82,9 @@ export function useTradingBot() {
         parsed.zScoreEntry = 2.0;
         parsed.zScoreLower = -2.0;
         parsed.zScoreLowerEntry = -2.0;
-        // Force orderType to FAK
-        if (!parsed.orderType || parsed.orderType === 'GTC') {
-          parsed.orderType = 'FAK';
+        // Set default orderType to GTC
+        if (!parsed.orderType || parsed.orderType === 'FAK') {
+          parsed.orderType = 'GTC';
         }
         if (parsed.maxPriceCents === undefined || parsed.maxPriceCents < 0.3) {
           parsed.maxPriceCents = 0.85;
