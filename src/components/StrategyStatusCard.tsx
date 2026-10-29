@@ -1,5 +1,5 @@
 import React from 'react';
-import { BotConfig } from '../types/bot';
+import { BotConfig, EmaFilterState } from '../types/bot';
 import {
   ShieldAlert,
   Zap,
@@ -30,6 +30,7 @@ interface StrategyStatusCardProps {
   config: BotConfig;
   lang: 'en' | 'ar';
   metric?: import('../types/bot').ZScoreMetric | null;
+  emaFilter?: EmaFilterState;
   executionNotice?: {
     type: 'SUCCESS' | 'WARNING' | 'ERROR';
     message: string;
@@ -62,6 +63,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
   config,
   lang,
   metric,
+  emaFilter,
   executionNotice,
   onClearNotice,
   contractLockInfo,
@@ -72,15 +74,20 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
   const lowerThresh = config.zScoreLower !== undefined ? config.zScoreLower : -config.zScoreUpper;
   const lowerEntryThresh = config.zScoreLowerEntry !== undefined ? config.zScoreLowerEntry : -config.zScoreEntry;
 
-  // Upper direction phase (Short / Down) - Entry only upon exceeding threshold 2 (>= 2.0σ)
+  const ema20Val = emaFilter?.ema20 ?? metric?.ema20 ?? 0;
+  const ema50Val = emaFilter?.ema50 ?? metric?.ema50 ?? 0;
+  const isEmaBullish = ema20Val > ema50Val;
+  const isEmaBearish = ema20Val > 0 && ema50Val > 0 && ema20Val < ema50Val;
+
+  // Upper direction phase (Short / Down) - Short only if: z > 2.0 AND 1h EMA(20) < 1h EMA(50)
   let upperPhase: 'MONITORING' | 'ENTRY_TRIGGERED' = 'MONITORING';
-  if (currentZScore >= config.zScoreUpper || crossedUpperThreshold || (isEntrySignal && (activeSignal === 'ENTRY_SHORT' || lastTradeDirection === 'SHORT'))) {
+  if ((currentZScore >= config.zScoreUpper && isEmaBearish) || crossedUpperThreshold || (isEntrySignal && (activeSignal === 'ENTRY_SHORT' || lastTradeDirection === 'SHORT'))) {
     upperPhase = 'ENTRY_TRIGGERED';
   }
 
-  // Lower direction phase (Long / Up) - Entry only upon exceeding threshold -2 (<= -2.0σ)
+  // Lower direction phase (Long / Up) - Long only if: z < -2.0 AND 1h EMA(20) > 1h EMA(50)
   let lowerPhase: 'MONITORING' | 'ENTRY_TRIGGERED' = 'MONITORING';
-  if (currentZScore <= lowerThresh || crossedLowerThreshold || (isEntrySignal && (activeSignal === 'ENTRY_LONG' || lastTradeDirection === 'LONG'))) {
+  if ((currentZScore <= lowerThresh && isEmaBullish) || crossedLowerThreshold || (isEntrySignal && (activeSignal === 'ENTRY_LONG' || lastTradeDirection === 'LONG'))) {
     lowerPhase = 'ENTRY_TRIGGERED';
   }
 
@@ -320,49 +327,45 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
         )}
       </div>
 
-      {/* Dual Direction Live Strategy Status Wings */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-xs">
-        {/* Wing 1: Upper Direction (Bearish Reversion / Short / DOWN) */}
-        <div
-          className={`p-3 rounded-xl border transition-all ${
-            upperPhase === 'ENTRY_TRIGGERED'
-              ? 'bg-rose-950/40 border-rose-500 shadow-md shadow-rose-950/40 ring-1 ring-rose-500 animate-pulse'
-              : 'bg-slate-950/40 border-slate-800/80'
-          }`}
-        >
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-1.5">
-              <TrendingDown className={`w-3.5 h-3.5 ${upperPhase === 'ENTRY_TRIGGERED' ? 'text-rose-400' : 'text-slate-400'}`} />
-              <span className="font-bold text-slate-100 text-[11px]">
-                {isAr ? '1. اتجاه الصعود / ذروة الشراء (Short / DOWN)' : '1. Overbought / Short Reversion (DOWN)'}
-              </span>
-            </div>
-            <span
-              className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
-                upperPhase === 'ENTRY_TRIGGERED'
-                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/60'
-                  : 'bg-slate-800 text-slate-400'
-              }`}
-            >
-              {upperPhase === 'ENTRY_TRIGGERED'
-                ? (isAr ? '🎯 تجاوز العتبة 2 - دخول هبوط!' : '🎯 EXCEEDED 2 - SHORT TRIGGERED')
-                : (isAr ? 'مراقبة (في انتظار تجاوز +2σ)' : 'MONITORING (< +2σ)')}
-            </span>
-          </div>
-
-          <div className="text-[11px] text-slate-300 space-y-1 font-mono">
-            <div className="flex justify-between">
-              <span className="text-slate-400">{isAr ? 'شرط الدخول في الصعود:' : 'Entry Condition (Rise):'}</span>
-              <span className="text-rose-400 font-bold">&ge; +{config.zScoreUpper.toFixed(2)}σ</span>
-            </div>
-            <div className="flex justify-between text-[10px]">
-              <span className="text-slate-500">{isAr ? 'نوع الصفقة المنفذة:' : 'Action Executed:'}</span>
-              <span className="text-amber-400 font-bold">{isAr ? 'شراء عقد DOWN (هبوط)' : 'Buy DOWN Contract'}</span>
-            </div>
-          </div>
+      {/* 1h EMA(20) vs 1h EMA(50) Trend Filter Indicator Box */}
+      <div className="p-3 rounded-xl border border-slate-800 bg-slate-950/70 space-y-2">
+        <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+          <span className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
+            <span className={`w-2 h-2 rounded-full ${isEmaBullish ? 'bg-emerald-400' : 'bg-rose-400'}`}></span>
+            <span>{isAr ? 'مؤشر فلتر الاتجاه 1h EMA(20) / EMA(50):' : '1h EMA(20) / EMA(50) Trend Filter:'}</span>
+          </span>
+          <span
+            className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${
+              isEmaBullish
+                ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/50'
+                : 'bg-rose-950/80 text-rose-300 border-rose-500/50'
+            }`}
+          >
+            {isEmaBullish
+              ? isAr
+                ? '▲ EMA(20) > EMA(50) · مسموح Long فقط'
+                : '▲ EMA(20) > EMA(50) · Long Allowed'
+              : isAr
+              ? '▼ EMA(20) < EMA(50) · مسموح Short فقط'
+              : '▼ EMA(20) < EMA(50) · Short Allowed'}
+          </span>
         </div>
 
-        {/* Wing 2: Lower Direction (Bullish Reversion / Long / UP) */}
+        <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
+          <div className="p-2 rounded-lg bg-slate-900/90 border border-slate-800 flex items-center justify-between">
+            <span className="text-amber-400 font-semibold">1h EMA(20):</span>
+            <span className="text-slate-100 font-bold">${ema20Val > 0 ? ema20Val.toFixed(2) : '---'}</span>
+          </div>
+          <div className="p-2 rounded-lg bg-slate-900/90 border border-slate-800 flex items-center justify-between">
+            <span className="text-purple-400 font-semibold">1h EMA(50):</span>
+            <span className="text-slate-100 font-bold">${ema50Val > 0 ? ema50Val.toFixed(2) : '---'}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Dual Direction Live Strategy Status Wings */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-xs">
+        {/* Wing 1: Lower Direction (Long / UP) */}
         <div
           className={`p-3 rounded-xl border transition-all ${
             lowerPhase === 'ENTRY_TRIGGERED'
@@ -374,7 +377,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             <div className="flex items-center gap-1.5">
               <TrendingUp className={`w-3.5 h-3.5 ${lowerPhase === 'ENTRY_TRIGGERED' ? 'text-emerald-400' : 'text-slate-400'}`} />
               <span className="font-bold text-slate-100 text-[11px]">
-                {isAr ? '2. اتجاه الهبوط / ذروة البيع (Long / UP)' : '2. Oversold / Long Rebound (UP)'}
+                {isAr ? '1. شروط صفقة الصعود (Long / UP)' : '1. Long Entry Conditions (UP)'}
               </span>
             </div>
             <span
@@ -385,19 +388,75 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
               }`}
             >
               {lowerPhase === 'ENTRY_TRIGGERED'
-                ? (isAr ? '🎯 تجاوز العتبة 2 - دخول صعود!' : '🎯 EXCEEDED 2 - LONG TRIGGERED')
-                : (isAr ? 'مراقبة (في انتظار تجاوز -2σ)' : 'MONITORING (> -2σ)')}
+                ? (isAr ? '🎯 تحقق الشرطان - دخول Long!' : '🎯 LONG TRIGGERED')
+                : (isAr ? 'مراقبة الشروط' : 'MONITORING')}
             </span>
           </div>
 
-          <div className="text-[11px] text-slate-300 space-y-1 font-mono">
-            <div className="flex justify-between">
-              <span className="text-slate-400">{isAr ? 'شرط الدخول في الهبوط:' : 'Entry Condition (Decline):'}</span>
-              <span className="text-emerald-400 font-bold">&le; {lowerThresh.toFixed(2)}σ</span>
+          <div className="text-[11px] text-slate-300 space-y-1.5 font-mono">
+            <div className="flex items-center justify-between">
+              <span className="text-slate-400">1) z &lt; {lowerThresh.toFixed(1)}</span>
+              <span className={`font-bold ${currentZScore <= lowerThresh ? 'text-emerald-400' : 'text-slate-500'}`}>
+                {currentZScore <= lowerThresh ? '✓ متحقق' : `(${currentZScore.toFixed(2)}σ)`}
+              </span>
             </div>
-            <div className="flex justify-between text-[10px]">
-              <span className="text-slate-500">{isAr ? 'نوع الصفقة المنفذة:' : 'Action Executed:'}</span>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-400">2) 1h EMA(20) &gt; EMA(50)</span>
+              <span className={`font-bold ${isEmaBullish ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {isEmaBullish ? (isAr ? '✓ متحقق' : '✓ PASS') : (isAr ? '✗ غير متحقق' : '✗ BLOCKED')}
+              </span>
+            </div>
+            <div className="flex justify-between text-[10px] pt-1 border-t border-slate-800/80">
+              <span className="text-slate-500">{isAr ? 'الإجراء عند التحقق:' : 'Action:'}</span>
               <span className="text-teal-400 font-bold">{isAr ? 'شراء عقد UP (صعود)' : 'Buy UP Contract'}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Wing 2: Upper Direction (Short / DOWN) */}
+        <div
+          className={`p-3 rounded-xl border transition-all ${
+            upperPhase === 'ENTRY_TRIGGERED'
+              ? 'bg-rose-950/40 border-rose-500 shadow-md shadow-rose-950/40 ring-1 ring-rose-500 animate-pulse'
+              : 'bg-slate-950/40 border-slate-800/80'
+          }`}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-1.5">
+              <TrendingDown className={`w-3.5 h-3.5 ${upperPhase === 'ENTRY_TRIGGERED' ? 'text-rose-400' : 'text-slate-400'}`} />
+              <span className="font-bold text-slate-100 text-[11px]">
+                {isAr ? '2. شروط صفقة الهبوط (Short / DOWN)' : '2. Short Entry Conditions (DOWN)'}
+              </span>
+            </div>
+            <span
+              className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                upperPhase === 'ENTRY_TRIGGERED'
+                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/60'
+                  : 'bg-slate-800 text-slate-400'
+              }`}
+            >
+              {upperPhase === 'ENTRY_TRIGGERED'
+                ? (isAr ? '🎯 تحقق الشرطان - دخول Short!' : '🎯 SHORT TRIGGERED')
+                : (isAr ? 'مراقبة الشروط' : 'MONITORING')}
+            </span>
+          </div>
+
+          <div className="text-[11px] text-slate-300 space-y-1.5 font-mono">
+            <div className="flex items-center justify-between">
+              <span className="text-slate-400">1) z &gt; +{config.zScoreUpper.toFixed(1)}</span>
+              <span className={`font-bold ${currentZScore >= config.zScoreUpper ? 'text-rose-400' : 'text-slate-500'}`}>
+                {currentZScore >= config.zScoreUpper ? '✓ متحقق' : `(${currentZScore > 0 ? '+' : ''}${currentZScore.toFixed(2)}σ)`}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-400">2) 1h EMA(20) &lt; EMA(50)</span>
+              <span className={`font-bold ${isEmaBearish ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {isEmaBearish ? (isAr ? '✓ متحقق' : '✓ PASS') : (isAr ? '✗ غير متحقق' : '✗ BLOCKED')}
+              </span>
+            </div>
+            <div className="flex justify-between text-[10px] pt-1 border-t border-slate-800/80">
+              <span className="text-slate-500">{isAr ? 'الإجراء عند التحقق:' : 'Action:'}</span>
+              <span className="text-amber-400 font-bold">{isAr ? 'شراء عقد DOWN (هبوط)' : 'Buy DOWN Contract'}</span>
             </div>
           </div>
         </div>

@@ -203,7 +203,7 @@ class LimitlessTradingBot {
                 params: {
                     symbol: CONFIG.SYMBOL,
                     interval: CONFIG.TIMEFRAME,
-                    limit: CONFIG.PERIODS + 35
+                    limit: Math.max(120, CONFIG.PERIODS + 70)
                 }
             });
 
@@ -242,53 +242,66 @@ class LimitlessTradingBot {
     }
 
     private onTick(newPrice: number, isClosed: boolean, candleTime: number) {
-        // حساب Z-Score اللحظي في نفس الشمعة فورياً
-        const livePrices = [...this.closePrices.slice(1), newPrice];
+        // حساب Z-Score و 1h EMA(20)/EMA(50) اللحظي في نفس الشمعة فورياً
+        const livePrices = [...this.closePrices.slice(0, -1), newPrice];
         this.evaluateStrategy(livePrices, candleTime);
 
         // عند إغلاق الشمعة النهائي، تثبيت السعر للانتقال للشمعة القادمة
         if (isClosed) {
-            this.closePrices = livePrices;
+            this.closePrices = [...this.closePrices.slice(1), newPrice];
         }
     }
 
     // ==========================================
-    // 5. الحسابات الرياضية (Z-Score)
+    // 5. الحسابات الرياضية (Z-Score + 1h EMA 20/50)
     // ==========================================
-    private calculateZScore(prices: number[] = this.closePrices): number {
-        const n = prices.length;
-        const mean = prices.reduce((a, b) => a + b, 0) / n;
-        const variance = prices.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / n;
+    private calculateZScore(prices: number[]): number {
+        const windowPrices = prices.slice(-CONFIG.PERIODS);
+        const n = windowPrices.length;
+        const mean = windowPrices.reduce((a, b) => a + b, 0) / n;
+        const variance = windowPrices.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / n;
         const stdDev = Math.sqrt(variance);
         
-        const currentPrice = prices[n - 1];
+        const currentPrice = windowPrices[n - 1];
         return stdDev > 0 ? (currentPrice - mean) / stdDev : 0;
     }
 
+    private calculateEMA(prices: number[], period: number): number {
+        if (prices.length === 0) return 0;
+        const k = 2 / (period + 1);
+        let ema = prices[0];
+        for (let i = 1; i < prices.length; i++) {
+            ema = prices[i] * k + ema * (1 - k);
+        }
+        return ema;
+    }
+
     // ==========================================
-    // 6. منطق الاستراتيجية (تنفيذ فوري في نفس الشمعة)
+    // 6. منطق الاستراتيجية (Z-Score + فلتر الاتجاه 1h EMA 20/50)
     // ==========================================
     private evaluateStrategy(prices: number[] = this.closePrices, candleTime?: number) {
         if (prices.length < CONFIG.PERIODS) return;
 
         const currentZScore = this.calculateZScore(prices);
+        const ema20 = this.calculateEMA(prices, 20);
+        const ema50 = this.calculateEMA(prices, 50);
 
-        // الاتجاه الأول: تجاوز عتبة الصعود +2.0σ (SHORT / DOWN)
+        // Short only if: z > 2.0 AND 1h EMA(20) < 1h EMA(50)
         if (CONFIG.STRATEGY_DIRECTION === 'BOTH' || CONFIG.STRATEGY_DIRECTION === 'SHORT_ONLY') {
-            if (currentZScore >= CONFIG.Z_SCORE_UPPER) {
+            if (currentZScore >= CONFIG.Z_SCORE_UPPER && ema20 < ema50) {
                 if (!this.isExecutingTrade && (!candleTime || this.lastExecutedCandleTime !== candleTime)) {
-                    console.log(\`🎯 إشارة دخول هبوط فورية! تجاوز Z-Score عتبة +\${CONFIG.Z_SCORE_UPPER}σ (\${currentZScore.toFixed(2)}σ). تنفيذ أمر DOWN!\`);
+                    console.log(\`🎯 إشارة Short محققة! z=\${currentZScore.toFixed(2)}σ (> +\${CONFIG.Z_SCORE_UPPER}) و EMA20 (\${ema20.toFixed(2)}) < EMA50 (\${ema50.toFixed(2)}). تنفيذ أمر DOWN!\`);
                     if (candleTime) this.lastExecutedCandleTime = candleTime;
                     this.executeTrade('SHORT');
                 }
             }
         }
 
-        // الاتجاه الثاني: تجاوز عتبة الهبوط -2.0σ (LONG / UP)
+        // Long only if: z < -2.0 AND 1h EMA(20) > 1h EMA(50)
         if (CONFIG.STRATEGY_DIRECTION === 'BOTH' || CONFIG.STRATEGY_DIRECTION === 'LONG_ONLY') {
-            if (currentZScore <= CONFIG.Z_SCORE_LOWER) {
+            if (currentZScore <= CONFIG.Z_SCORE_LOWER && ema20 > ema50) {
                 if (!this.isExecutingTrade && (!candleTime || this.lastExecutedCandleTime !== candleTime)) {
-                    console.log(\`🎯 إشارة دخول صعود فورية! تجاوز Z-Score عتبة \${CONFIG.Z_SCORE_LOWER}σ (\${currentZScore.toFixed(2)}σ). تنفيذ أمر UP!\`);
+                    console.log(\`🎯 إشارة Long محققة! z=\${currentZScore.toFixed(2)}σ (< \${CONFIG.Z_SCORE_LOWER}) و EMA20 (\${ema20.toFixed(2)}) > EMA50 (\${ema50.toFixed(2)}). تنفيذ أمر UP!\`);
                     if (candleTime) this.lastExecutedCandleTime = candleTime;
                     this.executeTrade('LONG');
                 }

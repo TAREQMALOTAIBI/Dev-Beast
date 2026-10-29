@@ -52,6 +52,10 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
     visibleMetrics.forEach((m) => {
       if (m.upperBand > max) max = m.upperBand;
       if (m.lowerBand < min) min = m.lowerBand;
+      if (m.ema20 && m.ema20 > max) max = m.ema20;
+      if (m.ema20 && m.ema20 < min) min = m.ema20;
+      if (m.ema50 && m.ema50 > max) max = m.ema50;
+      if (m.ema50 && m.ema50 < min) min = m.ema50;
     });
 
     const buffer = (max - min) * 0.08 || 1;
@@ -128,6 +132,31 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
       .join(' ');
   }, [visibleMetrics, candleX, candleY]);
 
+  // 1h EMA(20) and EMA(50) paths for trend filter
+  const ema20Path = useMemo(() => {
+    return visibleMetrics
+      .map((m, i) => {
+        if (!m.ema20) return '';
+        const x = candleX(i);
+        const y = candleY(m.ema20);
+        return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
+      })
+      .filter(Boolean)
+      .join(' ');
+  }, [visibleMetrics, candleX, candleY]);
+
+  const ema50Path = useMemo(() => {
+    return visibleMetrics
+      .map((m, i) => {
+        if (!m.ema50) return '';
+        const x = candleX(i);
+        const y = candleY(m.ema50);
+        return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
+      })
+      .filter(Boolean)
+      .join(' ');
+  }, [visibleMetrics, candleX, candleY]);
+
   // Z-Score line
   const zScorePath = useMemo(() => {
     return visibleMetrics
@@ -180,9 +209,21 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
               </span>
             </span>
             {hoveredMetric && (
-              <span className="text-slate-300 bg-slate-800/80 px-2 py-0.5 rounded">
-                Z: <span className="text-sky-300 font-bold">{hoveredMetric.zScore.toFixed(2)}σ</span>
-              </span>
+              <>
+                {hoveredMetric.ema20 ? (
+                  <span className="text-amber-300 bg-amber-950/50 border border-amber-700/40 px-1.5 py-0.5 rounded">
+                    EMA20: <span className="font-bold">{formatPrice(hoveredMetric.ema20)}</span>
+                  </span>
+                ) : null}
+                {hoveredMetric.ema50 ? (
+                  <span className="text-purple-300 bg-purple-950/50 border border-purple-700/40 px-1.5 py-0.5 rounded">
+                    EMA50: <span className="font-bold">{formatPrice(hoveredMetric.ema50)}</span>
+                  </span>
+                ) : null}
+                <span className="text-slate-300 bg-slate-800/80 px-2 py-0.5 rounded">
+                  Z: <span className="text-sky-300 font-bold">{hoveredMetric.zScore.toFixed(2)}σ</span>
+                </span>
+              </>
             )}
           </div>
         )}
@@ -235,6 +276,10 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
           <path d={lowerEntryBandPath} fill="none" stroke="#2dd4bf" strokeWidth="1" strokeDasharray="2 2" opacity="0.85" />
           {/* Lower Threshold Band (Emerald dashed line) */}
           <path d={lowerBandPath} fill="none" stroke="#10b981" strokeWidth="1.2" strokeDasharray="4 3" opacity="0.8" />
+          {/* 1h EMA(20) Line (Amber solid line) */}
+          {ema20Path && <path d={ema20Path} fill="none" stroke="#fbbf24" strokeWidth="1.6" opacity="0.95" />}
+          {/* 1h EMA(50) Line (Purple solid line) */}
+          {ema50Path && <path d={ema50Path} fill="none" stroke="#c084fc" strokeWidth="1.6" opacity="0.95" />}
 
           {/* Candlesticks */}
           {visibleCandles.map((c, i) => {
@@ -432,12 +477,24 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
             <span>{lowerEntryThreshold.toFixed(2)}σ Trigger Long (▲)</span>
           </div>
           <div className="flex items-center gap-1.5">
+            <span className="w-3 h-0.5 bg-amber-400 inline-block"></span>
+            <span className="text-amber-300 font-medium">1h EMA(20)</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-3 h-0.5 bg-purple-400 inline-block"></span>
+            <span className="text-purple-300 font-medium">1h EMA(50)</span>
+          </div>
+          <div className="flex items-center gap-1.5">
             <span className="w-3 h-0.5 bg-emerald-500 inline-block"></span>
-            <span>{lowerThreshold.toFixed(1)}σ Arm Long</span>
+            <span>{lowerThreshold.toFixed(1)}σ Long (if EMA20&gt;EMA50)</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-3 h-0.5 bg-rose-500 inline-block"></span>
+            <span>+{upperThreshold.toFixed(1)}σ Short (if EMA20&lt;EMA50)</span>
           </div>
         </div>
         <div className="text-emerald-400 font-mono font-semibold">
-          ⚡ Bidirectional Mean Reversion (Both Directions)
+          ⚡ Z-Score + 1h EMA(20/50) Trend Filter
         </div>
       </div>
     </div>

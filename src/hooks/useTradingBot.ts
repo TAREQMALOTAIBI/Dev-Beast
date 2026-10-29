@@ -8,10 +8,11 @@ import {
   WsMessageLog,
   LiveWalletInfo,
   LimitlessMarketDetails,
+  EmaFilterState,
 } from '../types/bot';
 import { binanceService } from '../services/binanceService';
 import { limitlessService, LimitlessStatus } from '../services/limitlessService';
-import { calculateZScore, calculateKellySizing } from '../utils/math';
+import { calculateZScore, calculateKellySizing, calculateEMA } from '../utils/math';
 import { soundController } from '../utils/audio';
 
 const DEFAULT_CONFIG: BotConfig = {
@@ -123,6 +124,20 @@ export function useTradingBot() {
   const [candles, setCandles] = useState<CandleData[]>([]);
   const [metrics, setMetrics] = useState<ZScoreMetric[]>([]);
   const [currentZScore, setCurrentZScore] = useState<number>(0);
+  const [emaFilter, setEmaFilter] = useState<EmaFilterState>({
+    ema20: 0,
+    ema50: 0,
+    trend: 'BULLISH',
+    longAllowed: false,
+    shortAllowed: false,
+  });
+  const emaFilterRef = useRef<EmaFilterState>({
+    ema20: 0,
+    ema50: 0,
+    trend: 'BULLISH',
+    longAllowed: false,
+    shortAllowed: false,
+  });
   const [crossedUpperThreshold, setCrossedUpperThreshold] = useState<boolean>(false);
   const [crossedLowerThreshold, setCrossedLowerThreshold] = useState<boolean>(false);
   const [lastTradeDirection, setLastTradeDirection] = useState<'SHORT' | 'LONG' | null>(null);
@@ -282,7 +297,14 @@ export function useTradingBot() {
     const lowerThresh = cfg.zScoreLower !== undefined ? cfg.zScoreLower : -cfg.zScoreUpper;
     const lowerEntryThresh = cfg.zScoreLowerEntry !== undefined ? cfg.zScoreLowerEntry : -cfg.zScoreEntry;
 
+    // Compute 1h EMA(20) and 1h EMA(50) series across the historical candle series
+    const ema20Series = calculateEMA(closes, 20);
+    const ema50Series = calculateEMA(closes, 50);
+
     for (let i = 0; i < candleList.length; i++) {
+      const e20 = ema20Series[i] || candleList[i].close;
+      const e50 = ema50Series[i] || candleList[i].close;
+
       if (i < cfg.periods - 1) {
         result.push({
           time: candleList[i].time,
@@ -299,6 +321,8 @@ export function useTradingBot() {
           entryThreshold: cfg.zScoreEntry,
           lowerThreshold: lowerThresh,
           lowerEntryThreshold: lowerEntryThresh,
+          ema20: e20,
+          ema50: e50,
           signal: null,
           direction: null,
         });
@@ -311,9 +335,9 @@ export function useTradingBot() {
       let signal: 'ARMED_UPPER' | 'ARMED_LOWER' | 'ENTRY_SHORT' | 'ENTRY_LONG' | 'ARMED' | 'ENTRY' | null = null;
       let dir: 'SHORT' | 'LONG' | null = null;
 
-      // Direction 1: Upper / Rise (Short / Down) - Entry ONLY when exceeding threshold 2 (>= 2.0σ)
+      // Condition: Short only if: z > 2.0 AND 1h EMA(20) < 1h EMA(50)
       if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'SHORT_ONLY') {
-        if (stats.zScore >= cfg.zScoreUpper) {
+        if (stats.zScore >= cfg.zScoreUpper && e20 < e50) {
           if (!hadArmedUpper) {
             hadArmedUpper = true;
             signal = 'ENTRY_SHORT';
@@ -324,9 +348,9 @@ export function useTradingBot() {
         }
       }
 
-      // Direction 2: Lower / Decline (Long / Up) - Entry ONLY when exceeding threshold -2 (<= -2.0σ)
+      // Condition: Long only if: z < -2.0 AND 1h EMA(20) > 1h EMA(50)
       if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'LONG_ONLY') {
-        if (stats.zScore <= lowerThresh) {
+        if (stats.zScore <= lowerThresh && e20 > e50) {
           if (!hadArmedLower) {
             hadArmedLower = true;
             signal = 'ENTRY_LONG';
@@ -352,6 +376,8 @@ export function useTradingBot() {
         entryThreshold: cfg.zScoreEntry,
         lowerThreshold: lowerThresh,
         lowerEntryThreshold: lowerEntryThresh,
+        ema20: e20,
+        ema50: e50,
         signal,
         direction: dir,
       });
@@ -361,6 +387,18 @@ export function useTradingBot() {
     if (result.length > 0) {
       const latest = result[result.length - 1];
       setCurrentZScore(latest.zScore);
+
+      const latestEma20 = latest.ema20 || 0;
+      const latestEma50 = latest.ema50 || 0;
+      const currentEmaState: EmaFilterState = {
+        ema20: latestEma20,
+        ema50: latestEma50,
+        trend: latestEma20 > latestEma50 ? 'BULLISH' : 'BEARISH',
+        longAllowed: latestEma20 > latestEma50,
+        shortAllowed: latestEma20 < latestEma50,
+      };
+      setEmaFilter(currentEmaState);
+      emaFilterRef.current = currentEmaState;
 
       // Synchronize armed states with recent candles
       if (hadArmedUpper) {
@@ -691,20 +729,37 @@ export function useTradingBot() {
 
   // Real Market Strategy Evaluation (Evaluates on every tick for immediate same-candle entry)
   const evaluateLiveStrategy = useCallback(
-    (prices: number[], candleTime?: number) => {
+    (allPrices: number[], candleTime?: number) => {
       const cfg = configRef.current;
-      if (prices.length < cfg.periods) return;
+      if (allPrices.length < cfg.periods) return;
 
+      const windowSlice = allPrices.slice(-cfg.periods);
       const lowerThresh = cfg.zScoreLower !== undefined ? cfg.zScoreLower : -cfg.zScoreUpper;
       const lowerEntryThresh = cfg.zScoreLowerEntry !== undefined ? cfg.zScoreLowerEntry : -cfg.zScoreEntry;
 
-      const { zScore } = calculateZScore(prices, cfg.zScoreUpper, cfg.zScoreEntry, lowerThresh, lowerEntryThresh);
+      const { zScore } = calculateZScore(windowSlice, cfg.zScoreUpper, cfg.zScoreEntry, lowerThresh, lowerEntryThresh);
       setCurrentZScore(zScore);
 
-      const targetMarketSlug = activeLimitlessMarketRef.current?.slug || cfg.limitlessMarketSlug || 'btc-up-or-down-hourly';
+      // Compute 1h EMA(20) and 1h EMA(50) across available price history
+      const ema20Arr = calculateEMA(allPrices, 20);
+      const ema50Arr = calculateEMA(allPrices, 50);
+      const currentEma20 = ema20Arr[ema20Arr.length - 1] || 0;
+      const currentEma50 = ema50Arr[ema50Arr.length - 1] || 0;
 
-      // ================= DIRECTION 1: UPPER / RISE (Short / Down) =================
-      // شرط الدخول: فقط عند تجاوز العتبة 2 في الصعود (Z >= +2.0σ)
+      const isEmaBullish = currentEma20 > currentEma50;
+      const isEmaBearish = currentEma20 < currentEma50;
+
+      const currentEmaState: EmaFilterState = {
+        ema20: currentEma20,
+        ema50: currentEma50,
+        trend: isEmaBullish ? 'BULLISH' : 'BEARISH',
+        longAllowed: isEmaBullish,
+        shortAllowed: isEmaBearish,
+      };
+      setEmaFilter(currentEmaState);
+      emaFilterRef.current = currentEmaState;
+
+      // ================= DIRECTION 1: Short only if: z > 2.0 AND 1h EMA(20) < 1h EMA(50) =================
       if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'SHORT_ONLY') {
         if (zScore >= cfg.zScoreUpper) {
           if (!crossedUpperThresholdRef.current) {
@@ -726,37 +781,36 @@ export function useTradingBot() {
             return;
           }
 
-          // Check if market or cooldown is locked
-          const lock = checkTradeLock(targetMarketSlug, candleTime);
-          if (lock.locked) {
-            console.warn(`[SAFETY GUARD ACTIVE] Signal detected (Z=${zScore.toFixed(2)}σ) but trade locked: ${lock.reason}`);
-            limitlessService.logDirect('SYSTEM', `🔒 تم رصد إشارة دخول هبوط (Z=${zScore.toFixed(2)}σ) ولكن العقد مقفل: ${lock.reason}`);
+          // Strict Filter Check: 1h EMA(20) < 1h EMA(50)
+          if (!isEmaBearish) {
+            const filterWarn = `⚠️ [فلتر EMA محجوب] Z=+${zScore.toFixed(2)}σ > +2.0، ولكن 1h EMA(20) [${currentEma20.toFixed(1)}] ليس أصغر من 1h EMA(50) [${currentEma50.toFixed(1)}]. يتطلب الهبوط (EMA20 < EMA50).`;
+            console.log(filterWarn);
+            limitlessService.logDirect('SYSTEM', filterWarn);
             setExecutionNotice({
               type: 'WARNING',
-              message: `تم رصد إشارة هبوط (Z=${zScore.toFixed(2)}σ) ولكن: ${lock.reason}`,
+              message: `إشارة هبوط محجوبة بفلتر EMA: يتطلب الهبوط EMA(20) < EMA(50). الحالي: EMA20=$${currentEma20.toFixed(1)} > EMA50=$${currentEma50.toFixed(1)}.`,
               timestamp: Date.now(),
             });
             return;
           }
 
           if (!isExecutingRef.current) {
-            console.log(`🎯 تنفيذ فوري لصفقة هبوط! تجاوز Z-Score عتبة +${cfg.zScoreUpper}σ (${zScore.toFixed(2)}σ). جاري إرسال أمر DOWN!`);
+            console.log(`🎯 تنفيذ فوري لصفقة هبوط! تحقق الشرطان: Z=+${zScore.toFixed(2)}σ > 2.0 و 1h EMA(20) [$${currentEma20.toFixed(1)}] < 1h EMA(50) [$${currentEma50.toFixed(1)}]. جاري إرسال أمر DOWN!`);
             limitlessService.logDirect(
               'SYSTEM',
-              `🎯 [شرط الدخول متحقق] تجاوزت قيمة Z-Score عتبة +${cfg.zScoreUpper}σ (${zScore.toFixed(2)}σ) في الصعود. جاري إرسال أمر DOWN فوراً دون أي تأخير!`
+              `🎯 [شرطا الهبوط متحققان] Z=+${zScore.toFixed(2)}σ > +2.0σ مع اتجاه هابط 1h EMA(20) [$${currentEma20.toFixed(1)}] < 1h EMA(50) [$${currentEma50.toFixed(1)}]. جاري إرسال أمر DOWN فوراً!`
             );
             executeLiveTrade(zScore, 'SHORT', candleTime);
           }
         } else {
-          if (crossedUpperThresholdRef.current && checkTradeLock(targetMarketSlug).locked === false) {
+          if (crossedUpperThresholdRef.current) {
             crossedUpperThresholdRef.current = false;
             setCrossedUpperThreshold(false);
           }
         }
       }
 
-      // ================= DIRECTION 2: LOWER / DECLINE (Long / Up) =================
-      // شرط الدخول: فقط عند تجاوز العتبة 2 في الهبوط (Z <= -2.0σ)
+      // ================= DIRECTION 2: Long only if: z < -2.0 AND 1h EMA(20) > 1h EMA(50) =================
       if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'LONG_ONLY') {
         if (zScore <= lowerThresh) {
           if (!crossedLowerThresholdRef.current) {
@@ -778,36 +832,36 @@ export function useTradingBot() {
             return;
           }
 
-          // Check if market or cooldown is locked
-          const lock = checkTradeLock(targetMarketSlug, candleTime);
-          if (lock.locked) {
-            console.warn(`[SAFETY GUARD ACTIVE] Signal detected (Z=${zScore.toFixed(2)}σ) but trade locked: ${lock.reason}`);
-            limitlessService.logDirect('SYSTEM', `🔒 تم رصد إشارة دخول صعود (Z=${zScore.toFixed(2)}σ) ولكن العقد مقفل: ${lock.reason}`);
+          // Strict Filter Check: 1h EMA(20) > 1h EMA(50)
+          if (!isEmaBullish) {
+            const filterWarn = `⚠️ [فلتر EMA محجوب] Z=${zScore.toFixed(2)}σ < -2.0، ولكن 1h EMA(20) [${currentEma20.toFixed(1)}] ليس أكبر من 1h EMA(50) [${currentEma50.toFixed(1)}]. يتطلب الصعود (EMA20 > EMA50).`;
+            console.log(filterWarn);
+            limitlessService.logDirect('SYSTEM', filterWarn);
             setExecutionNotice({
               type: 'WARNING',
-              message: `تم رصد إشارة صعود (Z=${zScore.toFixed(2)}σ) ولكن: ${lock.reason}`,
+              message: `إشارة صعود محجوبة بفلتر EMA: يتطلب الصعود EMA(20) > EMA(50). الحالي: EMA20=$${currentEma20.toFixed(1)} < EMA50=$${currentEma50.toFixed(1)}.`,
               timestamp: Date.now(),
             });
             return;
           }
 
           if (!isExecutingRef.current) {
-            console.log(`🎯 تنفيذ فوري لصفقة صعود! تجاوز Z-Score عتبة ${lowerThresh}σ (${zScore.toFixed(2)}σ). جاري إرسال أمر UP!`);
+            console.log(`🎯 تنفيذ فوري لصفقة صعود! تحقق الشرطان: Z=${zScore.toFixed(2)}σ < -2.0 و 1h EMA(20) [$${currentEma20.toFixed(1)}] > 1h EMA(50) [$${currentEma50.toFixed(1)}]. جاري إرسال أمر UP!`);
             limitlessService.logDirect(
               'SYSTEM',
-              `🎯 [شرط الدخول متحقق] تجاوزت قيمة Z-Score عتبة ${lowerThresh}σ (${zScore.toFixed(2)}σ) في الهبوط. جاري إرسال أمر UP فوراً دون أي تأخير!`
+              `🎯 [شرطا الصعود متحققان] Z=${zScore.toFixed(2)}σ < -2.0σ مع اتجاه صاعد 1h EMA(20) [$${currentEma20.toFixed(1)}] > 1h EMA(50) [$${currentEma50.toFixed(1)}]. جاري إرسال أمر UP فوراً!`
             );
             executeLiveTrade(zScore, 'LONG', candleTime);
           }
         } else {
-          if (crossedLowerThresholdRef.current && checkTradeLock(targetMarketSlug).locked === false) {
+          if (crossedLowerThresholdRef.current) {
             crossedLowerThresholdRef.current = false;
             setCrossedLowerThreshold(false);
           }
         }
       }
     },
-    [executeLiveTrade, checkTradeLock]
+    [executeLiveTrade]
   );
 
   // Subscribe to Limitless WebSocket Gateway using official SDK
@@ -917,7 +971,7 @@ export function useTradingBot() {
       const realCandles = await binanceService.fetchHistoricalCandles(
         config.symbol,
         config.timeframe,
-        config.periods + 35,
+        Math.max(120, config.periods + 70),
         config.binanceRestUrl
       );
 
@@ -932,8 +986,7 @@ export function useTradingBot() {
         // Immediate evaluation of the current in-progress candle on initial data load
         if (realCandles.length >= config.periods) {
           const latestCandle = realCandles[realCandles.length - 1];
-          const liveCloses = closes.slice(-config.periods);
-          evaluateLiveStrategyRef.current(liveCloses, latestCandle.time);
+          evaluateLiveStrategyRef.current(closes, latestCandle.time);
         }
       }
 
@@ -956,11 +1009,10 @@ export function useTradingBot() {
           // Immediate real-time execution in the SAME candle on every price tick
           if (updatedCandles.length >= configRef.current.periods) {
             const allCloses = updatedCandles.map((c) => c.close);
-            const liveCloses = allCloses.slice(-configRef.current.periods);
-            evaluateLiveStrategyRef.current(liveCloses, tickCandle.time);
+            evaluateLiveStrategyRef.current(allCloses, tickCandle.time);
 
             if (isClosed) {
-              closePricesRef.current = liveCloses;
+              closePricesRef.current = allCloses.slice(-configRef.current.periods);
             }
 
             rebuildMetricsRef.current(updatedCandles, configRef.current);
@@ -1167,5 +1219,6 @@ export function useTradingBot() {
     refreshActiveMarket,
     contractLockInfo,
     clearTradeLock,
+    emaFilter,
   };
 }

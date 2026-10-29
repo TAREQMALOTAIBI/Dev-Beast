@@ -151,3 +151,40 @@ export function formatPrice(price: number): string {
   }
   return price.toLocaleString('en-US', { minimumFractionDigits: 6, maximumFractionDigits: 6 });
 }
+
+/**
+ * Calculates Exponential Moving Average (EMA) series for an array of prices
+ * k = 2 / (period + 1)
+ * EMA_t = (Price_t * k) + (EMA_{t-1} * (1 - k))
+ */
+export function calculateEMA(prices: number[], period: number): number[] {
+  if (!prices || prices.length === 0 || period <= 0) return [];
+  const k = 2 / (period + 1);
+  const emaArr: number[] = new Array(prices.length);
+
+  if (prices.length < period) {
+    let runningSum = 0;
+    for (let i = 0; i < prices.length; i++) {
+      runningSum += prices[i];
+      emaArr[i] = runningSum / (i + 1);
+    }
+    return emaArr;
+  }
+
+  // Calculate initial SMA for first `period` prices
+  let initialSum = 0;
+  for (let i = 0; i < period; i++) {
+    initialSum += prices[i];
+    emaArr[i] = initialSum / (i + 1);
+  }
+  let prevEma = initialSum / period;
+  emaArr[period - 1] = prevEma;
+
+  // Calculate EMA for all subsequent prices
+  for (let i = period; i < prices.length; i++) {
+    prevEma = prices[i] * k + prevEma * (1 - k);
+    emaArr[i] = prevEma;
+  }
+
+  return emaArr;
+}
