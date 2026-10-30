@@ -49,10 +49,12 @@ export class LimitlessService {
         const data = await res.json();
         if (data) {
           if (data.status && data.status !== 'DISCONNECTED') {
-            if (data.status === 'ERROR' && (data.orderbook || data.market)) {
+            if ((data.status === 'ERROR' || data.status === 'CONNECTING') && (data.orderbook || data.market)) {
               const hasAuth = Boolean(this.credentials?.tokenId || this.credentials?.apiKey);
               this.setStatus(hasAuth ? 'AUTHENTICATED' : 'CONNECTED');
-            } else {
+            } else if (data.status === 'AUTHENTICATED' || data.status === 'CONNECTED') {
+              this.setStatus(data.status);
+            } else if (this.status === 'DISCONNECTED') {
               this.setStatus(data.status);
             }
           }
@@ -293,7 +295,9 @@ export class LimitlessService {
           const hasAuth = Boolean(this.credentials?.tokenId || this.credentials?.apiKey);
           this.setStatus(hasAuth ? 'AUTHENTICATED' : 'CONNECTED');
           this.stopOrderbookPolling();
-          this.subscribeMarket(this.activeMarketSlug);
+          if (this.activeMarketSlug && this.activeMarketSlug !== 'btc-up-or-down-hourly') {
+            this.subscribeMarket(this.activeMarketSlug);
+          }
           this.discoverAndSubscribeActiveBtcMarket();
         };
 
@@ -303,7 +307,7 @@ export class LimitlessService {
             if (data?.status === 'AUTHENTICATED' || data?.status === 'CONNECTED') {
               this.setStatus(data.status);
               this.stopOrderbookPolling();
-            } else if (data?.status === 'CONNECTING') {
+            } else if (data?.status === 'CONNECTING' && this.status === 'DISCONNECTED') {
               this.setStatus('CONNECTING');
             }
           } catch {}
@@ -391,9 +395,7 @@ export class LimitlessService {
 
         es.onerror = () => {
           // EventSource automatically attempts to reconnect on transient drops.
-          // Only change status if connection was completely terminated.
           if (es.readyState === EventSource.CLOSED && !this.isExplicitlyClosed) {
-            this.setStatus('CONNECTING');
             this.startOrderbookPolling(this.activeMarketSlug);
           }
         };
@@ -406,14 +408,17 @@ export class LimitlessService {
     }
 
     // Immediately fetch initial snapshot so orderbook is populated with zero delay
-    this.fetchInitialOrderbook(this.activeMarketSlug);
+    if (this.activeMarketSlug && this.activeMarketSlug !== 'btc-up-or-down-hourly') {
+      this.fetchInitialOrderbook(this.activeMarketSlug);
+    }
   }
 
   /**
    * Subscribe to specific market prices
    */
   public subscribeMarket(slug: string) {
-    if (!slug) return;
+    if (!slug || slug === 'btc-up-or-down-hourly') return;
+    if (this.activeMarketSlug === slug) return;
     this.activeMarketSlug = slug;
     // Notify official backend SDK WebSocket to subscribe
     fetch('/api/limitless/subscribe', {
