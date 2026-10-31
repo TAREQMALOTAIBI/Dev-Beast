@@ -1,5 +1,5 @@
 import React from 'react';
-import { BotConfig, EmaFilterState } from '../types/bot';
+import { BotConfig } from '../types/bot';
 import {
   ShieldAlert,
   Zap,
@@ -30,7 +30,6 @@ interface StrategyStatusCardProps {
   config: BotConfig;
   lang: 'en' | 'ar';
   metric?: import('../types/bot').ZScoreMetric | null;
-  emaFilter?: EmaFilterState;
   executionNotice?: {
     type: 'SUCCESS' | 'WARNING' | 'ERROR';
     message: string;
@@ -63,7 +62,6 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
   config,
   lang,
   metric,
-  emaFilter,
   executionNotice,
   onClearNotice,
   contractLockInfo,
@@ -73,11 +71,6 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
 
   const lowerThresh = config.zScoreLower !== undefined ? config.zScoreLower : -config.zScoreUpper;
   const lowerEntryThresh = config.zScoreLowerEntry !== undefined ? config.zScoreLowerEntry : -config.zScoreEntry;
-
-  const ema20Val = emaFilter?.ema20 ?? metric?.ema20 ?? 0;
-  const ema50Val = emaFilter?.ema50 ?? metric?.ema50 ?? 0;
-  const isEmaBullish = ema20Val > ema50Val;
-  const isEmaBearish = ema20Val > 0 && ema50Val > 0 && ema20Val < ema50Val;
 
   // Upper direction phase (Short / Down): First confirmation >= +2.5, Second confirmation <= +2.3
   let upperPhase: 'MONITORING' | 'ARMED' | 'ENTRY_TRIGGERED' = 'MONITORING';

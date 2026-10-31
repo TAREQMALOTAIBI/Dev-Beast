@@ -83,18 +83,8 @@ export interface ZScoreMetric {
   entryThreshold: number;
   lowerThreshold: number;
   lowerEntryThreshold: number;
-  ema20?: number;
-  ema50?: number;
   signal?: 'ARMED_UPPER' | 'ARMED_LOWER' | 'ENTRY_SHORT' | 'ENTRY_LONG' | 'ARMED' | 'ENTRY' | null;
   direction?: 'SHORT' | 'LONG' | null;
-}
-
-export interface EmaFilterState {
-  ema20: number;
-  ema50: number;
-  trend: 'BULLISH' | 'BEARISH';
-  longAllowed: boolean; // 1h EMA(20) > 1h EMA(50)
-  shortAllowed: boolean; // 1h EMA(20) < 1h EMA(50)
 }
 
 export interface KellyMath {

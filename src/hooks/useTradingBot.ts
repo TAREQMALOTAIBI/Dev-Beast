@@ -8,11 +8,10 @@ import {
   WsMessageLog,
   LiveWalletInfo,
   LimitlessMarketDetails,
-  EmaFilterState,
 } from '../types/bot';
 import { binanceService } from '../services/binanceService';
 import { limitlessService, LimitlessStatus } from '../services/limitlessService';
-import { calculateZScore, calculateKellySizing, calculateEMA } from '../utils/math';
+import { calculateZScore, calculateKellySizing } from '../utils/math';
 import { soundController } from '../utils/audio';
 
 const DEFAULT_CONFIG: BotConfig = {
@@ -108,20 +107,6 @@ export function useTradingBot() {
   const [candles, setCandles] = useState<CandleData[]>([]);
   const [metrics, setMetrics] = useState<ZScoreMetric[]>([]);
   const [currentZScore, setCurrentZScore] = useState<number>(0);
-  const [emaFilter, setEmaFilter] = useState<EmaFilterState>({
-    ema20: 0,
-    ema50: 0,
-    trend: 'BULLISH',
-    longAllowed: true,
-    shortAllowed: true,
-  });
-  const emaFilterRef = useRef<EmaFilterState>({
-    ema20: 0,
-    ema50: 0,
-    trend: 'BULLISH',
-    longAllowed: true,
-    shortAllowed: true,
-  });
   const [crossedUpperThreshold, setCrossedUpperThreshold] = useState<boolean>(false);
   const [crossedLowerThreshold, setCrossedLowerThreshold] = useState<boolean>(false);
   const [lastTradeDirection, setLastTradeDirection] = useState<'SHORT' | 'LONG' | null>(null);
@@ -270,13 +255,7 @@ export function useTradingBot() {
     const lowerThresh = cfg.zScoreLower !== undefined ? cfg.zScoreLower : -cfg.zScoreUpper;
     const lowerEntryThresh = cfg.zScoreLowerEntry !== undefined ? cfg.zScoreLowerEntry : -cfg.zScoreEntry;
 
-    const ema20Series = calculateEMA(closes, 20);
-    const ema50Series = calculateEMA(closes, 50);
-
     for (let i = 0; i < candleList.length; i++) {
-      const e20 = ema20Series[i] || candleList[i].close;
-      const e50 = ema50Series[i] || candleList[i].close;
-
       if (i < cfg.periods - 1) {
         result.push({
           time: candleList[i].time,
@@ -293,8 +272,6 @@ export function useTradingBot() {
           entryThreshold: cfg.zScoreEntry,
           lowerThreshold: lowerThresh,
           lowerEntryThreshold: lowerEntryThresh,
-          ema20: e20,
-          ema50: e50,
           signal: null,
           direction: null,
         });
@@ -352,8 +329,6 @@ export function useTradingBot() {
         entryThreshold: cfg.zScoreEntry,
         lowerThreshold: lowerThresh,
         lowerEntryThreshold: lowerEntryThresh,
-        ema20: e20,
-        ema50: e50,
         signal,
         direction: dir,
       });
@@ -363,18 +338,6 @@ export function useTradingBot() {
     if (result.length > 0) {
       const latest = result[result.length - 1];
       setCurrentZScore(latest.zScore);
-
-      const latestEma20 = latest.ema20 || 0;
-      const latestEma50 = latest.ema50 || 0;
-      const currentEmaState: EmaFilterState = {
-        ema20: latestEma20,
-        ema50: latestEma50,
-        trend: latestEma20 > latestEma50 ? 'BULLISH' : 'BEARISH',
-        longAllowed: true,
-        shortAllowed: true,
-      };
-      setEmaFilter(currentEmaState);
-      emaFilterRef.current = currentEmaState;
 
       if (hadArmedUpper) {
         crossedUpperThresholdRef.current = true;
@@ -1162,6 +1125,5 @@ export function useTradingBot() {
     refreshActiveMarket,
     contractLockInfo,
     clearTradeLock,
-    emaFilter,
   };
 }

@@ -72,7 +72,6 @@ export default function App() {
     refreshActiveMarket,
     contractLockInfo,
     clearTradeLock,
-    emaFilter,
   } = useTradingBot();
 
   const isAr = lang === 'ar';
@@ -395,7 +394,6 @@ export default function App() {
                   config={config}
                   lang={lang}
                   metric={latestMetric}
-                  emaFilter={emaFilter}
                   executionNotice={executionNotice}
                   onClearNotice={() => setExecutionNotice(null)}
                   contractLockInfo={contractLockInfo}
