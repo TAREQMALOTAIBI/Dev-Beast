@@ -53,8 +53,8 @@ function loadTradeGuardFromDisk() {
       const raw = fs.readFileSync(TRADE_GUARD_FILE, 'utf8');
       const parsed = JSON.parse(raw);
       const ageMs = Date.now() - (Number(parsed?.timestamp) || 0);
-      if (ageMs >= 60 * 60 * 1000) {
-        console.log(`[VM Trade Guard] Previous hourly contract lock expired (${Math.round(ageMs / 60000)}m ago). Auto-clearing.`);
+      if (ageMs >= 15 * 60 * 1000) {
+        console.log(`[VM Trade Guard] Previous 15m contract lock expired (${Math.round(ageMs / 60000)}m ago). Auto-clearing.`);
         clearTradeGuardFromDisk();
         return null;
       }
@@ -93,20 +93,20 @@ function clearTradeGuardFromDisk() {
 // Initial load into RAM on server boot
 loadTradeGuardFromDisk();
 
-function isHourlyBtcMarket(m) {
+function is15MinBtcMarket(m) {
   if (!m) return false;
   const slug = (m.slug || '').toLowerCase();
   const title = (m.title || '').toLowerCase();
   const isBtc = slug.includes('btc') || title.includes('btc') || title.includes('bitcoin');
   if (!isBtc) return false;
-  const isHourly = /hourly/i.test(slug) || /hourly/i.test(title) || /(^|[^0-9])1-hour/i.test(slug) || /1\s*hour/i.test(title) || /(^|[^0-9])1h/i.test(slug) || /(^|[^0-9])60m/i.test(slug);
-  const isOther = /(^|[^0-9])5-min/i.test(slug) || /(^|[^0-9])15-min/i.test(slug) || /5\s*min/i.test(title) || /15\s*min/i.test(title);
+  const is15Min = /(^|[^0-9])15-min/i.test(slug) || /15\s*min/i.test(title) || /(^|[^0-9])15m/i.test(slug);
+  const isOther = /(^|[^0-9])5-min/i.test(slug) || /5\s*min/i.test(title) || /hourly/i.test(slug) || /hourly/i.test(title) || /(^|[^0-9])1-hour/i.test(slug) || /1\s*hour/i.test(title);
   if (slug.includes('daily') || slug.includes('weekly')) return false;
-  return isHourly && !isOther;
+  return is15Min && !isOther;
 }
 
 // Backward-compatible alias
-const is15MinBtcMarket = isHourlyBtcMarket;
+const isHourlyBtcMarket = is15MinBtcMarket;
 
 function broadcastSse(eventType, payload) {
   const msg = `event: ${eventType}\ndata: ${JSON.stringify(payload)}\n\n`;
@@ -120,30 +120,30 @@ function broadcastSse(eventType, payload) {
   }
 }
 
-async function fetchLiveHourlyBtcMarket() {
+async function fetchLive15MinBtcMarket() {
   try {
     const response = await fetch('https://api.limitless.exchange/markets/active');
     if (!response.ok) return null;
     const json = await response.json();
     const list = json?.data || [];
     const now = Date.now();
-    // Strictly require unexpired hourly BTC market (expirationTimestamp > now)
-    const validHourlyMkts = list.filter((m) => isHourlyBtcMarket(m) && m.expirationTimestamp && Number(m.expirationTimestamp) > now);
+    // Strictly require unexpired 15-minute BTC market (expirationTimestamp > now)
+    const valid15mMkts = list.filter((m) => is15MinBtcMarket(m) && m.expirationTimestamp && Number(m.expirationTimestamp) > now);
     
     // Sort so the currently active (closing soonest, but in the future) or funded market is first
-    validHourlyMkts.sort((a, b) => {
+    valid15mMkts.sort((a, b) => {
       if (a.status === 'FUNDED' && b.status !== 'FUNDED') return -1;
       if (b.status === 'FUNDED' && a.status !== 'FUNDED') return 1;
       return (Number(a.expirationTimestamp) || 0) - (Number(b.expirationTimestamp) || 0);
     });
 
-    return validHourlyMkts[0] || null;
+    return valid15mMkts[0] || null;
   } catch {
     return null;
   }
 }
 
-const fetchLive15MinBtcMarket = fetchLiveHourlyBtcMarket;
+const fetchLiveHourlyBtcMarket = fetchLive15MinBtcMarket;
 
 async function pollActiveBtcMarket() {
   try {
@@ -738,12 +738,12 @@ app.post('/api/limitless/order', async (req, res) => {
     const hasLiveAuth = Boolean(pk && tokenId && secret);
 
     // Fetch market data to obtain token IDs and venue contract address
-    let activeMarketSlug = market || 'btc-up-or-down-hourly';
+    let activeMarketSlug = market || 'btc-up-or-down-15-min';
     let marketData = null;
 
     // Check if market exists, and verify it has not expired or resolved
     let isExpiredOrResolved = false;
-    if (activeMarketSlug && isHourlyBtcMarket({ slug: activeMarketSlug })) {
+    if (activeMarketSlug && is15MinBtcMarket({ slug: activeMarketSlug })) {
       try {
         const mRes = await fetch(`https://api.limitless.exchange/markets/${encodeURIComponent(activeMarketSlug)}`);
         if (mRes.ok) {
@@ -765,26 +765,29 @@ app.post('/api/limitless/order', async (req, res) => {
     }
 
     if (isExpiredOrResolved || !marketData) {
-      const activeRes = await fetch('https://api.limitless.exchange/markets/active');
-      if (activeRes.ok) {
-        const activeJson = await activeRes.json();
-        const list = activeJson?.data || [];
-        const now = Date.now();
-        const liveHourly = list.find((m) => isHourlyBtcMarket(m) && m.status === 'FUNDED' && (!m.expirationTimestamp || m.expirationTimestamp > now))
-          || list.find((m) => isHourlyBtcMarket(m) && (!m.expirationTimestamp || m.expirationTimestamp > now));
-        if (liveHourly) {
-          activeMarketSlug = liveHourly.slug;
-          marketData = liveHourly;
-          cachedActiveBtcServer = liveHourly;
-          console.log(`[ORDER ROUTER] Market was expired/inactive. Auto-routed to current live hourly market: '${liveHourly.slug}'`);
-        }
+      const live15m = await fetchLive15MinBtcMarket();
+      if (live15m) {
+        activeMarketSlug = live15m.slug;
+        marketData = live15m;
+        cachedActiveBtc = live15m;
+        console.log(`[ORDER ROUTER] Auto-routed to current live 15-minute BTC market: '${live15m.slug}'`);
       }
     }
 
-    if (!marketData || !isHourlyBtcMarket(marketData)) {
+    if (!marketData || !is15MinBtcMarket(marketData)) {
       return res.status(400).json({
         success: false,
-        error: `Safety Guard Blocked: No active, unexpired 1-hour BTC market was found on Limitless Exchange. Order aborted.`,
+        error: `Safety Guard Blocked: No active, unexpired 15-minute BTC market was found on Limitless Exchange. Order aborted.`,
+      });
+    }
+
+    // Enforce max 1 bet per 15m contract
+    const existingGuard = inMemoryTradeGuard || loadTradeGuardFromDisk();
+    if (existingGuard && existingGuard.marketSlug === activeMarketSlug) {
+      return res.status(429).json({
+        success: false,
+        mode: 'CONTRACT_LOCKED',
+        error: `🔒 تم بالفعل تنفيذ صفقة على عقد الـ 15 دقيقة الحالي (${activeMarketSlug}). ينتظر الروبوت بدء عقد الـ 15 دقيقة القادم.`,
       });
     }
 
@@ -826,15 +829,14 @@ app.post('/api/limitless/order', async (req, res) => {
       });
     }
 
-    // Extract market ask price for this outcome so FAK orders fill immediately
+    // Extract live market ask price for this outcome (GTC Order without max Entry price)
     const marketAsk = isLong
       ? (marketData?.tradePrices?.buy?.market?.[0] ?? marketData?.prices?.[0] ?? 0.50)
       : (marketData?.tradePrices?.buy?.market?.[1] ?? marketData?.prices?.[1] ?? 0.50);
 
     let inputPrice = Number(price) > 1 ? Number(price) / 100 : (Number(price) || marketAsk);
-    // Add 1.5% slippage buffer for FAK to guarantee execution against book movements
-    if (type === 'FAK' && inputPrice <= marketAsk) {
-      inputPrice = Math.min(0.999, marketAsk * 1.015);
+    if (!inputPrice || inputPrice >= 0.99) {
+      inputPrice = marketAsk;
     }
     // Price must have max 3 decimal places for Limitless SDK tick alignment (0.001)
     const tickAlignedPrice = Math.max(0.001, Math.min(0.999, parseFloat(Number(inputPrice).toFixed(3))));
@@ -849,16 +851,16 @@ app.post('/api/limitless/order', async (req, res) => {
     let rawSize = parseFloat(Number(size || 1).toFixed(2));
     if (isNaN(rawSize) || rawSize <= 0) rawSize = 1;
 
-    // Server-Side 10% Maximum Risk Shield: Enforce hard 10% dollar ceiling based on live on-chain balance
+    // Server-Side Fixed 4% Maximum Risk Shield: Enforce hard 4% dollar ceiling per 15m contract based on live on-chain balance
     try {
       const liveBal = await fetchLiveWalletAndBalance(wallet.address);
       if (liveBal && liveBal.usdcBalance > 0) {
-        const maxRiskBudgetUsd = liveBal.usdcBalance * 0.10;
+        const maxRiskBudgetUsd = liveBal.usdcBalance * 0.04;
         const requestedOrderCost = rawSize * tickAlignedPrice;
         if (requestedOrderCost > maxRiskBudgetUsd) {
           const maxAllowedContracts = Math.floor((maxRiskBudgetUsd / tickAlignedPrice) * 100) / 100;
           console.warn(
-            `[SERVER RISK SHIELD] Requested order cost $${requestedOrderCost.toFixed(2)} exceeds 10% of balance ($${maxRiskBudgetUsd.toFixed(2)}). Strictly capping contracts from ${rawSize} to ${maxAllowedContracts}.`
+            `[SERVER RISK SHIELD] Requested order cost $${requestedOrderCost.toFixed(2)} exceeds Fixed 4% of bankroll ($${maxRiskBudgetUsd.toFixed(2)}). Strictly capping contracts from ${rawSize} to ${maxAllowedContracts}.`
           );
           rawSize = Math.max(0.01, maxAllowedContracts);
         }

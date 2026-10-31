@@ -293,13 +293,13 @@ export default function App() {
             </div>
             <span className="text-slate-700">·</span>
             <div className="text-slate-300">
-              Kelly 10% Cap: <span className="text-emerald-400 font-bold">{formatUsd(kelly.positionSizeUsd)}</span>
+              Fixed 4% / 15m: <span className="text-emerald-400 font-bold">{formatUsd(kelly.positionSizeUsd)}</span>
             </div>
             <span className="text-slate-700">·</span>
             <div className="flex items-center gap-1">
               <span className="text-slate-400">{isAr ? 'نوع الأمر:' : 'Order:'}</span>
               <span className="text-emerald-300 font-bold bg-emerald-950/70 px-1.5 py-0.5 rounded border border-emerald-600/50">
-                {config.orderType} ≤ ${config.maxPriceCents.toFixed(2)}
+                {config.orderType} ({isAr ? 'بدون سقف سعر' : 'No Max Price'})
               </span>
             </div>
             {hasEnvCredentials && (
@@ -406,20 +406,20 @@ export default function App() {
                 <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/90 text-xs flex flex-col gap-3">
                   <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                     <span className="font-semibold text-slate-200">
-                      {isAr ? 'حجم الصفقة المحسوب للصفقة القادمة' : 'Calculated Live Allocation'}
+                      {isAr ? 'حجم الصفقة المحسوب (4% ثابت لكل عقد 15 دقيقة)' : 'Calculated Live Allocation (Fixed 4% per 15m)'}
                     </span>
                     <button
                       onClick={() => setActiveTab('kelly')}
                       className="text-emerald-400 hover:text-emerald-300 transition-colors"
                     >
-                      {isAr ? 'تفاصيل كيلي ←' : 'Kelly Sizing →'}
+                      {isAr ? 'تفاصيل الحجم ←' : 'Sizing Details →'}
                     </button>
                   </div>
                   <div className="space-y-2 font-mono">
                     <div className="flex justify-between text-slate-400">
-                      <span>{isAr ? 'نسبة المخاطرة:' : 'Risk Percentage:'}</span>
+                      <span>{isAr ? 'نسبة الدخول الثابتة:' : 'Fixed Bet Size:'}</span>
                       <span className="text-emerald-400 font-bold">
-                        {(kelly.riskToTake * 100).toFixed(2)}% (Max 10%)
+                        {(kelly.riskToTake * 100).toFixed(2)}% (Fixed 4% / 15m Contract)
                       </span>
                     </div>
                     <div className="flex justify-between text-slate-400">
@@ -429,15 +429,15 @@ export default function App() {
                       </span>
                     </div>
                     <div className="flex justify-between text-slate-400">
-                      <span>{isAr ? 'عقود التوقع المستهدفة:' : 'Prediction Contracts:'}</span>
+                      <span>{isAr ? 'نوع الأمر وسعر التنفيذ:' : 'Order Type & Price:'}</span>
                       <span className="text-sky-400 font-bold">
-                        {kelly.numberOfContracts} @ ${config.maxPriceCents.toFixed(2)} ({config.orderType})
+                        {config.orderType} ({isAr ? 'بسعر السوق الحي بدون سقف' : 'Live Market Price - No Cap'})
                       </span>
                     </div>
                     <div className="flex justify-between text-slate-400">
                       <span>{isAr ? 'نمط التنفيذ المعتمد:' : 'Execution Mode:'}</span>
                       <span className="text-emerald-400 font-bold">
-                        {isAr ? 'أمر موحد مباشر (بدون تجزئة)' : 'Direct Order (No Chunks)'}
+                        {isAr ? 'أمر GTC موحد مباشر (بدون سقف سعر دخول)' : 'Direct GTC Order (Without Max Entry Price)'}
                       </span>
                     </div>
                     <div className="flex justify-between items-center text-slate-400 pt-1.5 border-t border-slate-800/80 text-[11px]">
@@ -491,16 +491,16 @@ export default function App() {
             <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 text-xs text-slate-300 space-y-3">
               <h3 className="font-bold text-slate-100 text-sm">
                 {isAr
-                  ? 'منهجية إدارة المخاطر في التداول الحي (Kelly Criterion)'
-                  : 'Live Risk Management Methodology (Kelly Criterion)'}
+                  ? 'منهجية إدارة رأس المال وتنفيذ الأوامر (4% ثابت لكل عقد 15 دقيقة · أمر GTC بدون سقف سعر)'
+                  : 'Bankroll & Order Execution Methodology (Fixed 4% per 15m Contract · GTC Without Max Entry Price)'}
               </h3>
               <p className="leading-relaxed">
                 {isAr
-                  ? 'في التداول الحي لأسواق التوقع (Prediction Markets)، تشتري عقوداً بسعر أقصاه 0.20$ للعقد الواحد. عند اكتمال الارتداد الإحصائي للوسط الحسابي، يصرف العقد بقيمة 1.00$ كاملة، مما يحقق ربحاً صافياً قدره 0.80$ لكل عقد، وتكون نسبة العائد إلى المخاطرة b = 4.0.'
-                  : 'In live prediction market execution, contracts are placed at a maximum price of $0.20 per contract. Upon successful mean reversion, contracts settle at $1.00, yielding a net return of $0.80 per contract with odds ratio b = 4.0.'}
+                  ? 'يعتمد الروبوت على بث Binance لفريم الدقيقة الواحدة (1min) وحساب مؤشر Z-Score على آخر 45 شمعة تاريخية (1min). يتم تسليح الإشارة عند وصول التأكيد الأول (±2.5σ)، ويتم تنفيذ أمر شراء GTC فوري بدون سقف لسعر الدخول عند تحقق التأكيد الثاني (±2.3σ) بحجم ثابت قدره 4% من إجمالي رصيد المحفظة لكل عقد 15 دقيقة.'
+                  : 'The bot streams 1-minute Binance klines and computes Z-Score across 45 historical 1-minute candles. It arms on the First Confirmation (±2.5σ) and executes a live GTC order without a max entry price ceiling on the Second Confirmation (±2.3σ), allocating a fixed max 4% of bankroll per 15-minute contract.'}
               </p>
               <div className="p-3 bg-slate-950 font-mono text-emerald-400 rounded-lg border border-slate-800">
-                Formula: Kelly% = (b·p - q) / b | Enforced Cap: Math.min(Kelly%, 0.10)
+                Timeframe: 1m (45 Candles) | Z-Threshold: 1st Confirm ±2.5σ → 2nd Confirm ±2.3σ | Bet Size: Fixed 4% per 15m Contract | Order: GTC (No Max Entry Price)
               </div>
             </div>
           </div>
@@ -518,9 +518,9 @@ export default function App() {
           <div className="flex items-center gap-2">
             <span>{isAr ? 'نظام التداول الحي المباشر' : 'Live Trading System'}</span>
             <span>·</span>
-            <span>Binance 1h Z-Score Mean Reversion</span>
+            <span>Binance 1m (45 Candles) · Z-Score (2.5 → 2.3)</span>
             <span>·</span>
-            <span>Limitless Exchange Execution</span>
+            <span>Limitless 15m Contract (Fixed 4% · GTC No Max Price)</span>
           </div>
           <div className="font-mono text-[11px] text-slate-500">
             Node.js / TypeScript WebSocket Architecture

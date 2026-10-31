@@ -44,19 +44,19 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
     percent: 0,
   });
 
-  // Calculate live countdown to the 1-hour expiration
+  // Calculate live countdown to the 15-minute expiration
   useEffect(() => {
     const updateCountdown = () => {
       const exp = market?.expirationTimestamp;
       if (!exp) {
-        // Fallback: Calculate remaining in 1-hour clock cycle
+        // Fallback: Calculate remaining in 15-minute clock cycle
         const now = Date.now();
-        const next1Hour = Math.ceil(now / (60 * 60 * 1000)) * (60 * 60 * 1000);
-        const diffMs = Math.max(0, next1Hour - now);
+        const next15Min = Math.ceil(now / (15 * 60 * 1000)) * (15 * 60 * 1000);
+        const diffMs = Math.max(0, next15Min - now);
         const totalSec = Math.floor(diffMs / 1000);
         const mins = Math.floor(totalSec / 60);
         const secs = totalSec % 60;
-        const pct = Math.min(100, Math.max(0, ((3600 - totalSec) / 3600) * 100));
+        const pct = Math.min(100, Math.max(0, ((900 - totalSec) / 900) * 100));
         setTimeLeft({ minutes: mins, seconds: secs, totalSeconds: totalSec, percent: pct });
         return;
       }
@@ -71,7 +71,7 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
         onRefresh();
       }
 
-      const start = market?.startAt ? new Date(market.startAt).getTime() : exp - 60 * 60 * 1000;
+      const start = market?.startAt ? new Date(market.startAt).getTime() : exp - 15 * 60 * 1000;
       const totalDuration = Math.max(1, exp - start);
       const elapsed = Math.max(0, now - start);
       const pct = Math.min(100, Math.max(0, (elapsed / totalDuration) * 100));
@@ -92,8 +92,8 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
     return () => clearInterval(timer);
   }, [onRefresh]);
 
-  const slug = market?.slug || 'btc-up-or-down-hourly';
-  const title = market?.title || (isAr ? 'سوق البيتكوين صعود أم هبوط - عقد الساعة' : 'BTC Up or Down Hourly');
+  const slug = market?.slug || 'btc-up-or-down-15-min';
+  const title = market?.title || (isAr ? 'سوق البيتكوين صعود أم هبوط - عقد 15 دقيقة' : 'BTC Up or Down 15-Minute');
   const marketUrl = `https://limitless.exchange/markets/${encodeURIComponent(slug)}`;
 
   // Real best bid / ask from orderbook
@@ -174,11 +174,11 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
               <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
             </span>
             <span className="text-xs font-extrabold uppercase tracking-wider text-emerald-400 bg-emerald-950/80 px-2.5 py-0.5 rounded-full border border-emerald-500/40">
-              {isAr ? 'عقد Limitless الحصري (ساعة كاملة 1H)' : 'Exclusive Limitless Market (1-Hour)'}
+              {isAr ? 'عقد Limitless الحصري (15 دقيقة 15m)' : 'Exclusive Limitless Market (15-Minute)'}
             </span>
             <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-300 bg-emerald-950/90 px-2 py-0.5 rounded-full border border-emerald-500/50">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-              <span>{isAr ? 'حماية الساعة (عقود 5 د و 15 د محظورة)' : '1-Hour Lock (5m & 15m Blocked)'}</span>
+              <span>{isAr ? 'حجم ثابت 4% لكل عقد 15m · GTC بدون سقف سعر' : 'Fixed 4% per 15m Contract · GTC No Price Cap'}</span>
             </span>
           </div>
 
@@ -207,7 +207,7 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
             onClick={onRefresh}
             disabled={isRefreshing}
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors cursor-pointer"
-            title={isAr ? 'تحديث بيانات السوق والتأكد من أحدث شمعة 15 دقيقة' : 'Refresh market details'}
+            title={isAr ? 'تحديث بيانات السوق والتأكد من أحدث عقد 15 دقيقة' : 'Refresh market details'}
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-emerald-400' : ''}`} />
             <span className="hidden sm:inline text-[11px]">{isAr ? 'مزامنة' : 'Sync'}</span>
@@ -235,7 +235,7 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
               {priceToBeat ? `$${priceToBeat.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '$80,553.85'}
             </span>
             <span className="text-xs text-slate-400">
-              {isAr ? 'سعر بداية الساعة' : '1-Hour Open Price'}
+              {isAr ? 'سعر بداية الـ 15 دقيقة' : '15-Minute Open Price'}
             </span>
           </div>
 
@@ -398,7 +398,7 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
           <div className="flex items-center justify-between text-xs text-slate-400">
             <span className="flex items-center gap-1.5 font-medium">
               <Clock className="w-3.5 h-3.5 text-amber-400" />
-              <span>{isAr ? 'نهاية نافذة الساعة:' : '1-Hour Expiration:'}</span>
+              <span>{isAr ? 'نهاية عقد الـ 15 دقيقة:' : '15-Minute Expiration:'}</span>
             </span>
             <span className="text-[10px] text-slate-500 font-mono">Auto-Roll</span>
           </div>
@@ -412,7 +412,7 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
             </span>
           </div>
 
-          {/* Progress bar of current 1 hour interval */}
+          {/* Progress bar of current 15 minute interval */}
           <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
             <div
               className="bg-gradient-to-r from-emerald-500 via-amber-500 to-rose-500 h-2 rounded-full transition-all duration-1000"
@@ -440,11 +440,11 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
           <span>
             {isAr ? (
               <>
-                <strong className="text-slate-200">توضيح المعمارية:</strong> بث <strong className="text-sky-400">Binance 1h</strong> بالشارت أعلاه يعمل كـ <em>رادار إحصائي فوري</em> لحساب Z-Score، بينما يتم تنفيذ أوامر الشراء الموقعة <strong className="text-emerald-400">EIP-712</strong> مباشرة داخل عقد <strong className="text-white">{title}</strong> على منصة Limitless!
+                <strong className="text-slate-200">توضيح المعمارية:</strong> بث <strong className="text-sky-400">Binance 1m (45 شمعة)</strong> يحسب Z-Score بتأكيد أول <strong className="text-amber-300">2.5</strong> وتأكيد ثاني <strong className="text-emerald-400">2.3</strong>، ويتم تنفيذ أمر <strong className="text-emerald-400">GTC بدون سقف سعر</strong> بحجم ثابت <strong className="text-white">4%</strong> لكل عقد 15 دقيقة!
               </>
             ) : (
               <>
-                <strong className="text-slate-200">Architecture:</strong> <strong className="text-sky-400">Binance 1h</strong> acts as the low-latency statistical radar for Z-Score mean reversion, while signed <strong className="text-emerald-400">EIP-712</strong> orders are executed directly on the <strong className="text-white">{title}</strong> contract on Limitless!
+                <strong className="text-slate-200">Architecture:</strong> <strong className="text-sky-400">Binance 1m (45 candles)</strong> computes Z-Score with 1st confirm <strong className="text-amber-300">2.5</strong> &amp; 2nd confirm <strong className="text-emerald-400">2.3</strong>, executing <strong className="text-emerald-400">GTC without max entry price</strong> at fixed <strong className="text-white">4%</strong> per 15m contract!
               </>
             )}
           </span>

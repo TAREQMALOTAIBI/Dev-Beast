@@ -31,25 +31,24 @@ import {
 // ==========================================
 const CONFIG = {
     SYMBOL: '${config.symbol}',
-    TIMEFRAME: '${config.timeframe}',
-    PERIODS: ${config.periods},
+    TIMEFRAME: '1m', // 1min Binance WebSocket & Historical Candles
+    PERIODS: 45, // 45 Historical Candles
     STRATEGY_DIRECTION: '${config.strategyDirection || 'BOTH'}', // 'BOTH' | 'LONG_ONLY' | 'SHORT_ONLY'
-    Z_SCORE_UPPER: ${config.zScoreUpper.toFixed(2)},
-    Z_SCORE_ENTRY: ${config.zScoreEntry.toFixed(2)},
-    Z_SCORE_LOWER: ${(config.zScoreLower ?? -2.0).toFixed(2)},
-    Z_SCORE_LOWER_ENTRY: ${(config.zScoreLowerEntry ?? -1.9).toFixed(2)},
-    MAX_PRICE_CENTS: ${config.maxPriceCents.toFixed(2)}, // سقف سعر الدخول (20 سنت وتحت)
-    MAX_RISK_PERCENT: 0.10, // الحد الأقصى للمخاطرة 10% كحد أقصى لحماية رأس المال
-    ORDER_TYPE: '${config.orderType}',
-    EXECUTION_MODE: 'DIRECT_UNIFIED', // أمر موحد مباشر (تم إلغاء التجزئة)
+    Z_SCORE_UPPER: 2.50, // First confirmation (+2.5)
+    Z_SCORE_ENTRY: 2.30, // Second confirmation (+2.3)
+    Z_SCORE_LOWER: -2.50, // First confirmation (-2.5)
+    Z_SCORE_LOWER_ENTRY: -2.30, // Second confirmation (-2.3)
+    MAX_RISK_PERCENT: 0.04, // Fixed 4% of bankroll per 15m contract
+    ORDER_TYPE: 'GTC', // GTC Order without max Entry price
+    EXECUTION_MODE: 'DIRECT_UNIFIED',
     
     // عناوين البيانات الحية الرسمية
     BINANCE_REST_URL: '${config.binanceRestUrl}', 
-    BINANCE_WS_URL: '${config.binanceWsUrl}',
+    BINANCE_WS_URL: 'wss://stream.binance.com/ws/btcusdt@kline_1m',
     
     // خادم Limitless الرسمي المدعوم رسمياً من SDK
     LIMITLESS_WS_URL: '${config.limitlessWsUrl}', // wss://ws.limitless.exchange
-    LIMITLESS_MARKET_SLUG: '${config.limitlessMarketSlug}', // e.g. 'btc-100k-weekly'
+    LIMITLESS_MARKET_SLUG: '${config.limitlessMarketSlug}', // 15m BTC contract
     
     // مفاتيح المحفظة وتوثيق HMAC (EIP-712 Order Signing)
     PRIVATE_KEY: process.env.PRIVATE_KEY || '',
@@ -194,21 +193,21 @@ class LimitlessTradingBot {
     }
 
     // ==========================================
-    // 3. جلب الشموع التاريخية (Binance Rest API)
+    // 3. جلب 45 شمعة تاريخية (1m) من Binance Rest API
     // ==========================================
     public async fetchHistoricalData() {
-        console.log(\`📥 Fetching last \${CONFIG.PERIODS} candles for \${CONFIG.SYMBOL}...\`);
+        console.log(\`📥 Fetching last \${CONFIG.PERIODS} candles (1m) for \${CONFIG.SYMBOL}...\`);
         try {
             const response = await axios.get(CONFIG.BINANCE_REST_URL, {
                 params: {
                     symbol: CONFIG.SYMBOL,
                     interval: CONFIG.TIMEFRAME,
-                    limit: Math.max(120, CONFIG.PERIODS + 70)
+                    limit: CONFIG.PERIODS
                 }
             });
 
             this.closePrices = response.data.map((candle: any[]) => parseFloat(candle[4]));
-            console.log('📊 Historical data loaded. Running prices:', this.closePrices.slice(-CONFIG.PERIODS));
+            console.log('📊 45 historical 1m candles loaded:', this.closePrices.length);
             this.startBinanceWS();
         } catch (error) {
             console.error('❌ Error fetching historical data:', error);
@@ -216,7 +215,7 @@ class LimitlessTradingBot {
     }
 
     // ==========================================
-    // 4. البث الحي (Binance WebSocket)
+    // 4. البث الحي (Binance 1m WebSocket)
     // ==========================================
     private lastExecutedCandleTime: number = 0;
     private isExecutingTrade: boolean = false;
@@ -228,7 +227,6 @@ class LimitlessTradingBot {
             const message = JSON.parse(data.toString());
             const kline = message.k;
 
-            // تنفيذ فوري في نفس الشمعة مع كل حركة سعر بمجرد تحقق إشارة الانعكاس
             if (kline) {
                 const currentPrice = parseFloat(kline.c);
                 const isClosed = Boolean(kline.x);
@@ -237,23 +235,21 @@ class LimitlessTradingBot {
             }
         });
 
-        binanceWs.on('open', () => console.log('✅ Connected to Binance Live Feed'));
+        binanceWs.on('open', () => console.log('✅ Connected to Binance 1m Live Feed'));
         binanceWs.on('error', (err) => console.warn('Binance WS notice:', err.message));
     }
 
     private onTick(newPrice: number, isClosed: boolean, candleTime: number) {
-        // حساب Z-Score و 1h EMA(20)/EMA(50) اللحظي في نفس الشمعة فورياً
-        const livePrices = [...this.closePrices.slice(0, -1), newPrice];
+        const livePrices = [...this.closePrices.slice(-(CONFIG.PERIODS - 1)), newPrice];
         this.evaluateStrategy(livePrices, candleTime);
 
-        // عند إغلاق الشمعة النهائي، تثبيت السعر للانتقال للشمعة القادمة
         if (isClosed) {
-            this.closePrices = [...this.closePrices.slice(1), newPrice];
+            this.closePrices = [...this.closePrices.slice(-(CONFIG.PERIODS - 1)), newPrice];
         }
     }
 
     // ==========================================
-    // 5. الحسابات الرياضية (Z-Score + 1h EMA 20/50)
+    // 5. حساب Z-Score على 45 شمعة (1m)
     // ==========================================
     private calculateZScore(prices: number[]): number {
         const windowPrices = prices.slice(-CONFIG.PERIODS);
@@ -266,120 +262,86 @@ class LimitlessTradingBot {
         return stdDev > 0 ? (currentPrice - mean) / stdDev : 0;
     }
 
-    private calculateEMA(prices: number[], period: number): number {
-        if (prices.length === 0) return 0;
-        const k = 2 / (period + 1);
-        let ema = prices[0];
-        for (let i = 1; i < prices.length; i++) {
-            ema = prices[i] * k + ema * (1 - k);
-        }
-        return ema;
-    }
-
     // ==========================================
-    // 6. منطق الاستراتيجية (Z-Score + فلتر الاتجاه 1h EMA 20/50)
+    // 6. منطق الاستراتيجية: التأكيد الأول (2.5) والتأكيد الثاني (2.3)
     // ==========================================
     private evaluateStrategy(prices: number[] = this.closePrices, candleTime?: number) {
         if (prices.length < CONFIG.PERIODS) return;
 
         const currentZScore = this.calculateZScore(prices);
-        const ema20 = this.calculateEMA(prices, 20);
-        const ema50 = this.calculateEMA(prices, 50);
 
-        // Short only if: z > 2.0 AND 1h EMA(20) < 1h EMA(50)
+        // 1. Short (DOWN): First confirmation >= +2.5, Second confirmation <= +2.3
         if (CONFIG.STRATEGY_DIRECTION === 'BOTH' || CONFIG.STRATEGY_DIRECTION === 'SHORT_ONLY') {
-            if (currentZScore >= CONFIG.Z_SCORE_UPPER && ema20 < ema50) {
+            if (currentZScore >= CONFIG.Z_SCORE_UPPER) {
+                this.crossedUpperThreshold = true;
+            } else if (this.crossedUpperThreshold && currentZScore <= CONFIG.Z_SCORE_ENTRY && currentZScore > 0) {
+                this.crossedUpperThreshold = false;
                 if (!this.isExecutingTrade && (!candleTime || this.lastExecutedCandleTime !== candleTime)) {
-                    console.log(\`🎯 إشارة Short محققة! z=\${currentZScore.toFixed(2)}σ (> +\${CONFIG.Z_SCORE_UPPER}) و EMA20 (\${ema20.toFixed(2)}) < EMA50 (\${ema50.toFixed(2)}). تنفيذ أمر DOWN!\`);
+                    console.log(\`🎯 Short Second Confirmation! z=\${currentZScore.toFixed(2)}σ (<= +\${CONFIG.Z_SCORE_ENTRY}). Executing GTC DOWN order!\`);
                     if (candleTime) this.lastExecutedCandleTime = candleTime;
                     this.executeTrade('SHORT');
                 }
+            } else if (currentZScore <= 0) {
+                this.crossedUpperThreshold = false;
             }
         }
 
-        // Long only if: z < -2.0 AND 1h EMA(20) > 1h EMA(50)
+        // 2. Long (UP): First confirmation <= -2.5, Second confirmation >= -2.3
         if (CONFIG.STRATEGY_DIRECTION === 'BOTH' || CONFIG.STRATEGY_DIRECTION === 'LONG_ONLY') {
-            if (currentZScore <= CONFIG.Z_SCORE_LOWER && ema20 > ema50) {
+            if (currentZScore <= CONFIG.Z_SCORE_LOWER) {
+                this.crossedLowerThreshold = true;
+            } else if (this.crossedLowerThreshold && currentZScore >= CONFIG.Z_SCORE_LOWER_ENTRY && currentZScore < 0) {
+                this.crossedLowerThreshold = false;
                 if (!this.isExecutingTrade && (!candleTime || this.lastExecutedCandleTime !== candleTime)) {
-                    console.log(\`🎯 إشارة Long محققة! z=\${currentZScore.toFixed(2)}σ (< \${CONFIG.Z_SCORE_LOWER}) و EMA20 (\${ema20.toFixed(2)}) > EMA50 (\${ema50.toFixed(2)}). تنفيذ أمر UP!\`);
+                    console.log(\`🎯 Long Second Confirmation! z=\${currentZScore.toFixed(2)}σ (>= \${CONFIG.Z_SCORE_LOWER_ENTRY}). Executing GTC UP order!\`);
                     if (candleTime) this.lastExecutedCandleTime = candleTime;
                     this.executeTrade('LONG');
                 }
+            } else if (currentZScore >= 0) {
+                this.crossedLowerThreshold = false;
             }
         }
     }
 
     // ==========================================
-    // 7. إدارة المخاطر (Kelly Criterion) 10% Max
+    // 7. حجم الصفقة: Fixed 4% من الرصيد لكل عقد 15 دقيقة
     // ==========================================
     private calculatePositionSize(): number {
-        // نسبة العائد إلى المخاطرة (شراء بـ 0.20$ والربح الصافي 0.80$ -> النسبة = 4)
-        const b = (1.00 - CONFIG.MAX_PRICE_CENTS) / CONFIG.MAX_PRICE_CENTS; 
-        const p = this.winProbability;
-        const q = 1 - p;
-
-        // معادلة كيلي: (bp - q) / b
-        const kellyFraction = (b * p - q) / b;
-        
-        // تطبيق الحد الأقصى للمخاطرة (لا يتجاوز 10% لحماية رأس المال)
-        const riskToTake = Math.min(Math.max(kellyFraction, 0), CONFIG.MAX_RISK_PERCENT);
-        
-        const positionSizeUsd = this.currentBalance * riskToTake;
-        console.log(\`🛡️ Kelly Risk: \${(riskToTake * 100).toFixed(2)}% | Size: $\${positionSizeUsd.toFixed(2)}\`);
+        const positionSizeUsd = this.currentBalance * CONFIG.MAX_RISK_PERCENT;
+        console.log(\`🛡️ Fixed 4% Bankroll Bet Size: $\${positionSizeUsd.toFixed(2)} per 15m contract\`);
         return positionSizeUsd;
     }
 
     // ==========================================
-    // 8. تنفيذ وتوقيع الأوامر (Direct EIP-712 Order Execution - No Chunking)
+    // 8. تنفيذ أمر GTC بدون سقف سعر دخول على عقد الـ 15 دقيقة
     // ==========================================
     private async executeTrade(direction: 'SHORT' | 'LONG' = 'SHORT') {
         const totalInvestment = this.calculatePositionSize();
-        const numberOfContracts = Math.floor(totalInvestment / CONFIG.MAX_PRICE_CENTS);
-
-        if (numberOfContracts <= 0) {
-            console.log('⚠️ Position size is 0, skipping order execution.');
-            return;
-        }
-
         const outcome = direction === 'LONG' ? 'UP' : 'DOWN';
-        console.log(\`🛒 Executing \${numberOfContracts} contracts for \${outcome} (\${direction}) via Direct EIP-712 Signing [10% Max Risk - No Chunking]...\`);
 
         try {
-            // توقيع وتنفيذ العقد كاملاً دفعة واحدة وفق معيار EIP-712 دون أي تجزئة
             if (this.orderClient) {
                 const marketFetcher = new MarketFetcher(this.httpClient!);
                 const market = await marketFetcher.getMarket(CONFIG.LIMITLESS_MARKET_SLUG);
                 const tokenId = direction === 'LONG' ? market.tokens?.yes : market.tokens?.no;
+                const livePrice = direction === 'LONG'
+                    ? (market.prices?.[0] || 0.50)
+                    : (market.prices?.[1] || 0.50);
+                const executionPrice = Math.min(0.99, Math.max(0.01, Number(livePrice.toFixed(2))));
+                const numberOfContracts = Math.max(1, Math.floor(totalInvestment / executionPrice));
 
                 if (tokenId) {
                     const signedOrder = await this.orderClient.createOrder({
                         marketSlug: CONFIG.LIMITLESS_MARKET_SLUG,
                         tokenId: String(tokenId),
                         side: Side.BUY,
-                        orderType: CONFIG.ORDER_TYPE === 'GTC' ? OrderType.GTC : OrderType.FAK,
-                        price: CONFIG.MAX_PRICE_CENTS,
+                        orderType: OrderType.GTC,
+                        price: executionPrice, // GTC Order without max Entry price cap
                         size: numberOfContracts
                     });
-                    console.log(\`✅ Direct Unified Order Executed! ID: \${signedOrder.id}\`);
+                    console.log(\`✅ GTC Order Executed (\${outcome})! ID: \${signedOrder.id} | \${numberOfContracts} contracts @ $\${executionPrice}\`);
                     return;
                 }
-            }
-
-            // بث الأمر المباشر الموحد
-            const orderPayload = {
-                action: 'PLACE_ORDER',
-                market: CONFIG.LIMITLESS_MARKET_SLUG,
-                side: 'BUY',
-                direction,
-                outcome,
-                type: CONFIG.ORDER_TYPE,
-                price: CONFIG.MAX_PRICE_CENTS,
-                size: numberOfContracts,
-                chunkId: 1
-            };
-            if ((this.limitlessWs as any).socket) {
-                (this.limitlessWs as any).socket.emit('order', orderPayload);
-                console.log(\`🚀 Direct Order dispatched via stream: \${numberOfContracts} contracts @ $\${CONFIG.MAX_PRICE_CENTS}\`);
             }
         } catch (err: any) {
             console.error('❌ Order execution failed:', err.message);

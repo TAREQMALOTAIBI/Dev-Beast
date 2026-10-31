@@ -30,7 +30,7 @@ export class LimitlessService {
   private currentOracle: OraclePriceData | null = null;
   private currentPositions: PositionItem[] = [];
   private isExplicitlyClosed = false;
-  private activeMarketSlug = 'btc-up-or-down-hourly';
+  private activeMarketSlug = 'btc-up-or-down-15-min';
   private pollingTimer: number | null = null;
   private liveStateTimer: number | null = null;
   private credentials?: { apiKey?: string; tokenId?: string; secret?: string };
@@ -272,14 +272,14 @@ export class LimitlessService {
    */
   public connect(
     url: string = 'wss://ws.limitless.exchange',
-    marketSlug: string = 'btc-up-or-down-hourly',
+    marketSlug: string = 'btc-up-or-down-15-min',
     credentials?: { apiKey?: string; tokenId?: string; secret?: string }
   ) {
     this.disconnect();
     this.isExplicitlyClosed = false;
     this.setStatus('CONNECTING');
     this.credentials = credentials;
-    this.activeMarketSlug = marketSlug || 'btc-up-or-down-hourly';
+    this.activeMarketSlug = marketSlug || 'btc-up-or-down-15-min';
 
     this.log('SYSTEM', `[LIMITLESS STREAM] Initializing live connection to Limitless Exchange Gateway...`);
     this.startLiveStateSync();
@@ -417,7 +417,7 @@ export class LimitlessService {
    * Subscribe to specific market prices
    */
   public subscribeMarket(slug: string) {
-    if (!slug || slug === 'btc-up-or-down-hourly') return;
+    if (!slug || slug === 'btc-up-or-down-hourly' || slug === 'btc-up-or-down-15-min') return;
     if (this.activeMarketSlug === slug) return;
     this.activeMarketSlug = slug;
     // Notify official backend SDK WebSocket to subscribe
@@ -431,7 +431,7 @@ export class LimitlessService {
   }
 
   /**
-   * Automatically discovers the active Hourly BTC prediction market from Limitless
+   * Automatically discovers the active 15-Minute BTC prediction market from Limitless
    */
   private async discoverAndSubscribeActiveBtcMarket() {
     try {
@@ -446,17 +446,16 @@ export class LimitlessService {
           const match = json.data.find(
             (m: { slug?: string; title?: string }) =>
               (m.slug?.toLowerCase().includes('btc') || m.title?.toLowerCase().includes('btc')) &&
-              (/hourly/i.test(m.slug || '') || /hourly/i.test(m.title || '') || /(^|[^0-9])1-hour/i.test(m.slug || '') || /1\s*hour/i.test(m.title || '') || /(^|[^0-9])1h/i.test(m.slug || '')) &&
+              (/(^|[^0-9])15-min/i.test(m.slug || '') || /15\s*min/i.test(m.title || '') || /(^|[^0-9])15m/i.test(m.slug || '')) &&
               !/(^|[^0-9])5-min/i.test(m.slug || '') &&
-              !/(^|[^0-9])15-min/i.test(m.slug || '') &&
-              !/(^|[^0-9])5\s*min/i.test(m.title || '') &&
-              !/(^|[^0-9])15\s*min/i.test(m.title || '')
+              !/hourly/i.test(m.slug || '') &&
+              !/(^|[^0-9])1-hour/i.test(m.slug || '')
           );
           discoveredSlug = match?.slug;
         }
 
         if (discoveredSlug && discoveredSlug !== this.activeMarketSlug) {
-          this.log('SYSTEM', `[LIMITLESS DISCOVERY] Active Hourly BTC prediction market found: ${discoveredSlug}`);
+          this.log('SYSTEM', `[LIMITLESS DISCOVERY] Active 15-Minute BTC prediction market found: ${discoveredSlug}`);
           this.subscribeMarket(discoveredSlug);
         }
       }
@@ -558,11 +557,11 @@ export class LimitlessService {
       this.log('SYSTEM', `[ORDER DISPATCH] WebSocket status is ${this.status}. Transmitting order via Limitless HTTP REST order execution proxy...`);
     }
 
-    const resolvedSlug = (targetMarketSlug || this.activeMarketSlug || 'btc-up-or-down-hourly').trim();
+    const resolvedSlug = (targetMarketSlug || this.activeMarketSlug || 'btc-up-or-down-15-min').trim();
 
-    // Strict safety check: Never permit 5-minute or 15-minute contracts
-    if (/(^|[^0-9])5-min/i.test(resolvedSlug) || /(^|[^0-9])15-min/i.test(resolvedSlug)) {
-      const err = `Safety Guard Blocked: Execution rejected for '${resolvedSlug}'. The bot is restricted exclusively to 1-hour contracts (BTC Up or Down Hourly).`;
+    // Strict safety check: Never permit 5-minute or 1-hour contracts when targeting 15m contracts
+    if (/(^|[^0-9])5-min/i.test(resolvedSlug) || /hourly/i.test(resolvedSlug) || /(^|[^0-9])1-hour/i.test(resolvedSlug)) {
+      const err = `Safety Guard Blocked: Execution rejected for '${resolvedSlug}'. The bot is restricted exclusively to 15-minute contracts (BTC 15m).`;
       this.log('SYSTEM', `[ORDER BLOCKED] ${err}`);
       throw new Error(err);
     }

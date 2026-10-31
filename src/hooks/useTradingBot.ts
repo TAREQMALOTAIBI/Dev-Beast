@@ -17,91 +17,75 @@ import { soundController } from '../utils/audio';
 
 const DEFAULT_CONFIG: BotConfig = {
   symbol: 'BTCUSDT',
-  timeframe: '1h',
-  periods: 30,
+  timeframe: '1m',
+  periods: 45,
   strategyDirection: 'BOTH', // 'BOTH' | 'LONG_ONLY' | 'SHORT_ONLY'
-  zScoreUpper: 2.0, // Upper threshold: Entry condition when exceeding 2.0 in rise
-  zScoreEntry: 2.0,
-  zScoreLower: -2.0, // Lower threshold: Entry condition when exceeding -2.0 in decline
-  zScoreLowerEntry: -2.0,
-  maxPriceCents: 0.20, // Ceiling price (20 cents and below)
-  maxRiskPercent: 0.10, // Strictly capped at 10% maximum (wallet safety limit)
+  zScoreUpper: 2.5, // First confirmation: +2.5
+  zScoreEntry: 2.3, // Second confirmation: +2.3
+  zScoreLower: -2.5, // First confirmation: -2.5
+  zScoreLowerEntry: -2.3, // Second confirmation: -2.3
+  maxPriceCents: 0.99, // GTC Order without max Entry price
+  maxRiskPercent: 0.04, // Fixed 4% of bankroll per 15m contract
   orderType: 'GTC', // Good-Til-Cancelled
-  fractionChunks: 1, // 1 unified single direct order (chunking eliminated)
+  fractionChunks: 1, // 1 unified single direct order
   chunkDelayMs: 0,
   winProbability: 0.55,
   initialBalance: 1000,
   binanceRestUrl: 'https://api.binance.com/api/v3/klines',
-  binanceWsUrl: 'wss://stream.binance.com/ws/btcusdt@kline_1h',
+  binanceWsUrl: 'wss://stream.binance.com/ws/btcusdt@kline_1m',
   limitlessWsUrl: 'wss://ws.limitless.exchange',
-  limitlessMarketSlug: 'btc-up-or-down-hourly',
+  limitlessMarketSlug: 'btc-up-or-down-15-min',
   limitlessApiKey: (typeof process !== 'undefined' && process.env?.LIMITLESS_API_KEY) || '',
   limitlessTokenId: (typeof process !== 'undefined' && process.env?.LMTS_TOKEN_ID) || '',
   limitlessTokenSecret: (typeof process !== 'undefined' && process.env?.LMTS_TOKEN_SECRET) || '',
-  singleTradePerContract: true, // Strictly max 1 trade per 1-hour contract
-  cooldownMinutes: 60, // 60-minute cooldown guard between trades
+  singleTradePerContract: true, // Max 1 bet per 15m contract
+  cooldownMinutes: 15, // 15-minute contract cycle guard
 };
 
 export function useTradingBot() {
   const [config, setConfig] = useState<BotConfig>(() => {
-    // Read persisted config if available
+    // Read persisted config if available and migrate to latest strategy settings
     try {
       const saved = localStorage.getItem('limitless_live_bot_config');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed.binanceWsUrl && (parsed.binanceWsUrl.includes(':9443') || parsed.binanceWsUrl.includes('15m'))) {
-          parsed.binanceWsUrl = DEFAULT_CONFIG.binanceWsUrl;
-        }
+        parsed.timeframe = '1m';
+        parsed.periods = 45;
+        parsed.binanceWsUrl = 'wss://stream.binance.com/ws/btcusdt@kline_1m';
         if (parsed.binanceRestUrl && parsed.binanceRestUrl.includes('binance.vision')) {
           parsed.binanceRestUrl = DEFAULT_CONFIG.binanceRestUrl;
         }
         if (parsed.limitlessWsUrl && parsed.limitlessWsUrl.includes('api.limitless.exchange')) {
           parsed.limitlessWsUrl = DEFAULT_CONFIG.limitlessWsUrl;
         }
-        // Force migration away from 5-min, 15-min, weekly markets, or specific expired timestamp slugs to base hourly
+        // Migrate to 15-minute BTC market slug
         if (
           !parsed.limitlessMarketSlug ||
           /(^|[^0-9])5-min/i.test(parsed.limitlessMarketSlug) ||
-          /(^|[^0-9])15-min/i.test(parsed.limitlessMarketSlug) ||
+          /hourly/i.test(parsed.limitlessMarketSlug) ||
+          /(^|[^0-9])1-hour/i.test(parsed.limitlessMarketSlug) ||
           parsed.limitlessMarketSlug.includes('weekly') ||
           /\d{8,}/.test(parsed.limitlessMarketSlug)
         ) {
           parsed.limitlessMarketSlug = DEFAULT_CONFIG.limitlessMarketSlug;
         }
-        if (!parsed.timeframe || parsed.timeframe === '15m') {
-          parsed.timeframe = '1h';
-        }
         if (!parsed.strategyDirection) {
           parsed.strategyDirection = 'BOTH';
         }
-        // Migrate candle periods from 14 to 30
-        if (!parsed.periods || parsed.periods === 14) {
-          parsed.periods = 30;
-        }
-        // Enforce threshold 2.0 and direct entry on exceeding threshold 2
-        parsed.zScoreUpper = 2.0;
-        parsed.zScoreEntry = 2.0;
-        parsed.zScoreLower = -2.0;
-        parsed.zScoreLowerEntry = -2.0;
-        // Set default orderType to GTC
-        if (!parsed.orderType || parsed.orderType === 'FAK') {
-          parsed.orderType = 'GTC';
-        }
-        if (parsed.maxPriceCents === undefined || parsed.maxPriceCents > 0.20) {
-          parsed.maxPriceCents = 0.20;
-        }
-        // Strictly eliminate chunking: set to 1 instant single order
+        // Enforce Z-Score First confirmation 2.5 and Second confirmation 2.3
+        parsed.zScoreUpper = 2.5;
+        parsed.zScoreEntry = 2.3;
+        parsed.zScoreLower = -2.5;
+        parsed.zScoreLowerEntry = -2.3;
+        // Enforce GTC Order without max Entry price
+        parsed.orderType = 'GTC';
+        parsed.maxPriceCents = 0.99;
         parsed.fractionChunks = 1;
         parsed.chunkDelayMs = 0;
-        // Set maxRiskPercent to 10% (0.10) wallet safety limit
-        parsed.maxRiskPercent = 0.10;
-        // Ensure single trade per 1-hour contract is active
-        if (parsed.singleTradePerContract === undefined) {
-          parsed.singleTradePerContract = true;
-        }
-        if (parsed.cooldownMinutes === undefined || parsed.cooldownMinutes < 1 || parsed.cooldownMinutes === 15) {
-          parsed.cooldownMinutes = 60;
-        }
+        // Enforce max Fixed 4% of bankroll per 15m contract
+        parsed.maxRiskPercent = 0.04;
+        parsed.singleTradePerContract = true;
+        parsed.cooldownMinutes = 15;
 
         // Auto-inject env secrets if persisted config has empty credentials
         if (!parsed.limitlessTokenId && DEFAULT_CONFIG.limitlessTokenId) {
@@ -128,15 +112,15 @@ export function useTradingBot() {
     ema20: 0,
     ema50: 0,
     trend: 'BULLISH',
-    longAllowed: false,
-    shortAllowed: false,
+    longAllowed: true,
+    shortAllowed: true,
   });
   const emaFilterRef = useRef<EmaFilterState>({
     ema20: 0,
     ema50: 0,
     trend: 'BULLISH',
-    longAllowed: false,
-    shortAllowed: false,
+    longAllowed: true,
+    shortAllowed: true,
   });
   const [crossedUpperThreshold, setCrossedUpperThreshold] = useState<boolean>(false);
   const [crossedLowerThreshold, setCrossedLowerThreshold] = useState<boolean>(false);
@@ -164,7 +148,7 @@ export function useTradingBot() {
     } catch {
       // Safe fallback
     }
-    return true; // Default to active and trading automatically
+    return true;
   });
   const [binanceStatus, setBinanceStatus] = useState<'CONNECTING' | 'CONNECTED' | 'DISCONNECTED'>('CONNECTING');
   const [limitlessStatus, setLimitlessStatus] = useState<LimitlessStatus>('DISCONNECTED');
@@ -179,7 +163,7 @@ export function useTradingBot() {
     return [];
   });
   const [isExecuting, setIsExecuting] = useState<boolean>(false);
-  const [soundEnabled, setSoundEnabled] = useState<boolean>(false); // Completely muted by default per user request
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(false);
   const [lastSignalTime, setLastSignalTime] = useState<number | null>(null);
 
   // References for live closures and duplicate prevention
@@ -196,7 +180,7 @@ export function useTradingBot() {
   const activeLimitlessMarketRef = useRef<LimitlessMarketDetails | null>(null);
   const metricsRef = useRef<ZScoreMetric[]>([]);
 
-  // Persistent trade lock status
+  // Persistent trade lock status (1 bet per 15m contract)
   const [contractLockInfo, setContractLockInfo] = useState<{
     isLocked: boolean;
     reason?: string;
@@ -204,31 +188,29 @@ export function useTradingBot() {
     lastTradedSlug?: string;
   }>({ isLocked: false });
 
-  // Load persistent trade guard on mount (Sync from VM server disk & RAM with 1-hour auto-expiry)
+  // Load persistent trade guard on mount (Sync from VM server disk & RAM with 15-minute auto-expiry)
   useEffect(() => {
     try {
       const saved = localStorage.getItem('limitless_last_trade_guard');
       if (saved) {
         const parsed = JSON.parse(saved);
         const age = Date.now() - (Number(parsed?.timestamp) || 0);
-        if (age < 60 * 60 * 1000) {
+        if (age < 15 * 60 * 1000) {
           if (parsed.marketSlug) lastExecutedMarketSlugRef.current = parsed.marketSlug;
           if (parsed.timestamp) lastExecutedTimestampRef.current = Number(parsed.timestamp);
           if (parsed.candleTime) lastExecutedCandleTimeRef.current = Number(parsed.candleTime);
         } else {
-          // Stale local guard (> 60 minutes), clean it up!
           localStorage.removeItem('limitless_last_trade_guard');
         }
       }
     } catch {}
 
-    // Fetch authoritative persistent lock from VM server disk & RAM
     limitlessService
       .fetchTradeGuard()
       .then((serverGuard) => {
         if (serverGuard && serverGuard.marketSlug) {
           const age = Date.now() - (Number(serverGuard.timestamp) || 0);
-          if (age < 60 * 60 * 1000) {
+          if (age < 15 * 60 * 1000) {
             lastExecutedMarketSlugRef.current = serverGuard.marketSlug;
             lastExecutedTimestampRef.current = Number(serverGuard.timestamp) || 0;
             lastExecutedCandleTimeRef.current = Number(serverGuard.candleTime) || 0;
@@ -236,7 +218,6 @@ export function useTradingBot() {
               localStorage.setItem('limitless_last_trade_guard', JSON.stringify(serverGuard));
             } catch {}
           } else {
-            // Previous contract already expired on VM, clear it!
             lastExecutedMarketSlugRef.current = '';
             lastExecutedTimestampRef.current = 0;
             lastExecutedCandleTimeRef.current = 0;
@@ -245,14 +226,6 @@ export function useTradingBot() {
             } catch {}
             limitlessService.clearTradeGuardOnVm().catch(() => {});
           }
-        } else {
-          // VM has no lock, clear any ghost lock in memory and localStorage immediately
-          lastExecutedMarketSlugRef.current = '';
-          lastExecutedTimestampRef.current = 0;
-          lastExecutedCandleTimeRef.current = 0;
-          try {
-            localStorage.removeItem('limitless_last_trade_guard');
-          } catch {}
         }
       })
       .catch(() => {});
@@ -276,7 +249,7 @@ export function useTradingBot() {
     setConfig((prev) => {
       const next = { ...prev, ...partial };
       if (next.maxRiskPercent !== undefined) {
-        next.maxRiskPercent = Math.min(Math.max(Number(next.maxRiskPercent) || 0.10, 0.001), 0.10);
+        next.maxRiskPercent = Math.min(Math.max(Number(next.maxRiskPercent) || 0.04, 0.001), 0.04);
       }
       try {
         localStorage.setItem('limitless_live_bot_config', JSON.stringify(next));
@@ -297,7 +270,6 @@ export function useTradingBot() {
     const lowerThresh = cfg.zScoreLower !== undefined ? cfg.zScoreLower : -cfg.zScoreUpper;
     const lowerEntryThresh = cfg.zScoreLowerEntry !== undefined ? cfg.zScoreLowerEntry : -cfg.zScoreEntry;
 
-    // Compute 1h EMA(20) and 1h EMA(50) series across the historical candle series
     const ema20Series = calculateEMA(closes, 20);
     const ema50Series = calculateEMA(closes, 50);
 
@@ -335,28 +307,32 @@ export function useTradingBot() {
       let signal: 'ARMED_UPPER' | 'ARMED_LOWER' | 'ENTRY_SHORT' | 'ENTRY_LONG' | 'ARMED' | 'ENTRY' | null = null;
       let dir: 'SHORT' | 'LONG' | null = null;
 
-      // Condition: Short only if: z > 2.0 AND 1h EMA(20) < 1h EMA(50)
+      // Upper Direction (Short / DOWN): First confirmation >= 2.5, Second confirmation <= 2.3
       if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'SHORT_ONLY') {
-        if (stats.zScore >= cfg.zScoreUpper && e20 < e50) {
-          if (!hadArmedUpper) {
-            hadArmedUpper = true;
-            signal = 'ENTRY_SHORT';
-            dir = 'SHORT';
-          }
-        } else {
+        if (stats.zScore >= cfg.zScoreUpper) {
+          hadArmedUpper = true;
+          signal = 'ARMED_UPPER';
+          dir = 'SHORT';
+        } else if (hadArmedUpper && stats.zScore <= cfg.zScoreEntry && stats.zScore > 0) {
+          hadArmedUpper = false;
+          signal = 'ENTRY_SHORT';
+          dir = 'SHORT';
+        } else if (stats.zScore <= 0) {
           hadArmedUpper = false;
         }
       }
 
-      // Condition: Long only if: z < -2.0 AND 1h EMA(20) > 1h EMA(50)
+      // Lower Direction (Long / UP): First confirmation <= -2.5, Second confirmation >= -2.3
       if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'LONG_ONLY') {
-        if (stats.zScore <= lowerThresh && e20 > e50) {
-          if (!hadArmedLower) {
-            hadArmedLower = true;
-            signal = 'ENTRY_LONG';
-            dir = 'LONG';
-          }
-        } else {
+        if (stats.zScore <= lowerThresh) {
+          hadArmedLower = true;
+          signal = 'ARMED_LOWER';
+          dir = 'LONG';
+        } else if (hadArmedLower && stats.zScore >= lowerEntryThresh && stats.zScore < 0) {
+          hadArmedLower = false;
+          signal = 'ENTRY_LONG';
+          dir = 'LONG';
+        } else if (stats.zScore >= 0) {
           hadArmedLower = false;
         }
       }
@@ -394,13 +370,12 @@ export function useTradingBot() {
         ema20: latestEma20,
         ema50: latestEma50,
         trend: latestEma20 > latestEma50 ? 'BULLISH' : 'BEARISH',
-        longAllowed: latestEma20 > latestEma50,
-        shortAllowed: latestEma20 < latestEma50,
+        longAllowed: true,
+        shortAllowed: true,
       };
       setEmaFilter(currentEmaState);
       emaFilterRef.current = currentEmaState;
 
-      // Synchronize armed states with recent candles
       if (hadArmedUpper) {
         crossedUpperThresholdRef.current = true;
         setCrossedUpperThreshold(true);
@@ -412,18 +387,34 @@ export function useTradingBot() {
     }
   }, []);
 
-  // Contract Lock removed per user request: trading is unrestricted on valid signals
-  const checkTradeLock = useCallback((_targetSlug?: string, _cTime?: number): { locked: boolean; reason?: string } => {
+  // Enforce 1 bet per 15m contract
+  const checkTradeLock = useCallback((targetSlug?: string, _cTime?: number): { locked: boolean; reason?: string } => {
+    const cfg = configRef.current;
+    if (!cfg.singleTradePerContract) return { locked: false };
+
+    const lastSlug = lastExecutedMarketSlugRef.current;
+    const lastTime = lastExecutedTimestampRef.current;
+    if (
+      targetSlug &&
+      lastSlug &&
+      targetSlug === lastSlug &&
+      targetSlug !== 'btc-up-or-down-15-min' &&
+      Date.now() - lastTime < 15 * 60 * 1000
+    ) {
+      return {
+        locked: true,
+        reason: `🔒 تم بالفعل فتح صفقة (4% من الرصيد) على عقد الـ 15 دقيقة الحالي (${targetSlug}). سينتقل الروبوت تلقائياً للعقد القادم.`,
+      };
+    }
     return { locked: false };
   }, []);
 
-  // Execute LIVE Trade strictly across Limitless
+  // Execute LIVE Trade strictly across Limitless (15m Contract, Fixed 4% Bankroll, GTC without Max Entry Price)
   const executeLiveTrade = useCallback(async (
     triggerZ: number,
     direction: 'SHORT' | 'LONG' = 'SHORT',
     candleTime?: number
   ) => {
-    // 1. Concurrency In-Flight Check: Prevent duplicate sends while order is being signed/sent
     if (isExecutingRef.current) {
       console.warn('[CONCURRENCY BLOCKED] An order is already in-flight.');
       return;
@@ -432,16 +423,16 @@ export function useTradingBot() {
     const cfg = configRef.current;
     let balance = currentBalanceRef.current;
 
-    // Determine target 1-hour market slug using latest live ref first
+    // Determine target 15-minute market slug using latest live ref first
     let currentMarket = activeLimitlessMarketRef.current;
-    const isHourlyMarket = (s?: string) => Boolean(s && (/hourly/i.test(s) || s.includes('1-hour') || s.includes('1h')));
+    const is15mMarket = (s?: string) => Boolean(s && (/(^|[^0-9])15-min/i.test(s) || s.includes('15m')));
 
-    if (!currentMarket?.slug || !isHourlyMarket(currentMarket.slug)) {
+    if (!currentMarket?.slug || !is15mMarket(currentMarket.slug)) {
       try {
         const mRes = await fetch('/api/limitless/active-btc');
         if (mRes.ok) {
           const mData = await mRes.json();
-          if (mData && mData.slug && isHourlyMarket(mData.slug)) {
+          if (mData && mData.slug && is15mMarket(mData.slug)) {
             currentMarket = mData;
             activeLimitlessMarketRef.current = mData;
             setActiveLimitlessMarket(mData);
@@ -451,28 +442,28 @@ export function useTradingBot() {
     }
 
     const resolvedMarketSlug =
-      currentMarket?.slug && isHourlyMarket(currentMarket.slug)
+      currentMarket?.slug && is15mMarket(currentMarket.slug)
         ? currentMarket.slug
-        : cfg.limitlessMarketSlug && isHourlyMarket(cfg.limitlessMarketSlug)
+        : cfg.limitlessMarketSlug && is15mMarket(cfg.limitlessMarketSlug)
         ? cfg.limitlessMarketSlug
-        : 'btc-up-or-down-hourly';
+        : 'btc-up-or-down-15-min';
 
-    // 2. Strict Anti-Duplicate Guard
+    // Strict Anti-Duplicate Guard (1 trade per 15m contract)
     const lock = checkTradeLock(resolvedMarketSlug, candleTime);
     if (lock.locked) {
       console.warn(`[SAFETY GUARD BLOCKED] Trade rejected: ${lock.reason}`);
       setExecutionNotice({
         type: 'WARNING',
-        message: lock.reason || 'الصفقة مقفلة لمنع التكرار',
+        message: lock.reason || 'الصفقة مقفلة لمنع التكرار على نفس عقد الـ 15 دقيقة',
         timestamp: Date.now(),
       });
       return;
     }
 
-    // Strict Safety Guard: NEVER trade 5-minute or 15-minute contracts
-    if (/(^|[^0-9])5-min/i.test(resolvedMarketSlug) || /(^|[^0-9])15-min/i.test(resolvedMarketSlug)) {
+    // Strict Safety Guard: Only trade 15-minute contracts
+    if (/(^|[^0-9])5-min/i.test(resolvedMarketSlug) || /hourly/i.test(resolvedMarketSlug) || /(^|[^0-9])1-hour/i.test(resolvedMarketSlug)) {
       console.error(
-        `[SAFETY SHIELD] Contract '${resolvedMarketSlug}' blocked! Trading bot is locked strictly to 1-hour contracts (BTC Up or Down Hourly).`
+        `[SAFETY SHIELD] Contract '${resolvedMarketSlug}' blocked! Trading bot is locked strictly to 15-minute contracts.`
       );
       return;
     }
@@ -514,7 +505,7 @@ export function useTradingBot() {
     const isLong = direction === 'LONG';
     const outcome = isLong ? 'UP' : 'DOWN';
 
-    // Live contract pricing based on chosen outcome (UP or DOWN), prioritizing market ask
+    // Live contract pricing based on chosen outcome (UP or DOWN) — GTC without max Entry price
     const currentMarketData = activeLimitlessMarketRef.current;
     const yesPrice = currentMarketData?.tradePrices?.buy?.market?.[0]
       ?? currentMarketData?.prices?.[0]
@@ -523,13 +514,11 @@ export function useTradingBot() {
       ?? currentMarketData?.prices?.[1]
       ?? (1 - yesPrice);
     const liveContractPrice = isLong ? yesPrice : noPrice;
-    // Enforce entry ceiling: 20 cents and below (≤ $0.20)
-    const priceCeiling = cfg.maxPriceCents !== undefined ? cfg.maxPriceCents : 0.20;
-    // Align to 3 decimals as strictly required by Limitless SDK (multiple of 0.001)
-    const effectiveContractPrice = parseFloat(Math.max(0.001, Math.min(priceCeiling, liveContractPrice)).toFixed(3));
+    // Align to 3 decimals as strictly required by Limitless SDK (multiple of 0.001) — NO max entry price ceiling
+    const effectiveContractPrice = parseFloat(Math.max(0.001, Math.min(0.999, liveContractPrice)).toFixed(3));
 
-    // Hard Risk Guard: Total dollar commitment CANNOT exceed 10.0% of balance under any circumstances
-    const maxRiskCap = Math.min(cfg.maxRiskPercent || 0.10, 0.10);
+    // Hard Risk Guard: Fixed 4% of bankroll per 15m contract
+    const maxRiskCap = Math.min(cfg.maxRiskPercent || 0.04, 0.04);
     const maxBudgetUsd = balance * maxRiskCap;
 
     const kelly = calculateKellySizing(balance, {
@@ -539,30 +528,26 @@ export function useTradingBot() {
       fractionChunks: 1,
     });
 
-    // Support fractional contract sizes natively on Limitless CLOB without rounding up
     let effectiveContracts = kelly.numberOfContracts;
 
-    // Minimum precision threshold: If budget allows at least 0.01 contracts (half a cent), permit 0.01
     if (effectiveContracts < 0.01 && maxBudgetUsd >= (0.01 * effectiveContractPrice)) {
       effectiveContracts = 0.01;
     }
 
-    // Ensure dollar cost strictly never exceeds 10% of balance
+    // Ensure dollar cost strictly never exceeds Fixed 4% of bankroll
     if (effectiveContracts * effectiveContractPrice > maxBudgetUsd) {
       effectiveContracts = Math.floor((maxBudgetUsd / effectiveContractPrice) * 100) / 100;
     }
 
-    // Safety decrement guard to guarantee strict compliance with 10% risk limit
     while (effectiveContracts > 0.01 && (effectiveContracts * effectiveContractPrice) > maxBudgetUsd) {
       effectiveContracts = Math.round((effectiveContracts - 0.01) * 100) / 100;
     }
 
     if (effectiveContracts <= 0) {
-      // If budget permits, set to 0.01 contracts
       if (maxBudgetUsd >= (0.01 * effectiveContractPrice)) {
         effectiveContracts = 0.01;
       } else {
-        const minWarning = `⚠️ رصيد المحفظة الحالي ($${balance.toFixed(2)} USDC) وسقف أمان المخاطرة 10% ($${maxBudgetUsd.toFixed(2)}) لا يكفي لشراء عقد بسعر $${effectiveContractPrice}. تم حظر الصفقة لحماية رأس المال.`;
+        const minWarning = `⚠️ رصيد المحفظة الحالي ($${balance.toFixed(2)} USDC) ونسبة 4% ($${maxBudgetUsd.toFixed(2)}) لا يكفي لشراء عقد بسعر $${effectiveContractPrice}.`;
         console.warn(minWarning);
         limitlessService.logDirect('SYSTEM', minWarning);
         setExecutionNotice({
@@ -593,7 +578,7 @@ export function useTradingBot() {
       contractPrice: effectiveContractPrice,
       totalContracts: effectiveContracts,
       totalInvestmentUsd: effectiveContracts * effectiveContractPrice,
-      kellyRiskPct: kelly.riskToTake,
+      kellyRiskPct: maxRiskCap,
       chunks: [],
       status: 'PENDING_WS',
     };
@@ -602,21 +587,19 @@ export function useTradingBot() {
 
     try {
       console.log(
-        `[LIVE DIRECT EXECUTION - ${direction}] Sending unified order of ${effectiveContracts} contracts to Limitless (${resolvedMarketSlug} - ${outcome} / ${
-          direction === 'LONG' ? 'BUY UP/YES' : 'BUY DOWN/NO'
-        }) @ $${effectiveContractPrice} [10% Max Risk - No Chunking]...`
+        `[LIVE DIRECT EXECUTION - ${direction}] Sending unified GTC order of ${effectiveContracts} contracts to Limitless (${resolvedMarketSlug} - ${outcome}) @ $${effectiveContractPrice} [Fixed 4% Bankroll - No Max Entry Price]...`
       );
 
       limitlessService.logDirect(
         'OUTGOING',
-        `🚀 [تنفيذ صفقة مباشرة] إرسال أمر موحد لعدد ${effectiveContracts} عقود ${outcome} (${direction}) بسعر $${effectiveContractPrice} إلى سوق ${resolvedMarketSlug} (سقف مخاطرة 10% كحد أقصى دون تجزئة)...`
+        `🚀 [تنفيذ صفقة GTC مباشرة] إرسال أمر موحد لعدد ${effectiveContracts} عقود ${outcome} (${direction}) بسعر السوق $${effectiveContractPrice} إلى عقد 15m (${resolvedMarketSlug}) بحجم ثابت 4% من الرصيد...`
       );
 
       const executed = await limitlessService.executeChunkedOrder(
         effectiveContracts,
         effectiveContractPrice,
         1,
-        cfg.orderType,
+        'GTC',
         0,
         (updatedChunk) => {
           setCurrentChunks((prev) => {
@@ -637,7 +620,7 @@ export function useTradingBot() {
       const completedTrade: TradeOrder = {
         ...initialTrade,
         chunks: executed,
-        status: cfg.orderType === 'FAK' ? 'EXECUTED_FAK' : 'ACTIVE_GTC',
+        status: 'ACTIVE_GTC',
       };
 
       setActiveTrade(completedTrade);
@@ -653,13 +636,18 @@ export function useTradingBot() {
       lastExecutedCandleTimeRef.current = candleTime || now;
       lastExecutedMarketSlugRef.current = resolvedMarketSlug;
       lastExecutedTimestampRef.current = now;
+      setContractLockInfo({
+        isLocked: true,
+        reason: `تم تنفيذ صفقة 4% على عقد ${resolvedMarketSlug}`,
+        cooldownRemainingMinutes: 15,
+        lastTradedSlug: resolvedMarketSlug,
+      });
 
-      // Deduct invested funds
       const invested = completedTrade.totalInvestmentUsd;
       setCurrentBalance((prev) => Math.max(0, prev - invested));
       currentBalanceRef.current = Math.max(0, currentBalanceRef.current - invested);
 
-      const successNotice = `✅ تم إرسال الصفقة بنجاح: أمر موحد لشراء ${outcome} (${direction}) لعدد ${effectiveContracts} عقد بقيمة $${invested.toFixed(2)} (سقف مخاطرة 10% دون تجزئة) على سوق ${resolvedMarketSlug}`;
+      const successNotice = `✅ تم إرسال صفقة GTC بنجاح: شراء ${outcome} (${direction}) لعدد ${effectiveContracts} عقد بقيمة $${invested.toFixed(2)} (4% ثابتة من الرصيد بدون سقف سعر دخول) على عقد الـ 15 دقيقة ${resolvedMarketSlug}`;
       limitlessService.logDirect('SYSTEM', successNotice);
       setExecutionNotice({
         type: 'SUCCESS',
@@ -676,13 +664,8 @@ export function useTradingBot() {
         message: `تعذر إرسال الصفقة: ${errMsg}`,
         timestamp: Date.now(),
       });
-      // Do NOT keep lock on failure - let bot retry when ready
       lastExecutedTimestampRef.current = 0;
       lastExecutedCandleTimeRef.current = 0;
-      try {
-        localStorage.removeItem('limitless_last_trade_guard');
-      } catch {}
-      limitlessService.clearTradeGuardOnVm().catch(() => {});
     } finally {
       isExecutingRef.current = false;
       setIsExecuting(false);
@@ -700,10 +683,9 @@ export function useTradingBot() {
     try {
       localStorage.removeItem('limitless_last_trade_guard');
     } catch {}
-    // Clear authoritative lock from VM server disk & RAM
     limitlessService.clearTradeGuardOnVm().catch(() => {});
     setContractLockInfo({ isLocked: false });
-    const unMsg = '🔓 تم إلغاء قفل العقد يدوياً. الروبوت مستعد لفتح صفقة جديدة.';
+    const unMsg = '🔓 تم إلغاء قفل عقد الـ 15 دقيقة يدوياً. الروبوت مستعد لفتح صفقة جديدة.';
     console.log(unMsg);
     limitlessService.logDirect('SYSTEM', unMsg);
     setExecutionNotice({
@@ -713,21 +695,8 @@ export function useTradingBot() {
     });
   }, []);
 
-  // Contract lock is permanently removed per user request
-  useEffect(() => {
-    // Clear any remnant lock on boot
-    try {
-      localStorage.removeItem('limitless_last_trade_guard');
-    } catch {}
-    limitlessService.clearTradeGuardOnVm().catch(() => {});
-    setContractLockInfo({
-      isLocked: false,
-      reason: undefined,
-      cooldownRemainingMinutes: 0,
-    });
-  }, []);
-
-  // Real Market Strategy Evaluation (Evaluates on every tick for immediate same-candle entry)
+  // Real Market Strategy Evaluation:
+  // 1m candles (45 periods), First confirmation 2.5 -> Second confirmation 2.3
   const evaluateLiveStrategy = useCallback(
     (allPrices: number[], candleTime?: number) => {
       const cfg = configRef.current;
@@ -740,36 +709,22 @@ export function useTradingBot() {
       const { zScore } = calculateZScore(windowSlice, cfg.zScoreUpper, cfg.zScoreEntry, lowerThresh, lowerEntryThresh);
       setCurrentZScore(zScore);
 
-      // Compute 1h EMA(20) and 1h EMA(50) across available price history
-      const ema20Arr = calculateEMA(allPrices, 20);
-      const ema50Arr = calculateEMA(allPrices, 50);
-      const currentEma20 = ema20Arr[ema20Arr.length - 1] || 0;
-      const currentEma50 = ema50Arr[ema50Arr.length - 1] || 0;
-
-      const isEmaBullish = currentEma20 > currentEma50;
-      const isEmaBearish = currentEma20 < currentEma50;
-
-      const currentEmaState: EmaFilterState = {
-        ema20: currentEma20,
-        ema50: currentEma50,
-        trend: isEmaBullish ? 'BULLISH' : 'BEARISH',
-        longAllowed: isEmaBullish,
-        shortAllowed: isEmaBearish,
-      };
-      setEmaFilter(currentEmaState);
-      emaFilterRef.current = currentEmaState;
-
-      // ================= DIRECTION 1: Short only if: z > 2.0 AND 1h EMA(20) < 1h EMA(50) =================
+      // ================= DIRECTION 1: Short (DOWN) — First Confirmation >= +2.5, Second Confirmation <= +2.3 =================
       if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'SHORT_ONLY') {
         if (zScore >= cfg.zScoreUpper) {
           if (!crossedUpperThresholdRef.current) {
             crossedUpperThresholdRef.current = true;
             setCrossedUpperThreshold(true);
+            const armMsg = `⚡ [التأكيد الأول +${cfg.zScoreUpper}σ] وصل Z-Score إلى +${zScore.toFixed(2)}σ. في انتظار التأكيد الثاني (≤ +${cfg.zScoreEntry}σ) لتنفيذ صفقة SHORT (DOWN).`;
+            console.log(armMsg);
+            limitlessService.logDirect('SYSTEM', armMsg);
           }
+        } else if (crossedUpperThresholdRef.current && zScore <= cfg.zScoreEntry && zScore > 0) {
+          crossedUpperThresholdRef.current = false;
+          setCrossedUpperThreshold(false);
 
           if (!botActiveRef.current) {
-            // Bot is stopped: warn user why trade was not executed
-            const pauseWarn = `⚠️ تم تجاوز العتبة 2 في الصعود (Z=+${zScore.toFixed(2)}σ) ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
+            const pauseWarn = `⚠️ تحقق التأكيد الثاني في الصعود (Z=+${zScore.toFixed(2)}σ ≤ +${cfg.zScoreEntry}σ) ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
             console.warn(pauseWarn);
             limitlessService.logDirect('SYSTEM', pauseWarn);
             setExecutionNotice({
@@ -781,46 +736,34 @@ export function useTradingBot() {
             return;
           }
 
-          // Strict Filter Check: 1h EMA(20) < 1h EMA(50)
-          if (!isEmaBearish) {
-            const filterWarn = `⚠️ [فلتر EMA محجوب] Z=+${zScore.toFixed(2)}σ > +2.0، ولكن 1h EMA(20) [${currentEma20.toFixed(1)}] ليس أصغر من 1h EMA(50) [${currentEma50.toFixed(1)}]. يتطلب الهبوط (EMA20 < EMA50).`;
-            console.log(filterWarn);
-            limitlessService.logDirect('SYSTEM', filterWarn);
-            setExecutionNotice({
-              type: 'WARNING',
-              message: `إشارة هبوط محجوبة بفلتر EMA: يتطلب الهبوط EMA(20) < EMA(50). الحالي: EMA20=$${currentEma20.toFixed(1)} > EMA50=$${currentEma50.toFixed(1)}.`,
-              timestamp: Date.now(),
-            });
-            return;
-          }
-
           if (!isExecutingRef.current) {
-            console.log(`🎯 تنفيذ فوري لصفقة هبوط! تحقق الشرطان: Z=+${zScore.toFixed(2)}σ > 2.0 و 1h EMA(20) [$${currentEma20.toFixed(1)}] < 1h EMA(50) [$${currentEma50.toFixed(1)}]. جاري إرسال أمر DOWN!`);
-            limitlessService.logDirect(
-              'SYSTEM',
-              `🎯 [شرطا الهبوط متحققان] Z=+${zScore.toFixed(2)}σ > +2.0σ مع اتجاه هابط 1h EMA(20) [$${currentEma20.toFixed(1)}] < 1h EMA(50) [$${currentEma50.toFixed(1)}]. جاري إرسال أمر DOWN فوراً!`
-            );
+            const trigMsg = `🎯 [تحقق التأكيد الثاني ≤ +${cfg.zScoreEntry}σ] ارتد Z-Score من فوق +${cfg.zScoreUpper}σ إلى +${zScore.toFixed(2)}σ! جاري إرسال أمر GTC لشراء عقد DOWN (4% من الرصيد).`;
+            console.log(trigMsg);
+            limitlessService.logDirect('SYSTEM', trigMsg);
             executeLiveTrade(zScore, 'SHORT', candleTime);
           }
-        } else {
-          if (crossedUpperThresholdRef.current) {
-            crossedUpperThresholdRef.current = false;
-            setCrossedUpperThreshold(false);
-          }
+        } else if (zScore <= 0 && crossedUpperThresholdRef.current) {
+          crossedUpperThresholdRef.current = false;
+          setCrossedUpperThreshold(false);
         }
       }
 
-      // ================= DIRECTION 2: Long only if: z < -2.0 AND 1h EMA(20) > 1h EMA(50) =================
+      // ================= DIRECTION 2: Long (UP) — First Confirmation <= -2.5, Second Confirmation >= -2.3 =================
       if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'LONG_ONLY') {
         if (zScore <= lowerThresh) {
           if (!crossedLowerThresholdRef.current) {
             crossedLowerThresholdRef.current = true;
             setCrossedLowerThreshold(true);
+            const armMsg = `⚡ [التأكيد الأول ${lowerThresh}σ] وصل Z-Score إلى ${zScore.toFixed(2)}σ. في انتظار التأكيد الثاني (≥ ${lowerEntryThresh}σ) لتنفيذ صفقة LONG (UP).`;
+            console.log(armMsg);
+            limitlessService.logDirect('SYSTEM', armMsg);
           }
+        } else if (crossedLowerThresholdRef.current && zScore >= lowerEntryThresh && zScore < 0) {
+          crossedLowerThresholdRef.current = false;
+          setCrossedLowerThreshold(false);
 
           if (!botActiveRef.current) {
-            // Bot is stopped: warn user why trade was not executed
-            const pauseWarn = `⚠️ تم تجاوز العتبة 2 في الهبوط (Z=${zScore.toFixed(2)}σ) ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
+            const pauseWarn = `⚠️ تحقق التأكيد الثاني في الهبوط (Z=${zScore.toFixed(2)}σ ≥ ${lowerEntryThresh}σ) ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
             console.warn(pauseWarn);
             limitlessService.logDirect('SYSTEM', pauseWarn);
             setExecutionNotice({
@@ -832,32 +775,15 @@ export function useTradingBot() {
             return;
           }
 
-          // Strict Filter Check: 1h EMA(20) > 1h EMA(50)
-          if (!isEmaBullish) {
-            const filterWarn = `⚠️ [فلتر EMA محجوب] Z=${zScore.toFixed(2)}σ < -2.0، ولكن 1h EMA(20) [${currentEma20.toFixed(1)}] ليس أكبر من 1h EMA(50) [${currentEma50.toFixed(1)}]. يتطلب الصعود (EMA20 > EMA50).`;
-            console.log(filterWarn);
-            limitlessService.logDirect('SYSTEM', filterWarn);
-            setExecutionNotice({
-              type: 'WARNING',
-              message: `إشارة صعود محجوبة بفلتر EMA: يتطلب الصعود EMA(20) > EMA(50). الحالي: EMA20=$${currentEma20.toFixed(1)} < EMA50=$${currentEma50.toFixed(1)}.`,
-              timestamp: Date.now(),
-            });
-            return;
-          }
-
           if (!isExecutingRef.current) {
-            console.log(`🎯 تنفيذ فوري لصفقة صعود! تحقق الشرطان: Z=${zScore.toFixed(2)}σ < -2.0 و 1h EMA(20) [$${currentEma20.toFixed(1)}] > 1h EMA(50) [$${currentEma50.toFixed(1)}]. جاري إرسال أمر UP!`);
-            limitlessService.logDirect(
-              'SYSTEM',
-              `🎯 [شرطا الصعود متحققان] Z=${zScore.toFixed(2)}σ < -2.0σ مع اتجاه صاعد 1h EMA(20) [$${currentEma20.toFixed(1)}] > 1h EMA(50) [$${currentEma50.toFixed(1)}]. جاري إرسال أمر UP فوراً!`
-            );
+            const trigMsg = `🎯 [تحقق التأكيد الثاني ≥ ${lowerEntryThresh}σ] ارتد Z-Score من تحت ${lowerThresh}σ إلى ${zScore.toFixed(2)}σ! جاري إرسال أمر GTC لشراء عقد UP (4% من الرصيد).`;
+            console.log(trigMsg);
+            limitlessService.logDirect('SYSTEM', trigMsg);
             executeLiveTrade(zScore, 'LONG', candleTime);
           }
-        } else {
-          if (crossedLowerThresholdRef.current) {
-            crossedLowerThresholdRef.current = false;
-            setCrossedLowerThreshold(false);
-          }
+        } else if (zScore >= 0 && crossedLowerThresholdRef.current) {
+          crossedLowerThresholdRef.current = false;
+          setCrossedLowerThreshold(false);
         }
       }
     },
@@ -881,8 +807,8 @@ export function useTradingBot() {
         setActiveLimitlessMarket((prev) => {
           if (!prev) {
             return {
-              slug: data.marketSlug || 'btc-up-or-down-hourly',
-              title: 'BTC Up or Down Hourly',
+              slug: data.marketSlug || 'btc-up-or-down-15-min',
+              title: 'BTC 15-Minute Prediction Market',
               status: 'FUNDED',
               prices: [data.prices[0], data.prices[1]],
             } as any;
@@ -898,12 +824,15 @@ export function useTradingBot() {
       if (
         newMarket &&
         newMarket.slug &&
-        (/hourly/i.test(newMarket.slug) || /hourly/i.test(newMarket.title || '') || /(^|[^0-9])1-hour/i.test(newMarket.slug) || /1\s*hour/i.test(newMarket.title || '') || /(^|[^0-9])1h/i.test(newMarket.slug)) &&
+        (/(^|[^0-9])15-min/i.test(newMarket.slug) || /15\s*min/i.test(newMarket.title || '') || /(^|[^0-9])15m/i.test(newMarket.slug)) &&
         !/(^|[^0-9])5-min/i.test(newMarket.slug) &&
-        !/(^|[^0-9])15-min/i.test(newMarket.slug)
+        !/hourly/i.test(newMarket.slug)
       ) {
         setActiveLimitlessMarket(newMarket);
         activeLimitlessMarketRef.current = newMarket;
+        if (lastExecutedMarketSlugRef.current && lastExecutedMarketSlugRef.current !== newMarket.slug) {
+          setContractLockInfo({ isLocked: false });
+        }
       }
     });
     const unsubOracle = limitlessService.subscribeOracle((orc) => setOracle(orc));
@@ -913,6 +842,12 @@ export function useTradingBot() {
         lastExecutedMarketSlugRef.current = serverGuard.marketSlug;
         lastExecutedTimestampRef.current = Number(serverGuard.timestamp) || 0;
         lastExecutedCandleTimeRef.current = Number(serverGuard.candleTime) || 0;
+        setContractLockInfo({
+          isLocked: true,
+          reason: `تم تنفيذ صفقة 4% على عقد ${serverGuard.marketSlug}`,
+          cooldownRemainingMinutes: 15,
+          lastTradedSlug: serverGuard.marketSlug,
+        });
         try {
           localStorage.setItem('limitless_last_trade_guard', JSON.stringify(serverGuard));
         } catch {}
@@ -920,13 +855,14 @@ export function useTradingBot() {
         lastExecutedMarketSlugRef.current = '';
         lastExecutedTimestampRef.current = 0;
         lastExecutedCandleTimeRef.current = 0;
+        setContractLockInfo({ isLocked: false });
         try {
           localStorage.removeItem('limitless_last_trade_guard');
         } catch {}
       }
     });
 
-    limitlessService.connect(config.limitlessWsUrl, 'btc-up-or-down-hourly', {
+    limitlessService.connect(config.limitlessWsUrl, 'btc-up-or-down-15-min', {
       apiKey: config.limitlessApiKey,
       tokenId: config.limitlessTokenId,
       secret: config.limitlessTokenSecret,
@@ -963,7 +899,7 @@ export function useTradingBot() {
   const rebuildMetricsRef = useRef(rebuildMetrics);
   rebuildMetricsRef.current = rebuildMetrics;
 
-  // Load real Binance Historical Data & Live WebSocket with permanent connection
+  // Load real Binance Historical Data (45 candles of 1m) & Live WebSocket (1m)
   useEffect(() => {
     let isCancelled = false;
 
@@ -971,7 +907,7 @@ export function useTradingBot() {
       const realCandles = await binanceService.fetchHistoricalCandles(
         config.symbol,
         config.timeframe,
-        Math.max(120, config.periods + 70),
+        config.periods,
         config.binanceRestUrl
       );
 
@@ -983,14 +919,12 @@ export function useTradingBot() {
         closePricesRef.current = closes.slice(-config.periods);
         rebuildMetricsRef.current(realCandles, configRef.current);
 
-        // Immediate evaluation of the current in-progress candle on initial data load
         if (realCandles.length >= config.periods) {
           const latestCandle = realCandles[realCandles.length - 1];
           evaluateLiveStrategyRef.current(closes, latestCandle.time);
         }
       }
 
-      // Connect real Binance WebSocket with stable listeners (no 12s reconnect loop)
       binanceService.connectWebSocket(
         config.symbol,
         config.timeframe,
@@ -1001,12 +935,11 @@ export function useTradingBot() {
             if (last && last.time === tickCandle.time) {
               updatedCandles = [...prev.slice(0, -1), tickCandle];
             } else {
-              updatedCandles = [...prev, tickCandle];
+              updatedCandles = [...prev.slice(-(configRef.current.periods - 1)), tickCandle];
             }
             return updatedCandles;
           });
 
-          // Immediate real-time execution in the SAME candle on every price tick
           if (updatedCandles.length >= configRef.current.periods) {
             const allCloses = updatedCandles.map((c) => c.close);
             evaluateLiveStrategyRef.current(allCloses, tickCandle.time);
@@ -1049,12 +982,15 @@ export function useTradingBot() {
           data &&
           data.success &&
           data.slug &&
-          (/hourly/i.test(data.slug) || /hourly/i.test(data.title || '') || /(^|[^0-9])1-hour/i.test(data.slug) || /1\s*hour/i.test(data.title || '') || /(^|[^0-9])1h/i.test(data.slug)) &&
+          (/(^|[^0-9])15-min/i.test(data.slug) || /15\s*min/i.test(data.title || '') || /(^|[^0-9])15m/i.test(data.slug)) &&
           !/(^|[^0-9])5-min/i.test(data.slug) &&
-          !/(^|[^0-9])15-min/i.test(data.slug)
+          !/hourly/i.test(data.slug)
         ) {
           setActiveLimitlessMarket(data);
           activeLimitlessMarketRef.current = data;
+          if (lastExecutedMarketSlugRef.current && lastExecutedMarketSlugRef.current !== data.slug) {
+            setContractLockInfo({ isLocked: false });
+          }
         }
       }
     } catch {
@@ -1163,14 +1099,21 @@ export function useTradingBot() {
 
   const triggerManualTrade = useCallback(
     (direction: 'SHORT' | 'LONG' = 'SHORT') => {
-      const defaultZ = direction === 'SHORT' ? 1.95 : -1.95;
+      const defaultZ = direction === 'SHORT' ? 2.3 : -2.3;
       executeLiveTrade(currentZScore || defaultZ, direction);
     },
     [executeLiveTrade, currentZScore]
   );
 
+  const livePreviewPrice =
+    config.maxPriceCents >= 0.99
+      ? activeLimitlessMarket?.prices?.[0] && activeLimitlessMarket.prices[0] > 0 && activeLimitlessMarket.prices[0] < 1
+        ? activeLimitlessMarket.prices[0]
+        : 0.50
+      : config.maxPriceCents;
+
   const kelly = calculateKellySizing(currentBalance, {
-    maxPriceCents: config.maxPriceCents,
+    maxPriceCents: livePreviewPrice,
     winProbability: config.winProbability,
     maxRiskPercent: config.maxRiskPercent,
     fractionChunks: config.fractionChunks,

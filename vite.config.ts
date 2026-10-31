@@ -92,7 +92,7 @@ let lastBtcFetchTime = 0;
 // ============================================================================
 // Limitless 15-Minute Strict Market Filter (Guarantees only 15m contracts)
 // ============================================================================
-function isHourlyBtcMarket(m: any): boolean {
+function is15MinBtcMarket(m: any): boolean {
   if (!m) return false;
   const slug = (m.slug || '').toLowerCase();
   const title = (m.title || '').toLowerCase();
@@ -101,37 +101,37 @@ function isHourlyBtcMarket(m: any): boolean {
   const isBtc = slug.includes('btc') || title.includes('btc') || title.includes('bitcoin');
   if (!isBtc) return false;
 
-  // Must strictly be Hourly
-  const isHourly = /hourly/i.test(slug) || /hourly/i.test(title) || /(^|[^0-9])1-hour/i.test(slug) || /1\s*hour/i.test(title) || /(^|[^0-9])1h/i.test(slug) || /(^|[^0-9])60m/i.test(slug);
-  const isOther = /(^|[^0-9])5-min/i.test(slug) || /(^|[^0-9])15-min/i.test(slug) || /5\s*min/i.test(title) || /15\s*min/i.test(title);
+  // Must strictly be 15-Minute
+  const is15Min = /(^|[^0-9])15-min/i.test(slug) || /15\s*min/i.test(title) || /(^|[^0-9])15m/i.test(slug);
+  const isOther = /(^|[^0-9])5-min/i.test(slug) || /5\s*min/i.test(title) || /hourly/i.test(slug) || /hourly/i.test(title) || /(^|[^0-9])1-hour/i.test(slug) || /1\s*hour/i.test(title);
 
   if (slug.includes('daily') || slug.includes('weekly')) {
     return false;
   }
 
-  return isHourly && !isOther;
+  return is15Min && !isOther;
 }
 
-const is15MinBtcMarket = isHourlyBtcMarket;
+const isHourlyBtcMarket = is15MinBtcMarket;
 
-async function fetchLiveHourlyBtcMarket(): Promise<any> {
+async function fetchLive15MinBtcMarket(): Promise<any> {
   try {
     const res = await fetch('https://api.limitless.exchange/markets/active');
     if (!res.ok) return null;
     const json = await res.json();
     const list = json?.data || [];
     const now = Date.now();
-    // Prioritize active, funded hourly BTC market that has NOT yet expired
-    const btcHourly = list.find((m: any) => isHourlyBtcMarket(m) && m.status === 'FUNDED' && (!m.expirationTimestamp || m.expirationTimestamp > now))
-      || list.find((m: any) => isHourlyBtcMarket(m) && (!m.expirationTimestamp || m.expirationTimestamp > now))
-      || list.find((m: any) => isHourlyBtcMarket(m));
-    return btcHourly || null;
+    // Prioritize active, funded 15-minute BTC market that has NOT yet expired
+    const btc15m = list.find((m: any) => is15MinBtcMarket(m) && m.status === 'FUNDED' && (!m.expirationTimestamp || m.expirationTimestamp > now))
+      || list.find((m: any) => is15MinBtcMarket(m) && (!m.expirationTimestamp || m.expirationTimestamp > now))
+      || list.find((m: any) => is15MinBtcMarket(m));
+    return btc15m || null;
   } catch {
     return null;
   }
 }
 
-const fetchLive15MinBtcMarket = fetchLiveHourlyBtcMarket;
+const fetchLiveHourlyBtcMarket = fetchLive15MinBtcMarket;
 
 let limitlessWsInstance: any = null;
 let currentWsStatus: string = 'DISCONNECTED';
@@ -156,8 +156,8 @@ function loadTradeGuardFromDisk(): any {
       const raw = fs.readFileSync(TRADE_GUARD_FILE, 'utf8');
       const parsed = JSON.parse(raw);
       const ageMs = Date.now() - (Number(parsed?.timestamp) || 0);
-      if (ageMs >= 60 * 60 * 1000) {
-        console.log(`[VM Trade Guard Dev] Previous hourly contract lock expired (${Math.round(ageMs / 60000)}m ago). Auto-clearing.`);
+      if (ageMs >= 15 * 60 * 1000) {
+        console.log(`[VM Trade Guard Dev] Previous 15m contract lock expired (${Math.round(ageMs / 60000)}m ago). Auto-clearing.`);
         clearTradeGuardFromDisk();
         return null;
       }
@@ -769,11 +769,10 @@ function setupApiMiddlewares(middlewares: any) {
         let marketData: any = null;
 
         // ====================================================================
-        // STRICT SAFETY GUARD: 1-HOUR BTC ONLY
+        // STRICT SAFETY GUARD: 15-MINUTE BTC ONLY
         // ====================================================================
-        // Check if market exists, and verify it has not expired or resolved
         let isExpiredOrResolved = false;
-        if (activeMarketSlug && isHourlyBtcMarket({ slug: activeMarketSlug })) {
+        if (activeMarketSlug && is15MinBtcMarket({ slug: activeMarketSlug })) {
           try {
             const mRes = await fetch(`https://api.limitless.exchange/markets/${encodeURIComponent(activeMarketSlug)}`);
             if (mRes.ok) {
@@ -794,29 +793,40 @@ function setupApiMiddlewares(middlewares: any) {
           isExpiredOrResolved = true;
         }
 
-        // If market is expired, resolved, or invalid, auto-route to current live active hourly market
+        // If market is expired, resolved, or invalid, auto-route to current live active 15m market
         if (isExpiredOrResolved || !marketData) {
-          const liveHourly = await fetchLiveHourlyBtcMarket();
-          if (liveHourly && isHourlyBtcMarket(liveHourly)) {
-            console.log(`[ORDER ROUTER] Market '${activeMarketSlug}' was expired/inactive. Auto-routed to current live hourly market: '${liveHourly.slug}'`);
-            activeMarketSlug = liveHourly.slug;
-            marketData = liveHourly;
-            cachedActiveBtc = liveHourly;
+          const live15m = await fetchLive15MinBtcMarket();
+          if (live15m && is15MinBtcMarket(live15m)) {
+            console.log(`[ORDER ROUTER] Market '${activeMarketSlug}' was expired/inactive. Auto-routed to current live 15m market: '${live15m.slug}'`);
+            activeMarketSlug = live15m.slug;
+            marketData = live15m;
+            cachedActiveBtc = live15m;
           } else {
             res.statusCode = 400;
             return res.end(JSON.stringify({
               success: false,
-              error: `Safety Guard Blocked: No active, unexpired 1-hour BTC market was found on Limitless Exchange. Order aborted.`,
+              error: `Safety Guard Blocked: No active, unexpired 15-minute BTC market was found on Limitless Exchange. Order aborted.`,
             }));
           }
         }
 
         // Final verification before order construction
-        if (!isHourlyBtcMarket({ slug: activeMarketSlug, title: marketData?.title })) {
+        if (!is15MinBtcMarket({ slug: activeMarketSlug, title: marketData?.title })) {
           res.statusCode = 400;
           return res.end(JSON.stringify({
             success: false,
-            error: `Safety Guard Violation: Market '${activeMarketSlug}' is not a 1-hour contract. All orders are strictly restricted to BTC Up or Down Hourly. Execution blocked.`,
+            error: `Safety Guard Violation: Market '${activeMarketSlug}' is not a 15-minute contract. Execution blocked.`,
+          }));
+        }
+
+        // Enforce 1 bet per 15m contract
+        const existingGuard = inMemoryTradeGuard || loadTradeGuardFromDisk();
+        if (existingGuard && existingGuard.marketSlug === activeMarketSlug) {
+          res.statusCode = 429;
+          return res.end(JSON.stringify({
+            success: false,
+            mode: 'CONTRACT_LOCKED',
+            error: `🔒 تم بالفعل تنفيذ صفقة على عقد الـ 15 دقيقة الحالي (${activeMarketSlug}). ينتظر الروبوت بدء عقد الـ 15 دقيقة القادم.`,
           }));
         }
 
@@ -860,15 +870,14 @@ function setupApiMiddlewares(middlewares: any) {
           }));
         }
 
-        // Extract market ask price for this outcome so FAK orders fill immediately
+        // Extract live market ask price for this outcome (GTC Order without max Entry price)
         const marketAsk = isLong
           ? (marketData?.tradePrices?.buy?.market?.[0] ?? marketData?.prices?.[0] ?? 0.50)
           : (marketData?.tradePrices?.buy?.market?.[1] ?? marketData?.prices?.[1] ?? 0.50);
 
         let inputPrice = Number(price) > 1 ? Number(price) / 100 : (Number(price) || marketAsk);
-        // Add 1.5% slippage buffer for FAK to guarantee execution against book movements
-        if (type === 'FAK' && inputPrice <= marketAsk) {
-          inputPrice = Math.min(0.999, marketAsk * 1.015);
+        if (!inputPrice || inputPrice >= 0.99) {
+          inputPrice = marketAsk;
         }
         // Price must have max 3 decimal places for Limitless SDK tick alignment (0.001)
         const tickAlignedPrice = Math.max(0.001, Math.min(0.999, parseFloat(Number(inputPrice).toFixed(3))));
@@ -882,16 +891,16 @@ function setupApiMiddlewares(middlewares: any) {
         let rawSize = parseFloat(Number(size || 0.1).toFixed(2));
         if (isNaN(rawSize) || rawSize <= 0) rawSize = 0.1;
 
-        // Server-Side 10% Maximum Risk Shield: Enforce hard 10% dollar ceiling based on live on-chain balance
+        // Server-Side Fixed 4% Maximum Risk Shield: Enforce hard 4% dollar ceiling per 15m contract based on live on-chain balance
         try {
           const liveBal = await fetchLiveWalletAndBalance();
           if (liveBal && liveBal.usdcBalance > 0) {
-            const maxRiskBudgetUsd = liveBal.usdcBalance * 0.10;
+            const maxRiskBudgetUsd = liveBal.usdcBalance * 0.04;
             const requestedOrderCost = rawSize * tickAlignedPrice;
             if (requestedOrderCost > maxRiskBudgetUsd) {
               const maxAllowedContracts = Math.floor((maxRiskBudgetUsd / tickAlignedPrice) * 100) / 100;
               console.warn(
-                `[SERVER RISK SHIELD] Requested order cost $${requestedOrderCost.toFixed(2)} exceeds 10% of balance ($${maxRiskBudgetUsd.toFixed(2)}). Strictly capping contracts from ${rawSize} to ${maxAllowedContracts}.`
+                `[SERVER RISK SHIELD] Requested order cost $${requestedOrderCost.toFixed(2)} exceeds Fixed 4% of bankroll ($${maxRiskBudgetUsd.toFixed(2)}). Strictly capping contracts from ${rawSize} to ${maxAllowedContracts}.`
               );
               rawSize = Math.max(0.01, maxAllowedContracts);
             }

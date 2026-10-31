@@ -10,10 +10,10 @@ import { BotConfig, KellyMath, ZScoreMetric } from '../types/bot';
  */
 export function calculateZScore(
   closePrices: number[],
-  upperThreshold = 2.0,
-  entryThreshold = 2.0,
-  lowerThreshold = -2.0,
-  lowerEntryThreshold = -2.0
+  upperThreshold = 2.5,
+  entryThreshold = 2.3,
+  lowerThreshold = -2.5,
+  lowerEntryThreshold = -2.3
 ): {
   mean: number;
   variance: number;
@@ -61,15 +61,8 @@ export function calculateZScore(
 }
 
 /**
- * Calculates Kelly Criterion position sizing with the 10% max risk cap
- * and contract fractionalization.
- * 
- * b: payout odds = (1.00 - MAX_PRICE_CENTS) / MAX_PRICE_CENTS (at $0.20, b = 4.0)
- * p: win probability (e.g. 0.55)
- * q: 1 - p (0.45)
- * kellyFraction: (b * p - q) / b
- * riskToTake: clamp between 0 and 10% max risk (0.10 maximum limit)
- * Unified single order execution (chunking eliminated)
+ * Calculates position sizing with Fixed 4% of bankroll per 15m contract
+ * and GTC order without max Entry price.
  */
 export function calculateKellySizing(
   balance: number,
@@ -77,23 +70,20 @@ export function calculateKellySizing(
 ): KellyMath {
   const { maxPriceCents, winProbability, maxRiskPercent } = config;
 
-  // Safe bounds
-  const price = Math.max(0.001, Math.min(0.999, maxPriceCents));
+  // Safe bounds for live contract price (no artificial max entry price ceiling)
+  const price = Math.max(0.001, Math.min(0.999, maxPriceCents >= 0.99 ? 0.50 : maxPriceCents));
   const b = (1.00 - price) / price;
   const p = Math.max(0.01, Math.min(0.99, winProbability));
   const q = 1 - p;
 
   const kellyFraction = (b * p - q) / b;
-  // Strict 10% maximum limit cap as demanded by user (NEVER exceed 0.10)
-  const effectiveMaxRisk = Math.min(Math.max(Number(maxRiskPercent) || 0.10, 0.001), 0.10);
-  // In prediction markets with Z >= 2.0σ statistical trigger, always allocate within the user's 10% safety cap
-  const riskToTake = kellyFraction > 0
-    ? Math.min(kellyFraction, effectiveMaxRisk)
-    : effectiveMaxRisk;
+  // Strict Fixed 4% maximum limit of bankroll per 15m contract (0.04)
+  const effectiveMaxRisk = Math.min(Math.max(Number(maxRiskPercent) || 0.04, 0.001), 0.04);
+  const riskToTake = effectiveMaxRisk;
 
-  // Exact maximum dollar allocation permitted by the 10% cap
+  // Exact dollar allocation permitted by Fixed 4% of bankroll
   const maxAllowedUsd = balance > 0 ? balance * effectiveMaxRisk : 0;
-  const positionSizeUsd = Math.min(balance * riskToTake, maxAllowedUsd);
+  const positionSizeUsd = maxAllowedUsd;
 
   // Contract calculation: Strict floor down to 2 decimals so (contracts * price) NEVER exceeds maxAllowedUsd
   let numberOfContracts = positionSizeUsd > 0 && price > 0
