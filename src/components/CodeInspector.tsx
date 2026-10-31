@@ -193,21 +193,27 @@ class LimitlessTradingBot {
     }
 
     // ==========================================
-    // 3. جلب 45 شمعة تاريخية (1m) من Binance Rest API
+    // 3. جلب 45 شمعة تاريخية مغلقة مؤكدة (1m) من Binance Rest API
     // ==========================================
     public async fetchHistoricalData() {
-        console.log(\`📥 Fetching last \${CONFIG.PERIODS} candles (1m) for \${CONFIG.SYMBOL}...\`);
+        console.log(\`📥 Fetching last \${CONFIG.PERIODS} closed candles (1m) for \${CONFIG.SYMBOL}...\`);
         try {
             const response = await axios.get(CONFIG.BINANCE_REST_URL, {
                 params: {
                     symbol: CONFIG.SYMBOL,
                     interval: CONFIG.TIMEFRAME,
-                    limit: CONFIG.PERIODS
+                    limit: CONFIG.PERIODS + 1
                 }
             });
 
-            this.closePrices = response.data.map((candle: any[]) => parseFloat(candle[4]));
-            console.log('📊 45 historical 1m candles loaded:', this.closePrices.length);
+            const now = Date.now();
+            const closedKlines = response.data.filter((candle: any[], idx: number) => {
+                const closeTime = Number(candle[6]) || 0;
+                return closeTime > 0 ? closeTime <= now : idx < response.data.length - 1;
+            });
+
+            this.closePrices = closedKlines.slice(-CONFIG.PERIODS).map((candle: any[]) => parseFloat(candle[4]));
+            console.log('📊 45 confirmed closed 1m candles loaded:', this.closePrices.length);
             this.startBinanceWS();
         } catch (error) {
             console.error('❌ Error fetching historical data:', error);
@@ -215,7 +221,7 @@ class LimitlessTradingBot {
     }
 
     // ==========================================
-    // 4. البث الحي (Binance 1m WebSocket)
+    // 4. البث الحي (Binance 1m WebSocket — حساب عند إغلاق الشمعة فقط)
     // ==========================================
     private lastExecutedCandleTime: number = 0;
     private isExecutingTrade: boolean = false;
@@ -235,17 +241,16 @@ class LimitlessTradingBot {
             }
         });
 
-        binanceWs.on('open', () => console.log('✅ Connected to Binance 1m Live Feed'));
+        binanceWs.on('open', () => console.log('✅ Connected to Binance 1m Live Feed (Closed Candles Only)'));
         binanceWs.on('error', (err) => console.warn('Binance WS notice:', err.message));
     }
 
     private onTick(newPrice: number, isClosed: boolean, candleTime: number) {
-        const livePrices = [...this.closePrices.slice(-(CONFIG.PERIODS - 1)), newPrice];
-        this.evaluateStrategy(livePrices, candleTime);
+        // حساب المؤشر وتأكيد الإشارات حصرياً بعد إغلاق الشمعة المؤكد (Closed Candles Only)
+        if (!isClosed) return;
 
-        if (isClosed) {
-            this.closePrices = [...this.closePrices.slice(-(CONFIG.PERIODS - 1)), newPrice];
-        }
+        this.closePrices = [...this.closePrices.slice(-(CONFIG.PERIODS - 1)), newPrice];
+        this.evaluateStrategy(this.closePrices, candleTime);
     }
 
     // ==========================================

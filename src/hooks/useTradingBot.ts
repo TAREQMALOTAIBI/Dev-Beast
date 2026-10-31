@@ -155,6 +155,9 @@ export function useTradingBot() {
   const closePricesRef = useRef<number[]>([]);
   const crossedUpperThresholdRef = useRef<boolean>(false);
   const crossedLowerThresholdRef = useRef<boolean>(false);
+  const armedUpperCandleTimeRef = useRef<number>(0);
+  const armedLowerCandleTimeRef = useRef<number>(0);
+  const lastEvaluatedClosedCandleTimeRef = useRef<number>(0);
   const botActiveRef = useRef<boolean>(botActive);
   const configRef = useRef<BotConfig>(config);
   const currentBalanceRef = useRef<number>(currentBalance);
@@ -245,19 +248,22 @@ export function useTradingBot() {
     });
   };
 
-  // Recompute metrics series on candle updates
+  // Recompute metrics series on candle updates (State machine strictly evaluates on Closed Candles Only)
   const rebuildMetrics = useCallback((candleList: CandleData[], cfg: BotConfig) => {
     const result: ZScoreMetric[] = [];
     const closes = candleList.map((c) => c.close);
     let hadArmedUpper = false;
     let hadArmedLower = false;
+    let lastClosedMetric: ZScoreMetric | null = null;
 
     const lowerThresh = cfg.zScoreLower !== undefined ? cfg.zScoreLower : -cfg.zScoreUpper;
     const lowerEntryThresh = cfg.zScoreLowerEntry !== undefined ? cfg.zScoreLowerEntry : -cfg.zScoreEntry;
 
     for (let i = 0; i < candleList.length; i++) {
+      const isClosedCandle = candleList[i].isClosed !== false;
+
       if (i < cfg.periods - 1) {
-        result.push({
+        const emptyMetric: ZScoreMetric = {
           time: candleList[i].time,
           price: candleList[i].close,
           mean: candleList[i].close,
@@ -274,7 +280,9 @@ export function useTradingBot() {
           lowerEntryThreshold: lowerEntryThresh,
           signal: null,
           direction: null,
-        });
+        };
+        result.push(emptyMetric);
+        if (isClosedCandle) lastClosedMetric = emptyMetric;
         continue;
       }
 
@@ -284,37 +292,40 @@ export function useTradingBot() {
       let signal: 'ARMED_UPPER' | 'ARMED_LOWER' | 'ENTRY_SHORT' | 'ENTRY_LONG' | 'ARMED' | 'ENTRY' | null = null;
       let dir: 'SHORT' | 'LONG' | null = null;
 
-      // Upper Direction (Short / DOWN): First confirmation >= 2.5, Second confirmation <= 2.3
-      if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'SHORT_ONLY') {
-        if (stats.zScore >= cfg.zScoreUpper) {
-          hadArmedUpper = true;
-          signal = 'ARMED_UPPER';
-          dir = 'SHORT';
-        } else if (hadArmedUpper && stats.zScore <= cfg.zScoreEntry && stats.zScore > 0) {
-          hadArmedUpper = false;
-          signal = 'ENTRY_SHORT';
-          dir = 'SHORT';
-        } else if (stats.zScore <= 0) {
-          hadArmedUpper = false;
+      // Strictly advance confirmation state machine ONLY on confirmed closed candles
+      if (isClosedCandle) {
+        // Upper Direction (Short / DOWN): First confirmation >= 2.5, Second confirmation <= 2.3
+        if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'SHORT_ONLY') {
+          if (stats.zScore >= cfg.zScoreUpper) {
+            hadArmedUpper = true;
+            signal = 'ARMED_UPPER';
+            dir = 'SHORT';
+          } else if (hadArmedUpper && stats.zScore <= cfg.zScoreEntry && stats.zScore > 0) {
+            hadArmedUpper = false;
+            signal = 'ENTRY_SHORT';
+            dir = 'SHORT';
+          } else if (stats.zScore <= 0) {
+            hadArmedUpper = false;
+          }
+        }
+
+        // Lower Direction (Long / UP): First confirmation <= -2.5, Second confirmation >= -2.3
+        if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'LONG_ONLY') {
+          if (stats.zScore <= lowerThresh) {
+            hadArmedLower = true;
+            signal = 'ARMED_LOWER';
+            dir = 'LONG';
+          } else if (hadArmedLower && stats.zScore >= lowerEntryThresh && stats.zScore < 0) {
+            hadArmedLower = false;
+            signal = 'ENTRY_LONG';
+            dir = 'LONG';
+          } else if (stats.zScore >= 0) {
+            hadArmedLower = false;
+          }
         }
       }
 
-      // Lower Direction (Long / UP): First confirmation <= -2.5, Second confirmation >= -2.3
-      if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'LONG_ONLY') {
-        if (stats.zScore <= lowerThresh) {
-          hadArmedLower = true;
-          signal = 'ARMED_LOWER';
-          dir = 'LONG';
-        } else if (hadArmedLower && stats.zScore >= lowerEntryThresh && stats.zScore < 0) {
-          hadArmedLower = false;
-          signal = 'ENTRY_LONG';
-          dir = 'LONG';
-        } else if (stats.zScore >= 0) {
-          hadArmedLower = false;
-        }
-      }
-
-      result.push({
+      const metricItem: ZScoreMetric = {
         time: candleList[i].time,
         price: stats.currentPrice,
         mean: stats.mean,
@@ -331,13 +342,18 @@ export function useTradingBot() {
         lowerEntryThreshold: lowerEntryThresh,
         signal,
         direction: dir,
-      });
+      };
+
+      result.push(metricItem);
+      if (isClosedCandle) {
+        lastClosedMetric = metricItem;
+      }
     }
 
     setMetrics(result);
     if (result.length > 0) {
-      const latest = result[result.length - 1];
-      setCurrentZScore(latest.zScore);
+      const confirmedMetric = lastClosedMetric || result[result.length - 1];
+      setCurrentZScore(confirmedMetric.zScore);
 
       if (hadArmedUpper) {
         crossedUpperThresholdRef.current = true;
@@ -658,36 +674,50 @@ export function useTradingBot() {
     });
   }, []);
 
-  // Real Market Strategy Evaluation:
-  // 1m candles (45 periods), First confirmation 2.5 -> Second confirmation 2.3
+  // Real Market Strategy Evaluation (STRICTLY CLOSED CANDLES ONLY):
+  // 1m closed candles (45 periods), First confirmation 2.5 -> Second confirmation 2.3
   const evaluateLiveStrategy = useCallback(
-    (allPrices: number[], candleTime?: number) => {
+    (closedPrices: number[], closedCandleTime?: number) => {
       const cfg = configRef.current;
-      if (allPrices.length < cfg.periods) return;
+      if (closedPrices.length < cfg.periods) return;
 
-      const windowSlice = allPrices.slice(-cfg.periods);
+      // Prevent duplicate evaluation of the exact same closed candle
+      if (closedCandleTime && lastEvaluatedClosedCandleTimeRef.current === closedCandleTime) {
+        return;
+      }
+      if (closedCandleTime) {
+        lastEvaluatedClosedCandleTimeRef.current = closedCandleTime;
+      }
+
+      const windowSlice = closedPrices.slice(-cfg.periods);
       const lowerThresh = cfg.zScoreLower !== undefined ? cfg.zScoreLower : -cfg.zScoreUpper;
       const lowerEntryThresh = cfg.zScoreLowerEntry !== undefined ? cfg.zScoreLowerEntry : -cfg.zScoreEntry;
 
       const { zScore } = calculateZScore(windowSlice, cfg.zScoreUpper, cfg.zScoreEntry, lowerThresh, lowerEntryThresh);
       setCurrentZScore(zScore);
 
-      // ================= DIRECTION 1: Short (DOWN) — First Confirmation >= +2.5, Second Confirmation <= +2.3 =================
+      // ================= DIRECTION 1: Short (DOWN) — First Confirmation >= +2.5, Second Confirmation <= +2.3 (Closed Candles Only) =================
       if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'SHORT_ONLY') {
         if (zScore >= cfg.zScoreUpper) {
+          armedUpperCandleTimeRef.current = closedCandleTime || Date.now();
           if (!crossedUpperThresholdRef.current) {
             crossedUpperThresholdRef.current = true;
             setCrossedUpperThreshold(true);
-            const armMsg = `⚡ [التأكيد الأول +${cfg.zScoreUpper}σ] وصل Z-Score إلى +${zScore.toFixed(2)}σ. في انتظار التأكيد الثاني (≤ +${cfg.zScoreEntry}σ) لتنفيذ صفقة SHORT (DOWN).`;
+            const armMsg = `⚡ [التأكيد الأول +${cfg.zScoreUpper}σ · شمعة مغلقة] أغلقت شمعة 1m عند Z-Score = +${zScore.toFixed(2)}σ. في انتظار إغلاق شمعة التأكيد الثاني (≤ +${cfg.zScoreEntry}σ) لتنفيذ صفقة SHORT (DOWN).`;
             console.log(armMsg);
             limitlessService.logDirect('SYSTEM', armMsg);
           }
-        } else if (crossedUpperThresholdRef.current && zScore <= cfg.zScoreEntry && zScore > 0) {
+        } else if (
+          crossedUpperThresholdRef.current &&
+          zScore <= cfg.zScoreEntry &&
+          zScore > 0 &&
+          (!closedCandleTime || closedCandleTime > armedUpperCandleTimeRef.current)
+        ) {
           crossedUpperThresholdRef.current = false;
           setCrossedUpperThreshold(false);
 
           if (!botActiveRef.current) {
-            const pauseWarn = `⚠️ تحقق التأكيد الثاني في الصعود (Z=+${zScore.toFixed(2)}σ ≤ +${cfg.zScoreEntry}σ) ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
+            const pauseWarn = `⚠️ تحقق التأكيد الثاني بعد إغلاق الشمعة (Z=+${zScore.toFixed(2)}σ ≤ +${cfg.zScoreEntry}σ) ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
             console.warn(pauseWarn);
             limitlessService.logDirect('SYSTEM', pauseWarn);
             setExecutionNotice({
@@ -700,10 +730,10 @@ export function useTradingBot() {
           }
 
           if (!isExecutingRef.current) {
-            const trigMsg = `🎯 [تحقق التأكيد الثاني ≤ +${cfg.zScoreEntry}σ] ارتد Z-Score من فوق +${cfg.zScoreUpper}σ إلى +${zScore.toFixed(2)}σ! جاري إرسال أمر GTC لشراء عقد DOWN (4% من الرصيد).`;
+            const trigMsg = `🎯 [تحقق التأكيد الثاني ≤ +${cfg.zScoreEntry}σ · شمعة مغلقة] أغلقت شمعة 1m بارتداد Z-Score من فوق +${cfg.zScoreUpper}σ إلى +${zScore.toFixed(2)}σ! جاري إرسال أمر GTC لشراء عقد DOWN (4% من الرصيد).`;
             console.log(trigMsg);
             limitlessService.logDirect('SYSTEM', trigMsg);
-            executeLiveTrade(zScore, 'SHORT', candleTime);
+            executeLiveTrade(zScore, 'SHORT', closedCandleTime);
           }
         } else if (zScore <= 0 && crossedUpperThresholdRef.current) {
           crossedUpperThresholdRef.current = false;
@@ -711,22 +741,28 @@ export function useTradingBot() {
         }
       }
 
-      // ================= DIRECTION 2: Long (UP) — First Confirmation <= -2.5, Second Confirmation >= -2.3 =================
+      // ================= DIRECTION 2: Long (UP) — First Confirmation <= -2.5, Second Confirmation >= -2.3 (Closed Candles Only) =================
       if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'LONG_ONLY') {
         if (zScore <= lowerThresh) {
+          armedLowerCandleTimeRef.current = closedCandleTime || Date.now();
           if (!crossedLowerThresholdRef.current) {
             crossedLowerThresholdRef.current = true;
             setCrossedLowerThreshold(true);
-            const armMsg = `⚡ [التأكيد الأول ${lowerThresh}σ] وصل Z-Score إلى ${zScore.toFixed(2)}σ. في انتظار التأكيد الثاني (≥ ${lowerEntryThresh}σ) لتنفيذ صفقة LONG (UP).`;
+            const armMsg = `⚡ [التأكيد الأول ${lowerThresh}σ · شمعة مغلقة] أغلقت شمعة 1m عند Z-Score = ${zScore.toFixed(2)}σ. في انتظار إغلاق شمعة التأكيد الثاني (≥ ${lowerEntryThresh}σ) لتنفيذ صفقة LONG (UP).`;
             console.log(armMsg);
             limitlessService.logDirect('SYSTEM', armMsg);
           }
-        } else if (crossedLowerThresholdRef.current && zScore >= lowerEntryThresh && zScore < 0) {
+        } else if (
+          crossedLowerThresholdRef.current &&
+          zScore >= lowerEntryThresh &&
+          zScore < 0 &&
+          (!closedCandleTime || closedCandleTime > armedLowerCandleTimeRef.current)
+        ) {
           crossedLowerThresholdRef.current = false;
           setCrossedLowerThreshold(false);
 
           if (!botActiveRef.current) {
-            const pauseWarn = `⚠️ تحقق التأكيد الثاني في الهبوط (Z=${zScore.toFixed(2)}σ ≥ ${lowerEntryThresh}σ) ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
+            const pauseWarn = `⚠️ تحقق التأكيد الثاني بعد إغلاق الشمعة (Z=${zScore.toFixed(2)}σ ≥ ${lowerEntryThresh}σ) ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
             console.warn(pauseWarn);
             limitlessService.logDirect('SYSTEM', pauseWarn);
             setExecutionNotice({
@@ -739,10 +775,10 @@ export function useTradingBot() {
           }
 
           if (!isExecutingRef.current) {
-            const trigMsg = `🎯 [تحقق التأكيد الثاني ≥ ${lowerEntryThresh}σ] ارتد Z-Score من تحت ${lowerThresh}σ إلى ${zScore.toFixed(2)}σ! جاري إرسال أمر GTC لشراء عقد UP (4% من الرصيد).`;
+            const trigMsg = `🎯 [تحقق التأكيد الثاني ≥ ${lowerEntryThresh}σ · شمعة مغلقة] أغلقت شمعة 1m بارتداد Z-Score من تحت ${lowerThresh}σ إلى ${zScore.toFixed(2)}σ! جاري إرسال أمر GTC لشراء عقد UP (4% من الرصيد).`;
             console.log(trigMsg);
             limitlessService.logDirect('SYSTEM', trigMsg);
-            executeLiveTrade(zScore, 'LONG', candleTime);
+            executeLiveTrade(zScore, 'LONG', closedCandleTime);
           }
         } else if (zScore >= 0 && crossedLowerThresholdRef.current) {
           crossedLowerThresholdRef.current = false;
@@ -878,13 +914,15 @@ export function useTradingBot() {
 
       if (realCandles.length > 0) {
         setCandles(realCandles);
-        const closes = realCandles.map((c) => c.close);
-        closePricesRef.current = closes.slice(-config.periods);
+        const closedCandles = realCandles.filter((c) => c.isClosed !== false);
+        const closedCloses = closedCandles.map((c) => c.close);
+        closePricesRef.current = closedCloses.slice(-config.periods);
         rebuildMetricsRef.current(realCandles, configRef.current);
 
-        if (realCandles.length >= config.periods) {
-          const latestCandle = realCandles[realCandles.length - 1];
-          evaluateLiveStrategyRef.current(closes, latestCandle.time);
+        // Initialize armed state from historical closed candles without firing stale historical entries
+        if (closedCandles.length >= config.periods) {
+          const latestClosed = closedCandles[closedCandles.length - 1];
+          lastEvaluatedClosedCandleTimeRef.current = latestClosed.time;
         }
       }
 
@@ -898,17 +936,24 @@ export function useTradingBot() {
             if (last && last.time === tickCandle.time) {
               updatedCandles = [...prev.slice(0, -1), tickCandle];
             } else {
-              updatedCandles = [...prev.slice(-(configRef.current.periods - 1)), tickCandle];
+              // Mark previous candle as closed when a new candle begins, keep 45 closed + 1 forming
+              const prevWithClosed = prev.map((c, idx) =>
+                idx === prev.length - 1 ? { ...c, isClosed: true } : c
+              );
+              updatedCandles = [...prevWithClosed.slice(-configRef.current.periods), tickCandle];
             }
             return updatedCandles;
           });
 
           if (updatedCandles.length >= configRef.current.periods) {
-            const allCloses = updatedCandles.map((c) => c.close);
-            evaluateLiveStrategyRef.current(allCloses, tickCandle.time);
-
+            // Strictly evaluate Z-Score strategy and confirmations ONLY when the 1m candle closes
             if (isClosed) {
-              closePricesRef.current = allCloses.slice(-configRef.current.periods);
+              const confirmedClosedCandles = updatedCandles.filter((c) => c.isClosed !== false);
+              const closedCloses = confirmedClosedCandles.map((c) => c.close);
+              if (closedCloses.length >= configRef.current.periods) {
+                closePricesRef.current = closedCloses.slice(-configRef.current.periods);
+                evaluateLiveStrategyRef.current(closedCloses, tickCandle.time);
+              }
             }
 
             rebuildMetricsRef.current(updatedCandles, configRef.current);
@@ -1082,12 +1127,19 @@ export function useTradingBot() {
     fractionChunks: config.fractionChunks,
   });
 
+  const latestConfirmedMetric =
+    metrics.length > 1 && candles[candles.length - 1]?.isClosed === false
+      ? metrics[metrics.length - 2]
+      : metrics.length > 0
+      ? metrics[metrics.length - 1]
+      : null;
+
   return {
     config,
     updateConfig,
     candles,
     metrics,
-    latestMetric: metrics.length > 0 ? metrics[metrics.length - 1] : null,
+    latestMetric: latestConfirmedMetric,
     currentZScore,
     crossedUpperThreshold,
     crossedLowerThreshold,

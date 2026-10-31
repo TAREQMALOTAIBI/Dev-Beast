@@ -324,29 +324,29 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
         )}
       </div>
 
-      {/* Strategy Summary Strip */}
+        {/* Strategy Summary Strip */}
       <div className="p-3 rounded-xl border border-slate-800 bg-slate-950/70 space-y-2">
-        <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+        <div className="flex items-center justify-between border-b border-slate-800/80 pb-2 flex-wrap gap-1.5">
           <span className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-            <span>{isAr ? 'إعدادات الاستراتيجية المعتمدة (Binance 1m · 45 شمعة):' : 'Approved Bot Parameters (Binance 1m · 45 Candles):'}</span>
+            <span>{isAr ? 'إعدادات الاستراتيجية المعتمدة (شموع 1m مغلقة مؤكدة فقط):' : 'Approved Bot Parameters (Confirmed Closed 1m Candles Only):'}</span>
           </span>
           <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-500/50">
-            {isAr ? 'GTC بدون سقف سعر · 4% ثابت لكل عقد 15m' : 'GTC No Max Price · Fixed 4% / 15m'}
+            {isAr ? 'الشموع المغلقة فقط · GTC بدون سقف · 4% ثابت' : 'Closed Candles Only · GTC No Cap · Fixed 4%'}
           </span>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] font-mono">
           <div className="p-2 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col">
-            <span className="text-slate-400 text-[10px]">{isAr ? 'الفريم والشموع:' : 'Timeframe & Candles:'}</span>
-            <span className="text-sky-300 font-bold">1m · 45 Candles</span>
+            <span className="text-slate-400 text-[10px]">{isAr ? 'الفريم والشموع:' : 'Timeframe & Mode:'}</span>
+            <span className="text-sky-300 font-bold">1m · 45 Closed</span>
           </div>
           <div className="p-2 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col">
-            <span className="text-slate-400 text-[10px]">{isAr ? 'التأكيد الأول:' : '1st Confirmation:'}</span>
+            <span className="text-slate-400 text-[10px]">{isAr ? 'التأكيد الأول (إغلاق):' : '1st Confirm (Close):'}</span>
             <span className="text-amber-400 font-bold">±{config.zScoreUpper.toFixed(1)}σ</span>
           </div>
           <div className="p-2 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col">
-            <span className="text-slate-400 text-[10px]">{isAr ? 'التأكيد الثاني (دخول):' : '2nd Confirmation:'}</span>
+            <span className="text-slate-400 text-[10px]">{isAr ? 'التأكيد الثاني (إغلاق):' : '2nd Confirm (Close):'}</span>
             <span className="text-emerald-400 font-bold">±{config.zScoreEntry.toFixed(1)}σ</span>
           </div>
           <div className="p-2 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col">

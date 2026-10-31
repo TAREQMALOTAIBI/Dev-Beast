@@ -37,7 +37,9 @@ export class BinanceService {
 
     for (const url of endpoints) {
       try {
-        const fullUrl = `${url}?symbol=${symbol.toUpperCase()}&interval=${interval}&limit=${limit}`;
+        // Fetch limit + 1 so that we always have `limit` (45) fully closed candles plus the currently forming candle
+        const requestLimit = limit + 1;
+        const fullUrl = `${url}?symbol=${symbol.toUpperCase()}&interval=${interval}&limit=${requestLimit}`;
         const res = await fetch(fullUrl, {
           method: 'GET',
           headers: { Accept: 'application/json' },
@@ -47,15 +49,20 @@ export class BinanceService {
 
         const rawData = await res.json();
         if (Array.isArray(rawData) && rawData.length > 0) {
-          const candles: CandleData[] = rawData.map((k: (string | number)[]) => ({
-            time: Number(k[0]),
-            open: parseFloat(String(k[1])),
-            high: parseFloat(String(k[2])),
-            low: parseFloat(String(k[3])),
-            close: parseFloat(String(k[4])),
-            volume: parseFloat(String(k[5])),
-            isClosed: true,
-          }));
+          const now = Date.now();
+          const candles: CandleData[] = rawData.map((k: (string | number)[], idx: number) => {
+            const closeTime = Number(k[6]) || 0;
+            const isClosedCandle = closeTime > 0 ? closeTime <= now : idx < rawData.length - 1;
+            return {
+              time: Number(k[0]),
+              open: parseFloat(String(k[1])),
+              high: parseFloat(String(k[2])),
+              low: parseFloat(String(k[3])),
+              close: parseFloat(String(k[4])),
+              volume: parseFloat(String(k[5])),
+              isClosed: isClosedCandle,
+            };
+          });
 
           if (candles.length > 0) {
             this.lastCandleTime = candles[candles.length - 1].time;
@@ -158,12 +165,19 @@ export class BinanceService {
     const poll = async () => {
       if (this.isExplicitlyClosed) return;
       try {
+        const prevCandleTime = this.lastCandleTime;
         const candles = await this.fetchHistoricalCandles(symbol, interval, 2);
         if (candles.length > 0) {
           const latest = candles[candles.length - 1];
-          const isClosed = this.lastCandleTime > 0 && latest.time > this.lastCandleTime;
+          if (prevCandleTime > 0 && latest.time > prevCandleTime && candles.length >= 2) {
+            const justClosedCandle: CandleData = {
+              ...candles[candles.length - 2],
+              isClosed: true,
+            };
+            onTick(justClosedCandle, true);
+          }
           this.lastCandleTime = latest.time;
-          onTick(latest, isClosed);
+          onTick({ ...latest, isClosed: Boolean(latest.isClosed) }, Boolean(latest.isClosed));
         }
       } catch {
         // Continue polling safely
