@@ -327,24 +327,40 @@ class LimitlessTradingBot {
         try {
             if (this.orderClient) {
                 const marketFetcher = new MarketFetcher(this.httpClient!);
-                const market = await marketFetcher.getMarket(CONFIG.LIMITLESS_MARKET_SLUG);
+                const currentSlotSec = Math.floor(Date.now() / 900000) * 900;
+                const resolvedSlug = CONFIG.LIMITLESS_MARKET_SLUG === 'btc-up-or-down-15-min'
+                    ? \`btc-up-or-down-15-min-\${currentSlotSec}\`
+                    : CONFIG.LIMITLESS_MARKET_SLUG;
+                const market: any = await marketFetcher.getMarket(resolvedSlug);
                 const tokenId = direction === 'LONG' ? market.tokens?.yes : market.tokens?.no;
                 const livePrice = direction === 'LONG'
-                    ? (market.prices?.[0] || 0.50)
-                    : (market.prices?.[1] || 0.50);
-                const executionPrice = Math.min(0.99, Math.max(0.01, Number(livePrice.toFixed(2))));
-                const numberOfContracts = Math.max(1, Math.floor(totalInvestment / executionPrice));
+                    ? (market.tradePrices?.buy?.market?.[0] ?? market.prices?.[0] ?? 0.52)
+                    : (market.tradePrices?.buy?.market?.[1] ?? market.prices?.[1] ?? 0.52);
+                const executionPrice = Math.min(0.999, Math.max(0.001, Number(livePrice.toFixed(3))));
+                // OrderBuilder.calculateGTCAmountsTickAligned supports fractional shares down to 0.001 (sharesStep = 1000)
+                const numberOfContracts = Math.max(0.001, Math.floor((totalInvestment / executionPrice) * 1000) / 1000);
 
                 if (tokenId) {
-                    const signedOrder = await this.orderClient.createOrder({
-                        marketSlug: CONFIG.LIMITLESS_MARKET_SLUG,
-                        tokenId: String(tokenId),
-                        side: Side.BUY,
-                        orderType: OrderType.GTC,
-                        price: executionPrice, // GTC Order without max Entry price cap
-                        size: numberOfContracts
-                    });
-                    console.log(\`✅ GTC Order Executed (\${outcome})! ID: \${signedOrder.id} | \${numberOfContracts} contracts @ $\${executionPrice}\`);
+                    try {
+                        const signedOrder = await this.orderClient.createOrder({
+                            marketSlug: market.slug || resolvedSlug,
+                            tokenId: String(tokenId),
+                            side: Side.BUY,
+                            orderType: OrderType.GTC,
+                            price: executionPrice, // GTC Order without max Entry price cap
+                            size: numberOfContracts
+                        });
+                        console.log(\`✅ GTC Fractional Order Executed (\${outcome})! ID: \${signedOrder.id} | \${numberOfContracts} contracts @ $\${executionPrice}\`);
+                    } catch (gtcErr) {
+                        const fokOrder = await this.orderClient.createOrder({
+                            marketSlug: market.slug || resolvedSlug,
+                            tokenId: String(tokenId),
+                            side: Side.BUY,
+                            orderType: OrderType.FOK,
+                            makerAmount: Math.max(0.01, Number(totalInvestment.toFixed(2)))
+                        });
+                        console.log(\`✅ FOK Order Executed (\${outcome})! ID: \${fokOrder.id} | Budget: $\${totalInvestment.toFixed(2)}\`);
+                    }
                     return;
                 }
             }

@@ -129,6 +129,34 @@ function broadcastSse(eventType, payload) {
 async function fetchLive15MinBtcMarket() {
   try {
     const now = Date.now();
+
+    // 1. Deterministic 15-minute window slug lookup first (instant & immune to pagination limits on /markets/active)
+    const currentSlotSec = Math.floor(now / 900000) * 900;
+    const candidateSlugs = [
+      `btc-up-or-down-15-min-${currentSlotSec}`,
+      `btc-up-or-down-15-min-${currentSlotSec + 900}`,
+      `btc-up-or-down-15-min-${currentSlotSec - 900}`,
+    ];
+    for (const candidateSlug of candidateSlugs) {
+      try {
+        const directRes = await fetch(`https://api.limitless.exchange/markets/${candidateSlug}`);
+        if (directRes.ok) {
+          const m = await directRes.json();
+          if (
+            m &&
+            is15MinBtcMarket(m) &&
+            (!m.status || m.status === 'FUNDED') &&
+            (!m.expirationTimestamp || Number(m.expirationTimestamp) > now)
+          ) {
+            return m;
+          }
+        }
+      } catch {
+        // continue
+      }
+    }
+
+    // 2. Fallback to /markets/active list
     const response = await fetch('https://api.limitless.exchange/markets/active');
     if (response.ok) {
       const json = await response.json();
@@ -145,26 +173,6 @@ async function fetchLive15MinBtcMarket() {
 
       if (valid15mMkts[0]) {
         return valid15mMkts[0];
-      }
-    }
-
-    // Deterministic 15-minute window slug fallback (current & next 15m slot)
-    const currentSlotSec = Math.floor(now / 900000) * 900;
-    const candidateSlugs = [
-      `btc-up-or-down-15-min-${currentSlotSec}`,
-      `btc-up-or-down-15-min-${currentSlotSec + 900}`,
-    ];
-    for (const candidateSlug of candidateSlugs) {
-      try {
-        const directRes = await fetch(`https://api.limitless.exchange/markets/${candidateSlug}`);
-        if (directRes.ok) {
-          const m = await directRes.json();
-          if (m && is15MinBtcMarket(m) && (!m.expirationTimestamp || Number(m.expirationTimestamp) > now)) {
-            return m;
-          }
-        }
-      } catch {
-        // continue
       }
     }
 
@@ -742,39 +750,48 @@ app.get('/api/limitless/orderbook', async (req, res) => {
   }
 });
 
-// Dedicated EIP-712 Order Execution Endpoint according to Limitless specification
-app.post('/api/limitless/order', async (req, res) => {
-  // 1. Concurrency In-Flight Mutex (Immediate 0.1ms rejection of parallel calls)
+// Core Server-Side Order Execution Helper (Used by REST API & Autonomous Server 1m Closed-Candle Engine)
+async function executeLimitlessOrderOnServer(params = {}) {
   if (isServerExecutingOrder) {
     console.warn('[VM SHIELD BLOCKED] Concurrent order already in-flight.');
-    return res.status(429).json({
-      success: false,
-      mode: 'IN_FLIGHT_LOCKED',
-      error: 'يوجد أمر شراء قيد التنفيذ والتوقيع حالياً على السيرفر. تم حظر الأمر المزدوج.',
-    });
+    return {
+      httpStatus: 429,
+      body: {
+        success: false,
+        mode: 'IN_FLIGHT_LOCKED',
+        error: 'يوجد أمر شراء قيد التنفيذ والتوقيع حالياً على السيرفر. تم حظر الأمر المزدوج.',
+      },
+    };
   }
-
-  // Contract lock check removed per user request: unrestricted trading on valid signals
-  // (In-flight mutex above remains to prevent concurrent double-clicks)
 
   isServerExecutingOrder = true;
 
   try {
-    const { market, direction, outcome, type, price, size, chunkId, privateKey, tokenId: bodyTokenId, secret: bodySecret } = req.body || {};
+    const {
+      market,
+      direction,
+      outcome,
+      type,
+      price,
+      size,
+      chunkId,
+      candleTime,
+      privateKey,
+      tokenId: bodyTokenId,
+      secret: bodySecret,
+    } = params || {};
+
     const pk = (privateKey || process.env.PRIVATE_KEY || '').trim();
     const tokenId = (bodyTokenId || process.env.LMTS_TOKEN_ID || '').trim();
     const secret = (bodySecret || process.env.LMTS_TOKEN_SECRET || process.env['.MTS_TOKEN_SECRET'] || '').trim();
 
-    // Check if live credentials are provided for on-chain EIP-712 signing
     const hasLiveAuth = Boolean(pk && tokenId && secret);
 
-    // Fetch market data to obtain token IDs and venue contract address
     let activeMarketSlug = market || 'btc-up-or-down-15-min';
     let marketData = null;
 
-    // Check if market exists, and verify it has not expired or resolved
     let isExpiredOrResolved = false;
-    if (activeMarketSlug && is15MinBtcMarket({ slug: activeMarketSlug })) {
+    if (activeMarketSlug && activeMarketSlug !== 'btc-up-or-down-15-min' && is15MinBtcMarket({ slug: activeMarketSlug })) {
       try {
         const mRes = await fetch(`https://api.limitless.exchange/markets/${encodeURIComponent(activeMarketSlug)}`);
         if (mRes.ok) {
@@ -806,69 +823,97 @@ app.post('/api/limitless/order', async (req, res) => {
     }
 
     if (!marketData || !is15MinBtcMarket(marketData)) {
-      return res.status(400).json({
-        success: false,
-        error: `Safety Guard Blocked: No active, unexpired 15-minute BTC market was found on Limitless Exchange. Order aborted.`,
-      });
+      return {
+        httpStatus: 400,
+        body: {
+          success: false,
+          error: `Safety Guard Blocked: No active, unexpired 15-minute BTC market was found on Limitless Exchange. Order aborted.`,
+        },
+      };
     }
 
     // Enforce max 1 bet per 15m contract
     const existingGuard = inMemoryTradeGuard || loadTradeGuardFromDisk();
     if (existingGuard && existingGuard.marketSlug === activeMarketSlug) {
-      return res.status(429).json({
-        success: false,
-        mode: 'CONTRACT_LOCKED',
-        error: `🔒 تم بالفعل تنفيذ صفقة على عقد الـ 15 دقيقة الحالي (${activeMarketSlug}). ينتظر الروبوت بدء عقد الـ 15 دقيقة القادم.`,
-      });
+      return {
+        httpStatus: 429,
+        body: {
+          success: false,
+          mode: 'CONTRACT_LOCKED',
+          error: `🔒 تم بالفعل تنفيذ صفقة على عقد الـ 15 دقيقة الحالي (${activeMarketSlug}). ينتظر الروبوت بدء عقد الـ 15 دقيقة القادم.`,
+        },
+      };
     }
 
-    // Ensure marketData has tokens and venue
-    if (!marketData?.tokens?.yes || !marketData?.tokens?.no || !marketData?.venue?.exchange) {
-      try {
-        const mFullRes = await fetch(`https://api.limitless.exchange/markets/${encodeURIComponent(activeMarketSlug)}`);
-        if (mFullRes.ok) {
-          const mFull = await mFullRes.json();
-          marketData = { ...marketData, ...mFull };
-        }
-      } catch {
-        // Safe continuation
+    // Always fetch full fresh market details + live CLOB orderbook so tokens, venue, and live Best Ask are 100% accurate
+    let liveOb = null;
+    try {
+      const [mFullRes, obRes] = await Promise.all([
+        fetch(`https://api.limitless.exchange/markets/${encodeURIComponent(activeMarketSlug)}`),
+        fetch(`https://api.limitless.exchange/markets/${encodeURIComponent(activeMarketSlug)}/orderbook`),
+      ]);
+      if (mFullRes.ok) {
+        const mFull = await mFullRes.json();
+        marketData = { ...marketData, ...mFull };
       }
+      if (obRes.ok) {
+        liveOb = await obRes.json();
+      }
+    } catch {
+      // Safe continuation
     }
 
-    const venueExchange = marketData?.venue?.exchange || '0x05c748E2f4DcDe0ec9Fa8DDc40DE6b867f923fa5';
     const isLong = direction === 'LONG' || outcome === 'UP';
     const targetTokenId = isLong ? marketData?.tokens?.yes : marketData?.tokens?.no;
 
     if (!targetTokenId) {
-      return res.status(400).json({
-        success: false,
-        error: `Token ID for outcome ${outcome} could not be resolved for market '${activeMarketSlug}'. Order cancelled.`,
-      });
-    }
-
-    // Require live credentials for on-chain execution - do not silently fake execution!
-    if (!hasLiveAuth) {
-      return res.status(400).json({
-        success: false,
-        mode: 'MISSING_CREDENTIALS',
-        error: 'تعذر تنفيذ الصفقة: المفتاح الخاص PRIVATE_KEY أو توثيق HMAC (LMTS_TOKEN_ID و LMTS_TOKEN_SECRET) غير موجود في ملف .env في الخادم! يرجى إدخال هذه المفاتيح في ملف .env في الخادم ليتم توقيع وإرسال الصفقات الحية مباشرة إلى Limitless.',
-        missing: {
-          privateKey: !pk,
-          tokenId: !tokenId,
-          secret: !secret,
+      return {
+        httpStatus: 400,
+        body: {
+          success: false,
+          error: `Token ID for outcome ${outcome} could not be resolved for market '${activeMarketSlug}'. Order cancelled.`,
         },
-      });
+      };
     }
 
-    // Extract live market ask price for this outcome (GTC Order without max Entry price)
+    if (!hasLiveAuth) {
+      return {
+        httpStatus: 400,
+        body: {
+          success: false,
+          mode: 'MISSING_CREDENTIALS',
+          error: 'تعذر تنفيذ الصفقة: المفتاح الخاص PRIVATE_KEY أو توثيق HMAC (LMTS_TOKEN_ID و LMTS_TOKEN_SECRET) غير موجود في ملف .env في الخادم! يرجى إدخال هذه المفاتيح في ملف .env في الخادم ليتم توقيع وإرسال الصفقات الحية مباشرة إلى Limitless.',
+          missing: {
+            privateKey: !pk,
+            tokenId: !tokenId,
+            secret: !secret,
+          },
+        },
+      };
+    }
+
+    // Resolve true live market Best Ask price for this outcome (GTC Order without max Entry price)
+    // Note: In Limitless CLOB, orderbook asks[0].price is the Best Ask for YES, and (1 - bids[0].price) is the Best Ask for NO
+    const obYesAsk =
+      liveOb?.asks?.[0]?.price && Number(liveOb.asks[0].price) > 0 && Number(liveOb.asks[0].price) < 1
+        ? Number(liveOb.asks[0].price)
+        : null;
+    const obNoAsk =
+      liveOb?.bids?.[0]?.price && Number(liveOb.bids[0].price) > 0 && Number(liveOb.bids[0].price) < 1
+        ? parseFloat((1 - Number(liveOb.bids[0].price)).toFixed(3))
+        : null;
+
     const marketAsk = isLong
-      ? (marketData?.tradePrices?.buy?.market?.[0] ?? marketData?.prices?.[0] ?? 0.50)
-      : (marketData?.tradePrices?.buy?.market?.[1] ?? marketData?.prices?.[1] ?? 0.50);
+      ? (marketData?.tradePrices?.buy?.market?.[0] ?? obYesAsk ?? marketData?.prices?.[0] ?? 0.52)
+      : (marketData?.tradePrices?.buy?.market?.[1] ?? obNoAsk ?? marketData?.prices?.[1] ?? 0.52);
 
-    let inputPrice = Number(price) > 1 ? Number(price) / 100 : (Number(price) || marketAsk);
-    if (!inputPrice || inputPrice >= 0.99) {
-      inputPrice = marketAsk;
-    }
+    // Always prefer the live marketAsk over a default 0.50 or 0.99 placeholder from the client
+    const numericClientPrice = Number(price) > 1 ? Number(price) / 100 : Number(price);
+    const inputPrice =
+      !numericClientPrice || numericClientPrice >= 0.99 || Math.abs(numericClientPrice - 0.5) < 0.001
+        ? marketAsk
+        : marketAsk || numericClientPrice;
+
     // Price must have max 3 decimal places for Limitless SDK tick alignment (0.001)
     const tickAlignedPrice = Math.max(0.001, Math.min(0.999, parseFloat(Number(inputPrice).toFixed(3))));
 
@@ -878,29 +923,30 @@ app.post('/api/limitless/order', async (req, res) => {
     const formattedPk = pk.startsWith('0x') ? pk : `0x${pk}`;
     const wallet = new ethers.Wallet(formattedPk);
 
-    // Support fractional contract sizes (floored to 2 decimals) natively supported by Limitless OrderBuilder
-    let rawSize = parseFloat(Number(size || 1).toFixed(2));
+    // In @limitless-exchange/sdk OrderBuilder.calculateGTCAmountsTickAligned:
+    // sharesScale = 1e6, priceScale = 1e6, priceTick = 0.001 (tickInt = 1000) => sharesStep = 1000 (0.001 contracts).
+    // Fractional contracts down to 0.001 (3 decimal places, e.g. 0.54 or 0.542 contracts) are natively supported in GTC!
+    let rawSize = parseFloat(Number(size || 1).toFixed(3));
     if (isNaN(rawSize) || rawSize <= 0) rawSize = 1;
 
-    // Server-Side Fixed 4% Maximum Risk Shield: Enforce hard 4% dollar ceiling per 15m contract based on live on-chain balance
+    // Server-Side Fixed 4% Maximum Risk Shield: Enforce hard 4% dollar sizing per 15m contract based on live on-chain balance
+    let fixed4PctUsdBudget = Number((rawSize * tickAlignedPrice).toFixed(2));
     try {
       const liveBal = await fetchLiveWalletAndBalance(wallet.address);
       if (liveBal && liveBal.usdcBalance > 0) {
         const maxRiskBudgetUsd = liveBal.usdcBalance * 0.04;
-        const requestedOrderCost = rawSize * tickAlignedPrice;
-        if (requestedOrderCost > maxRiskBudgetUsd) {
-          const maxAllowedContracts = Math.floor((maxRiskBudgetUsd / tickAlignedPrice) * 100) / 100;
-          console.warn(
-            `[SERVER RISK SHIELD] Requested order cost $${requestedOrderCost.toFixed(2)} exceeds Fixed 4% of bankroll ($${maxRiskBudgetUsd.toFixed(2)}). Strictly capping contracts from ${rawSize} to ${maxAllowedContracts}.`
-          );
-          rawSize = Math.max(0.01, maxAllowedContracts);
+        fixed4PctUsdBudget = Math.max(0.01, parseFloat(maxRiskBudgetUsd.toFixed(2)));
+        // Calculate exact fractional contracts up to 3 decimal places (0.001 step = sharesStep 1000)
+        const maxAllowedContracts = Math.max(0.001, Math.floor((maxRiskBudgetUsd / tickAlignedPrice) * 1000) / 1000);
+        if (!size || rawSize * tickAlignedPrice > maxRiskBudgetUsd * 1.02) {
+          rawSize = maxAllowedContracts;
         }
       }
     } catch {
       // safe continuation
     }
 
-    const contractCount = rawSize;
+    const contractCount = parseFloat(rawSize.toFixed(3));
 
     const httpClient = new sdk.HttpClient({
       baseURL: sdk.DEFAULT_API_URL,
@@ -920,21 +966,17 @@ app.post('/api/limitless/order', async (req, res) => {
       // Safe continuation if already in eoa mode
     }
 
-    // Initialize official OrderClient with wallet and HMAC HttpClient
     const orderClient = new sdk.OrderClient({
       httpClient,
       wallet,
       logger: new sdk.ConsoleLogger(),
     });
 
-    const resolvedType = (type || 'GTC').toUpperCase();
-    const orderTypeEnum = resolvedType === 'FAK'
-      ? sdk.OrderType.FAK
-      : resolvedType === 'FOK'
-      ? sdk.OrderType.FOK
-      : sdk.OrderType.GTC;
+    const orderTypeEnum = sdk.OrderType.GTC;
+    const executedOrderType = 'GTC';
 
-    const orderArgs = {
+    // Execute strictly GTC fractional order at live Best Ask without max entry price (no FOK/FAK fallback)
+    const gtcOrderArgs = {
       marketSlug: activeMarketSlug,
       tokenId: String(targetTokenId),
       side: sdk.Side.BUY,
@@ -943,62 +985,192 @@ app.post('/api/limitless/order', async (req, res) => {
       size: contractCount,
     };
 
-    if (orderTypeEnum === sdk.OrderType.FOK) {
-      orderArgs.makerAmount = Math.max(0.1, Number((contractCount * tickAlignedPrice).toFixed(2)));
-      delete orderArgs.price;
-      delete orderArgs.size;
-    }
+    console.log(`[Limitless LIVE ORDER] Sending GTC fractional order via SDK...`, {
+      account: wallet.address,
+      slug: activeMarketSlug,
+      outcome: isLong ? 'UP' : 'DOWN',
+      type: orderTypeEnum,
+      price: tickAlignedPrice,
+      contracts: contractCount,
+      budgetUsd: fixed4PctUsdBudget,
+    });
 
-    console.log(`[Limitless LIVE ORDER] Sending order via SDK...`, {
-            account: wallet.address,
-            slug: activeMarketSlug,
-            outcome: isLong ? 'UP' : 'DOWN',
-            type: orderTypeEnum,
-            price: tickAlignedPrice,
-            contracts: contractCount,
-          });
+    const result = await orderClient.createOrder(gtcOrderArgs);
 
-          const result = await orderClient.createOrder(orderArgs);
+    console.log(`[EIP-712 LIVE ORDER] GTC order submitted successfully! ID: ${result?.id || result?.order?.id || 'OK'}`);
 
-          console.log(`[EIP-712 LIVE ORDER] Order submitted successfully! ID: ${result?.id || 'OK'}`);
+    const orderIdResolved = result?.id || result?.order?.id || `ord_${Date.now()}`;
+    const guardRecord = {
+      marketSlug: activeMarketSlug,
+      candleTime: candleTime || Date.now(),
+      timestamp: Date.now(),
+      direction: isLong ? 'LONG' : 'SHORT',
+      outcome: isLong ? 'UP' : 'DOWN',
+      price: tickAlignedPrice,
+      size: contractCount,
+      orderId: orderIdResolved,
+      orderType: executedOrderType,
+    };
+    persistTradeGuard(guardRecord);
+    broadcastSse('tradeGuardUpdate', guardRecord);
 
-          // Automatically persist execution to VM RAM & disk (trade-guard.json)
-          const orderIdResolved = result?.id || result?.order?.id || `ord_${Date.now()}`;
-          const guardRecord = {
-            marketSlug: activeMarketSlug,
-            candleTime: req.body?.candleTime || Date.now(),
-            timestamp: Date.now(),
-            direction: isLong ? 'LONG' : 'SHORT',
-            outcome: isLong ? 'UP' : 'DOWN',
-            price: tickAlignedPrice,
-            size: contractCount,
-            orderId: orderIdResolved,
-          };
-          persistTradeGuard(guardRecord);
-          broadcastSse('tradeGuardUpdate', guardRecord);
-
-          return res.json({
-            success: true,
-            mode: 'LIVE_EIP712_EXECUTED',
-            orderId: orderIdResolved,
-            marketSlug: activeMarketSlug,
-            direction: isLong ? 'LONG' : 'SHORT',
-            outcome: isLong ? 'UP' : 'DOWN',
-            tokenId: targetTokenId,
-            price: tickAlignedPrice,
-            size: contractCount,
-            chunkId,
-            details: result,
-            guard: guardRecord,
-          });
+    return {
+      httpStatus: 200,
+      body: {
+        success: true,
+        mode: 'LIVE_EIP712_EXECUTED',
+        orderId: orderIdResolved,
+        orderType: executedOrderType,
+        marketSlug: activeMarketSlug,
+        direction: isLong ? 'LONG' : 'SHORT',
+        outcome: isLong ? 'UP' : 'DOWN',
+        tokenId: targetTokenId,
+        price: tickAlignedPrice,
+        size: contractCount,
+        chunkId,
+        details: result,
+        guard: guardRecord,
+      },
+    };
   } catch (err) {
     const errorDetail = err?.response?.data?.message || err?.response?.data?.error || err?.message || String(err);
     console.warn('[EIP-712 ORDER NOTICE]', errorDetail);
-    res.status(500).json({ success: false, error: errorDetail });
+    return {
+      httpStatus: 500,
+      body: { success: false, error: errorDetail },
+    };
   } finally {
     isServerExecutingOrder = false;
   }
+}
+
+// Dedicated EIP-712 Order Execution Endpoint according to Limitless specification
+app.post('/api/limitless/order', async (req, res) => {
+  const outcomeResult = await executeLimitlessOrderOnServer(req.body || {});
+  return res.status(outcomeResult.httpStatus).json(outcomeResult.body);
 });
+
+// ============================================================================
+// Autonomous Server-Side 1m Closed-Candle Z-Score Engine (45 Candles, 2.5 -> 2.3)
+// Guarantees trades execute 24/7 on the VM even if the browser tab is throttled or closed
+// ============================================================================
+let serverLastEvaluatedClosedCandleTime = 0;
+
+function computeServerRollingZScore(windowPrices) {
+  const n = windowPrices.length;
+  if (n === 0) return 0;
+  const mean = windowPrices.reduce((acc, val) => acc + val, 0) / n;
+  const variance = windowPrices.reduce((acc, val) => acc + Math.pow(val - mean, 2), 0) / n;
+  const stdDev = Math.sqrt(variance);
+  const currentPrice = windowPrices[n - 1];
+  return stdDev > 0 ? (currentPrice - mean) / stdDev : 0;
+}
+
+async function pollServerClosedCandlesStrategy() {
+  try {
+    const pk = (process.env.PRIVATE_KEY || '').trim();
+    const tokenId = (process.env.LMTS_TOKEN_ID || '').trim();
+    const secret = (process.env.LMTS_TOKEN_SECRET || process.env['.MTS_TOKEN_SECRET'] || '').trim();
+    if (!pk || !tokenId || !secret) return;
+
+    const klinesRes = await fetch('https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=100');
+    if (!klinesRes.ok) return;
+    const rawKlines = await klinesRes.json();
+    if (!Array.isArray(rawKlines) || rawKlines.length < 46) return;
+
+    const now = Date.now();
+    // Filter strictly to confirmed closed 1m candles (closeTime <= now)
+    const closedKlines = rawKlines.filter((k, idx) => {
+      const closeTime = Number(k[6]) || 0;
+      return closeTime > 0 ? closeTime <= now : idx < rawKlines.length - 1;
+    });
+
+    if (closedKlines.length < 45) return;
+
+    const closes = closedKlines.map((k) => parseFloat(k[4]));
+    const times = closedKlines.map((k) => Number(k[0]));
+
+    let hadArmedUpper = false;
+    let hadArmedLower = false;
+    let latestSignal = null;
+    let latestZ = 0;
+    const latestClosedTime = times[times.length - 1];
+
+    for (let i = 44; i < closes.length; i++) {
+      const windowSlice = closes.slice(i - 44, i + 1);
+      const z = computeServerRollingZScore(windowSlice);
+      latestZ = z;
+      let sig = null;
+
+      // Short (DOWN): First confirmation >= +2.5, Second confirmation <= +2.3
+      if (z >= 2.5) {
+        hadArmedUpper = true;
+        sig = 'ARMED_UPPER';
+      } else if (hadArmedUpper && z <= 2.3 && z > 0) {
+        hadArmedUpper = false;
+        sig = 'ENTRY_SHORT';
+      } else if (z <= 0) {
+        hadArmedUpper = false;
+      }
+
+      // Long (UP): First confirmation <= -2.5, Second confirmation >= -2.3
+      if (z <= -2.5) {
+        hadArmedLower = true;
+        sig = 'ARMED_LOWER';
+      } else if (hadArmedLower && z >= -2.3 && z < 0) {
+        hadArmedLower = false;
+        sig = 'ENTRY_LONG';
+      } else if (z >= 0) {
+        hadArmedLower = false;
+      }
+
+      if (i === closes.length - 1) {
+        latestSignal = sig;
+      }
+    }
+
+    if (serverLastEvaluatedClosedCandleTime === 0) {
+      serverLastEvaluatedClosedCandleTime = latestClosedTime;
+      return;
+    }
+
+    if (latestClosedTime > serverLastEvaluatedClosedCandleTime) {
+      serverLastEvaluatedClosedCandleTime = latestClosedTime;
+
+      if (latestSignal === 'ENTRY_SHORT' || latestSignal === 'ENTRY_LONG') {
+        const direction = latestSignal === 'ENTRY_LONG' ? 'LONG' : 'SHORT';
+        const outcome = direction === 'LONG' ? 'UP' : 'DOWN';
+        console.log(
+          `[VM AUTONOMOUS 1m ENGINE] Closed candle (${new Date(latestClosedTime).toISOString()}) confirmed ${latestSignal} at Z=${latestZ.toFixed(2)}σ! Waiting 2.5s grace window before autonomous server execution...`
+        );
+
+        // Give frontend browser 2.5s to fire first if open; if not locked/in-flight, execute on VM server
+        setTimeout(async () => {
+          if (isServerExecutingOrder) return;
+          const liveMkt = cachedActiveBtc || (await fetchLive15MinBtcMarket());
+          const guard = inMemoryTradeGuard || loadTradeGuardFromDisk();
+          if (guard && liveMkt?.slug && guard.marketSlug === liveMkt.slug) {
+            return; // Already executed by frontend or previous trigger
+          }
+          console.log(`[VM AUTONOMOUS 1m ENGINE] Executing ${direction} (${outcome}) order directly from server...`);
+          await executeLimitlessOrderOnServer({
+            market: liveMkt?.slug || 'btc-up-or-down-15-min',
+            direction,
+            outcome,
+            type: 'GTC',
+            price: 0.99,
+            candleTime: latestClosedTime,
+          });
+        }, 2500);
+      }
+    }
+  } catch {
+    // safe continuation
+  }
+}
+
+setInterval(pollServerClosedCandlesStrategy, 8000);
+pollServerClosedCandlesStrategy();
 
 // General Limitless API proxy to avoid CORS and browser restrictions
 app.all('/api/limitless/*', async (req, res) => {

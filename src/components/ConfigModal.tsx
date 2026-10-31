@@ -421,17 +421,14 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block text-slate-400 mb-1">
-                  {isAr ? 'نوع الأمر (Order Type)' : 'Order Type'}
+                  {isAr ? 'نوع الأمر المعتمد (GTC فقط)' : 'Order Type (GTC Only)'}
                 </label>
                 <select
-                  value={draft.orderType}
-                  onChange={(e) => setDraft({ ...draft, orderType: e.target.value as any })}
+                  value="GTC"
+                  onChange={() => setDraft({ ...draft, orderType: 'GTC' })}
                   className="w-full bg-slate-950 border border-emerald-600/60 rounded-lg px-3 py-2 text-emerald-300 font-mono font-bold"
                 >
-                  <option value="GTC">GTC (Good-Til-Cancelled)</option>
-                  <option value="FAK">FAK (Fill-And-Kill)</option>
-                  <option value="IOC">IOC (Immediate-Or-Cancel)</option>
-                  <option value="FOK">FOK (Fill-Or-Kill)</option>
+                  <option value="GTC">GTC (Good-Til-Cancelled Only)</option>
                 </select>
               </div>
 
