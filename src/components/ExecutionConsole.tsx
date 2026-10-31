@@ -234,8 +234,8 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
                     <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
                     <span>
                       {isAr
-                        ? 'تنفيذ مباشر للأمر كاملاً دفعة واحدة بنوع GTC دون أي تجزئة (سقف أمان المحفظة 10% كحد أقصى)'
-                        : 'Direct execution for full order via GTC with 10% max risk safety cap (No chunking)'}
+                        ? 'تنفيذ مباشر للأمر كاملاً دفعة واحدة بنوع GTC دون سقف سعر دخول (حجم ثابت 4% لكل عقد 15 دقيقة)'
+                        : 'Direct execution for full order via GTC without max entry price (Fixed 4% per 15m contract)'}
                     </span>
                   </div>
                   {activeTrade && (

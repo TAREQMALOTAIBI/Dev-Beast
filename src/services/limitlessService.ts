@@ -446,8 +446,9 @@ export class LimitlessService {
           const match = json.data.find(
             (m: { slug?: string; title?: string }) =>
               (m.slug?.toLowerCase().includes('btc') || m.title?.toLowerCase().includes('btc')) &&
-              (/(^|[^0-9])15-min/i.test(m.slug || '') || /15\s*min/i.test(m.title || '') || /(^|[^0-9])15m/i.test(m.slug || '')) &&
+              (/(^|[^0-9])15-min/i.test(m.slug || '') || /(^|[^0-9])15\s*min/i.test(m.title || '') || /(^|[^0-9])15m/i.test(m.slug || '')) &&
               !/(^|[^0-9])5-min/i.test(m.slug || '') &&
+              !/(^|[^0-9])5\s*min/i.test(m.title || '') &&
               !/hourly/i.test(m.slug || '') &&
               !/(^|[^0-9])1-hour/i.test(m.slug || '')
           );
@@ -630,7 +631,7 @@ export class LimitlessService {
       onChunkUpdate({ ...chunkState });
       soundController.playChunkExecuted(0);
       console.log(
-        `🚀 Live Direct Order transmitted to Limitless: ${contractsToBuy} contracts @ $${priceCents} (${orderType}) [10% Max Risk - No Chunking]`
+        `🚀 Live Direct Order transmitted to Limitless: ${contractsToBuy} contracts @ $${priceCents} (${orderType}) [Fixed 4% per 15m Contract - GTC No Max Price]`
       );
     } catch (err: any) {
       chunkState.status = 'FAILED';

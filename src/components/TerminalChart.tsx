@@ -73,9 +73,9 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
     return padding.left + idx * step + step / 2;
   };
 
-  // Z-Score scale (-3.0 to +3.0)
-  const zMin = -3.0;
-  const zMax = 3.0;
+  // Z-Score scale (-3.2 to +3.2)
+  const zMin = -3.2;
+  const zMax = 3.2;
   const zY = (val: number) => {
     const clamped = Math.max(zMin, Math.min(zMax, val));
     return zScoreHeight - 20 - ((clamped - zMin) / (zMax - zMin)) * (zScoreHeight - 35);
@@ -182,7 +182,7 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
           </div>
           <span className="text-slate-600">·</span>
           <span className="text-emerald-400 text-[11px] font-medium hidden sm:inline">
-            → إشارات التداول الفورية لعقد Limitless (1 Hour)
+            → إشارات التداول الفورية لعقد Limitless (15 Min)
           </span>
           <span className="text-slate-600 hidden sm:inline">·</span>
           <div className="text-slate-400">
