@@ -261,8 +261,9 @@ export function useTradingBot() {
 
     for (let i = 0; i < candleList.length; i++) {
       const isClosedCandle = candleList[i].isClosed !== false;
+      const hasFullWindow = i >= cfg.periods - 1;
 
-      if (i < cfg.periods - 1) {
+      if (i === 0) {
         const emptyMetric: ZScoreMetric = {
           time: candleList[i].time,
           price: candleList[i].close,
@@ -286,14 +287,15 @@ export function useTradingBot() {
         continue;
       }
 
-      const windowSlice = closes.slice(i - cfg.periods + 1, i + 1);
+      const windowStart = Math.max(0, i - cfg.periods + 1);
+      const windowSlice = closes.slice(windowStart, i + 1);
       const stats = calculateZScore(windowSlice, cfg.zScoreUpper, cfg.zScoreEntry, lowerThresh, lowerEntryThresh);
 
       let signal: 'ARMED_UPPER' | 'ARMED_LOWER' | 'ENTRY_SHORT' | 'ENTRY_LONG' | 'ARMED' | 'ENTRY' | null = null;
       let dir: 'SHORT' | 'LONG' | null = null;
 
-      // Strictly advance confirmation state machine ONLY on confirmed closed candles
-      if (isClosedCandle) {
+      // Strictly advance confirmation state machine ONLY on confirmed closed candles with full 45-candle window
+      if (isClosedCandle && hasFullWindow) {
         // Upper Direction (Short / DOWN): First confirmation >= 2.5, Second confirmation <= 2.3
         if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'SHORT_ONLY') {
           if (stats.zScore >= cfg.zScoreUpper) {
@@ -898,15 +900,16 @@ export function useTradingBot() {
   const rebuildMetricsRef = useRef(rebuildMetrics);
   rebuildMetricsRef.current = rebuildMetrics;
 
-  // Load real Binance Historical Data (45 candles of 1m) & Live WebSocket (1m)
+  // Load real Binance Historical Data (100 candles lookback so all 45 displayed 1m candles have a full 45-period rolling window) & Live WebSocket (1m)
   useEffect(() => {
     let isCancelled = false;
 
     async function initMarketData() {
+      const lookbackBufferSize = Math.max(config.periods * 2 + 10, 100);
       const realCandles = await binanceService.fetchHistoricalCandles(
         config.symbol,
         config.timeframe,
-        config.periods,
+        lookbackBufferSize,
         config.binanceRestUrl
       );
 
@@ -931,16 +934,17 @@ export function useTradingBot() {
         config.timeframe,
         (tickCandle, isClosed) => {
           let updatedCandles: CandleData[] = [];
+          const maxBufferSize = Math.max(configRef.current.periods * 2 + 10, 100);
           setCandles((prev) => {
             const last = prev[prev.length - 1];
             if (last && last.time === tickCandle.time) {
               updatedCandles = [...prev.slice(0, -1), tickCandle];
             } else {
-              // Mark previous candle as closed when a new candle begins, keep 45 closed + 1 forming
+              // Mark previous candle as closed when a new candle begins, retain full lookback buffer so all 45 visible chart candles have complete 45-period bands
               const prevWithClosed = prev.map((c, idx) =>
                 idx === prev.length - 1 ? { ...c, isClosed: true } : c
               );
-              updatedCandles = [...prevWithClosed.slice(-configRef.current.periods), tickCandle];
+              updatedCandles = [...prevWithClosed.slice(-maxBufferSize), tickCandle];
             }
             return updatedCandles;
           });
