@@ -980,12 +980,7 @@ function setupApiMiddlewares(middlewares: any) {
           logger: new sdk.ConsoleLogger(),
         });
 
-        const resolvedType = (type || 'GTC').toUpperCase();
-        const orderTypeEnum = resolvedType === 'FAK'
-          ? sdk.OrderType.FAK
-          : resolvedType === 'FOK'
-          ? sdk.OrderType.FOK
-          : sdk.OrderType.GTC;
+        const orderTypeEnum = sdk.OrderType.GTC;
 
         const orderArgs: any = {
           marketSlug: activeMarketSlug,
@@ -995,12 +990,6 @@ function setupApiMiddlewares(middlewares: any) {
           price: tickAlignedPrice,
           size: contractCount,
         };
-
-        if (orderTypeEnum === sdk.OrderType.FOK) {
-          orderArgs.makerAmount = Math.max(0.1, Number((contractCount * tickAlignedPrice).toFixed(2)));
-          delete orderArgs.price;
-          delete orderArgs.size;
-        }
 
         console.log(`[Limitless LIVE ORDER] Sending order via SDK...`, {
           account: wallet.address,

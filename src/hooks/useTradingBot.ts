@@ -23,9 +23,9 @@ const DEFAULT_CONFIG: BotConfig = {
   zScoreEntry: 2.3, // Second confirmation: +2.3
   zScoreLower: -2.5, // First confirmation: -2.5
   zScoreLowerEntry: -2.3, // Second confirmation: -2.3
-  maxPriceCents: 0.99, // FAK Order without max Entry price
+  maxPriceCents: 0.99, // GTC Order without max Entry price
   maxRiskPercent: 0.04, // Fixed 4% of bankroll per 15m contract
-  orderType: 'FAK', // Fill-And-Kill
+  orderType: 'GTC', // Good-Til-Cancelled
   fractionChunks: 1, // 1 unified single direct order
   chunkDelayMs: 0,
   winProbability: 0.55,
@@ -76,8 +76,8 @@ export function useTradingBot() {
         parsed.zScoreEntry = 2.3;
         parsed.zScoreLower = -2.5;
         parsed.zScoreLowerEntry = -2.3;
-        // Enforce FAK Order without max Entry price
-        parsed.orderType = 'FAK';
+        // Enforce GTC Order without max Entry price
+        parsed.orderType = 'GTC';
         parsed.maxPriceCents = 0.99;
         parsed.fractionChunks = 1;
         parsed.chunkDelayMs = 0;
@@ -409,7 +409,7 @@ export function useTradingBot() {
               action: 'START_BOT',
             });
           } else if (!isExecutingRef.current) {
-            const trigMsg = `🎯 [تحقق التأكيد الثاني ≤ +${cfg.zScoreEntry}σ · شمعة مغلقة] أغلقت شمعة 1m بارتداد Z-Score من فوق +${cfg.zScoreUpper}σ إلى +${targetMetric.zScore.toFixed(2)}σ! جاري إرسال أمر FAK فوري لشراء عقد DOWN (4% من الرصيد).`;
+            const trigMsg = `🎯 [تحقق التأكيد الثاني ≤ +${cfg.zScoreEntry}σ · شمعة مغلقة] أغلقت شمعة 1m بارتداد Z-Score من فوق +${cfg.zScoreUpper}σ إلى +${targetMetric.zScore.toFixed(2)}σ! جاري إرسال أمر GTC فوري لشراء عقد DOWN (4% من الرصيد).`;
             console.log(trigMsg);
             limitlessService.logDirect('SYSTEM', trigMsg);
             executeLiveTradeRef.current(targetMetric.zScore, 'SHORT', targetMetric.time);
@@ -426,7 +426,7 @@ export function useTradingBot() {
               action: 'START_BOT',
             });
           } else if (!isExecutingRef.current) {
-            const trigMsg = `🎯 [تحقق التأكيد الثاني ≥ ${lowerEntryThresh}σ · شمعة مغلقة] أغلقت شمعة 1m بارتداد Z-Score من تحت ${lowerThresh}σ إلى ${targetMetric.zScore.toFixed(2)}σ! جاري إرسال أمر FAK فوري لشراء عقد UP (4% من الرصيد).`;
+            const trigMsg = `🎯 [تحقق التأكيد الثاني ≥ ${lowerEntryThresh}σ · شمعة مغلقة] أغلقت شمعة 1m بارتداد Z-Score من تحت ${lowerThresh}σ إلى ${targetMetric.zScore.toFixed(2)}σ! جاري إرسال أمر GTC فوري لشراء عقد UP (4% من الرصيد).`;
             console.log(trigMsg);
             limitlessService.logDirect('SYSTEM', trigMsg);
             executeLiveTradeRef.current(targetMetric.zScore, 'LONG', targetMetric.time);
@@ -643,12 +643,12 @@ export function useTradingBot() {
 
     try {
       console.log(
-        `[LIVE DIRECT EXECUTION - ${direction}] Sending unified FAK order of ${effectiveContracts} contracts to Limitless (${resolvedMarketSlug} - ${outcome}) @ $${effectiveContractPrice} [Fixed 4% Bankroll - No Max Entry Price]...`
+        `[LIVE DIRECT EXECUTION - ${direction}] Sending unified GTC order of ${effectiveContracts} contracts to Limitless (${resolvedMarketSlug} - ${outcome}) @ $${effectiveContractPrice} [Fixed 4% Bankroll - No Max Entry Price]...`
       );
 
       limitlessService.logDirect(
         'OUTGOING',
-        `🚀 [تنفيذ صفقة FAK مباشرة] إرسال أمر فوري FAK لعدد ${effectiveContracts} عقود ${outcome} (${direction}) بسعر السوق $${effectiveContractPrice} إلى عقد 15m (${resolvedMarketSlug}) بحجم ثابت 4% من الرصيد...`
+        `🚀 [تنفيذ صفقة GTC مباشرة] إرسال أمر فوري GTC لعدد ${effectiveContracts} عقود ${outcome} (${direction}) بسعر السوق $${effectiveContractPrice} إلى عقد 15m (${resolvedMarketSlug}) بحجم ثابت 4% من الرصيد...`
       );
 
       const executed = await limitlessService.executeChunkedOrder(

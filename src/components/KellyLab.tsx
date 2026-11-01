@@ -135,7 +135,7 @@ export const KellyLab: React.FC<KellyLabProps> = ({
               <span>{isAr ? 'نوع الأمر المعتمد' : 'Order Execution'}</span>
             </div>
             <div className="text-xs font-mono text-emerald-300 font-semibold mt-1">
-              {isAr ? 'FAK بدون سقف سعر دخول' : 'FAK Without Max Entry Price'}
+              {isAr ? 'GTC بدون سقف سعر دخول' : 'GTC Without Max Entry Price'}
             </div>
           </div>
         </div>
