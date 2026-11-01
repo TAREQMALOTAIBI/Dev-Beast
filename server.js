@@ -130,22 +130,27 @@ async function fetchLive15MinBtcMarket() {
   try {
     const now = Date.now();
 
-    // 1. Deterministic 15-minute window slug lookup first (instant & immune to pagination limits on /markets/active)
+    // 1. Deterministic 15-minute window slug lookup first:
+    // Strictly select the currently active, FUNDED 15m contract whose 15-minute window has started (openPriceCapturedAt <= now)
+    // and has not expired (expirationTimestamp > now). Never pick a premature future CREATED slot before its start time.
     const currentSlotSec = Math.floor(now / 900000) * 900;
     const candidateSlugs = [
       `btc-up-or-down-15-min-${currentSlotSec}`,
-      `btc-up-or-down-15-min-${currentSlotSec + 900}`,
       `btc-up-or-down-15-min-${currentSlotSec - 900}`,
+      `btc-up-or-down-15-min-${currentSlotSec + 900}`,
     ];
     for (const candidateSlug of candidateSlugs) {
       try {
         const directRes = await fetch(`https://api.limitless.exchange/markets/${candidateSlug}`);
         if (directRes.ok) {
           const m = await directRes.json();
+          const startMs = m?.metadata?.openPriceCapturedAt ? new Date(m.metadata.openPriceCapturedAt).getTime() : 0;
+          const isStarted = !startMs || startMs <= now + 5000;
           if (
             m &&
             is15MinBtcMarket(m) &&
-            (!m.status || m.status === 'FUNDED') &&
+            m.status === 'FUNDED' &&
+            isStarted &&
             (!m.expirationTimestamp || Number(m.expirationTimestamp) > now)
           ) {
             return m;
@@ -161,15 +166,17 @@ async function fetchLive15MinBtcMarket() {
     if (response.ok) {
       const json = await response.json();
       const list = json?.data || [];
-      // Strictly require unexpired 15-minute BTC market (expirationTimestamp > now)
-      const valid15mMkts = list.filter((m) => is15MinBtcMarket(m) && m.expirationTimestamp && Number(m.expirationTimestamp) > now);
+      // Strictly require unexpired FUNDED 15-minute BTC market (expirationTimestamp > now)
+      const valid15mMkts = list.filter(
+        (m) =>
+          is15MinBtcMarket(m) &&
+          m.status === 'FUNDED' &&
+          m.expirationTimestamp &&
+          Number(m.expirationTimestamp) > now
+      );
 
-      // Sort so the currently active (closing soonest, but in the future) or funded market is first
-      valid15mMkts.sort((a, b) => {
-        if (a.status === 'FUNDED' && b.status !== 'FUNDED') return -1;
-        if (b.status === 'FUNDED' && a.status !== 'FUNDED') return 1;
-        return (Number(a.expirationTimestamp) || 0) - (Number(b.expirationTimestamp) || 0);
-      });
+      // Sort so the currently active (closing soonest, i.e., active right now) market is first
+      valid15mMkts.sort((a, b) => (Number(a.expirationTimestamp) || 0) - (Number(b.expirationTimestamp) || 0));
 
       if (valid15mMkts[0]) {
         return valid15mMkts[0];

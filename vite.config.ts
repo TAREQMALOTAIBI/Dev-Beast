@@ -123,21 +123,13 @@ const isHourlyBtcMarket = is15MinBtcMarket;
 async function fetchLive15MinBtcMarket(): Promise<any> {
   try {
     const now = Date.now();
-    const res = await fetch('https://api.limitless.exchange/markets/active');
-    if (res.ok) {
-      const json = await res.json();
-      const list = json?.data || [];
-      // Prioritize active, funded 15-minute BTC market that has NOT yet expired
-      const btc15m =
-        list.find((m: any) => is15MinBtcMarket(m) && m.status === 'FUNDED' && (!m.expirationTimestamp || m.expirationTimestamp > now)) ||
-        list.find((m: any) => is15MinBtcMarket(m) && (!m.expirationTimestamp || m.expirationTimestamp > now));
-      if (btc15m) return btc15m;
-    }
-
-    // Deterministic 15-minute window slug fallback (current & next 15m slot)
+    // 1. Deterministic 15-minute window slug lookup first:
+    // Strictly select the currently active, FUNDED 15m contract whose 15-minute window has started (openPriceCapturedAt <= now)
+    // and has not expired (expirationTimestamp > now).
     const currentSlotSec = Math.floor(now / 900000) * 900;
     const candidateSlugs = [
       `btc-up-or-down-15-min-${currentSlotSec}`,
+      `btc-up-or-down-15-min-${currentSlotSec - 900}`,
       `btc-up-or-down-15-min-${currentSlotSec + 900}`,
     ];
     for (const candidateSlug of candidateSlugs) {
@@ -145,13 +137,36 @@ async function fetchLive15MinBtcMarket(): Promise<any> {
         const directRes = await fetch(`https://api.limitless.exchange/markets/${candidateSlug}`);
         if (directRes.ok) {
           const m = await directRes.json();
-          if (m && is15MinBtcMarket(m) && (!m.expirationTimestamp || Number(m.expirationTimestamp) > now)) {
+          const startMs = m?.metadata?.openPriceCapturedAt ? new Date(m.metadata.openPriceCapturedAt).getTime() : 0;
+          const isStarted = !startMs || startMs <= now + 5000;
+          if (
+            m &&
+            is15MinBtcMarket(m) &&
+            m.status === 'FUNDED' &&
+            isStarted &&
+            (!m.expirationTimestamp || Number(m.expirationTimestamp) > now)
+          ) {
             return m;
           }
         }
       } catch {
         // continue
       }
+    }
+
+    const res = await fetch('https://api.limitless.exchange/markets/active');
+    if (res.ok) {
+      const json = await res.json();
+      const list = json?.data || [];
+      const valid15mMkts = list.filter(
+        (m: any) =>
+          is15MinBtcMarket(m) &&
+          m.status === 'FUNDED' &&
+          m.expirationTimestamp &&
+          Number(m.expirationTimestamp) > now
+      );
+      valid15mMkts.sort((a: any, b: any) => (Number(a.expirationTimestamp) || 0) - (Number(b.expirationTimestamp) || 0));
+      if (valid15mMkts[0]) return valid15mMkts[0];
     }
 
     return null;
