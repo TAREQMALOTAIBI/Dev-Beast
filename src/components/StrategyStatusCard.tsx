@@ -44,6 +44,12 @@ interface StrategyStatusCardProps {
     lastTradedSlug?: string;
   };
   onClearTradeLock?: () => void;
+  recentChartSignal?: {
+    direction: 'SHORT' | 'LONG';
+    candleTime: number;
+    zScore: number;
+    ageMinutes: number;
+  } | null;
 }
 
 export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
@@ -66,6 +72,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
   onClearNotice,
   contractLockInfo,
   onClearTradeLock,
+  recentChartSignal,
 }) => {
   const isAr = lang === 'ar';
 

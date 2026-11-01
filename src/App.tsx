@@ -72,6 +72,7 @@ export default function App() {
     refreshActiveMarket,
     contractLockInfo,
     clearTradeLock,
+    recentChartSignal,
   } = useTradingBot();
 
   const isAr = lang === 'ar';
@@ -398,6 +399,7 @@ export default function App() {
                   onClearNotice={() => setExecutionNotice(null)}
                   contractLockInfo={contractLockInfo}
                   onClearTradeLock={clearTradeLock}
+                  recentChartSignal={recentChartSignal}
                 />
 
                 {/* Sizing & Position Allocation Card */}

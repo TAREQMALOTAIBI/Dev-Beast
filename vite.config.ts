@@ -721,6 +721,11 @@ function setupApiMiddlewares(middlewares: any) {
 
       if (slugChanged) {
         latestOrderbookData = null;
+        const existingGuard = inMemoryTradeGuard || loadTradeGuardFromDisk();
+        if (existingGuard && existingGuard.marketSlug && existingGuard.marketSlug !== btc15Market.slug) {
+          clearTradeGuardFromDisk();
+          broadcastSse('tradeGuardUpdate', null);
+        }
         broadcastSse('marketChange', cachedActiveBtc);
         if (limitlessWsInstance && typeof limitlessWsInstance.isConnected === 'function' && limitlessWsInstance.isConnected()) {
           limitlessWsInstance.subscribe('subscribe_market_prices', {

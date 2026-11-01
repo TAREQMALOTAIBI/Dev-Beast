@@ -273,7 +273,12 @@ async function pollActiveBtcMarket() {
     if (slugChanged) {
       latestOrderbookData = null;
       subscribedSlugs.clear();
-      console.log(`[Limitless Rollover] New hourly contract active on VM: ${market.slug}`);
+      const existingGuard = inMemoryTradeGuard || loadTradeGuardFromDisk();
+      if (existingGuard && existingGuard.marketSlug && existingGuard.marketSlug !== market.slug) {
+        clearTradeGuardFromDisk();
+        broadcastSse('tradeGuardUpdate', null);
+      }
+      console.log(`[Limitless 15m Rollover] New 15-minute contract active on VM: ${market.slug} (Armed state preserved across contract rollover)`);
       broadcastSse('marketChange', cachedActiveBtc);
     }
 
@@ -1124,14 +1129,14 @@ async function pollServerClosedCandlesStrategy() {
         hadArmedLower = false;
       }
 
-      if (i === closes.length - 1) {
-        latestSignal = sig;
+      if (i === closes.length - 1 || ((sig === 'ENTRY_SHORT' || sig === 'ENTRY_LONG') && now - times[i] <= 15 * 60 * 1000)) {
+        if (sig === 'ENTRY_SHORT' || sig === 'ENTRY_LONG') {
+          latestSignal = sig;
+          latestZ = z;
+        } else if (!latestSignal && i === closes.length - 1) {
+          latestSignal = sig;
+        }
       }
-    }
-
-    if (serverLastEvaluatedClosedCandleTime === 0) {
-      serverLastEvaluatedClosedCandleTime = latestClosedTime;
-      return;
     }
 
     if (latestClosedTime > serverLastEvaluatedClosedCandleTime) {
@@ -1141,16 +1146,15 @@ async function pollServerClosedCandlesStrategy() {
         const direction = latestSignal === 'ENTRY_LONG' ? 'LONG' : 'SHORT';
         const outcome = direction === 'LONG' ? 'UP' : 'DOWN';
         console.log(
-          `[VM AUTONOMOUS 1m ENGINE] Closed candle (${new Date(latestClosedTime).toISOString()}) confirmed ${latestSignal} at Z=${latestZ.toFixed(2)}σ! Waiting 2.5s grace window before autonomous server execution...`
+          `[VM AUTONOMOUS 1m ENGINE] Closed candle (${new Date(latestClosedTime).toISOString()}) confirmed ${latestSignal} at Z=${latestZ.toFixed(2)}σ! Executing on-chain order...`
         );
 
-        // Give frontend browser 2.5s to fire first if open; if not locked/in-flight, execute on VM server
         setTimeout(async () => {
           if (isServerExecutingOrder) return;
           const liveMkt = cachedActiveBtc || (await fetchLive15MinBtcMarket());
           const guard = inMemoryTradeGuard || loadTradeGuardFromDisk();
           if (guard && liveMkt?.slug && guard.marketSlug === liveMkt.slug) {
-            return; // Already executed by frontend or previous trigger
+            return; // Already executed for this 15m contract
           }
           console.log(`[VM AUTONOMOUS 1m ENGINE] Executing ${direction} (${outcome}) order directly from server...`);
           await executeLimitlessOrderOnServer({
@@ -1161,7 +1165,7 @@ async function pollServerClosedCandlesStrategy() {
             price: 0.99,
             candleTime: latestClosedTime,
           });
-        }, 2500);
+        }, 1500);
       }
     }
   } catch {

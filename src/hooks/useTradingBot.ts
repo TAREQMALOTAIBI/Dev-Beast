@@ -150,6 +150,12 @@ export function useTradingBot() {
   const [isExecuting, setIsExecuting] = useState<boolean>(false);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(false);
   const [lastSignalTime, setLastSignalTime] = useState<number | null>(null);
+  const [recentChartSignal, setRecentChartSignal] = useState<{
+    direction: 'SHORT' | 'LONG';
+    candleTime: number;
+    zScore: number;
+    ageMinutes: number;
+  } | null>(null);
 
   // References for live closures and duplicate prevention
   const candlesRef = useRef<CandleData[]>([]);
@@ -367,57 +373,63 @@ export function useTradingBot() {
       crossedLowerThresholdRef.current = hadArmedLower;
       setCrossedLowerThreshold(hadArmedLower);
 
-      // Evaluate newly closed candle for live trade execution (unified with chart signals)
-      if (lastClosedMetric && lastClosedMetric.time > lastEvaluatedClosedCandleTimeRef.current) {
-        const prevEvaluatedTime = lastEvaluatedClosedCandleTimeRef.current;
-        lastEvaluatedClosedCandleTimeRef.current = lastClosedMetric.time;
+      setRecentChartSignal(null);
 
-        // Allow execution on live closed candles, OR on initial load if the latest closed candle just closed within the last 90 seconds
-        const isFreshCandleClose = !isInitialLoad || prevEvaluatedTime > 0 || (Date.now() - lastClosedMetric.time <= 120 * 1000);
+      // Evaluate newly closed candle or active contract signal for live trade execution (no Fresh Signal Guard delay restriction)
+      const recentContractEntries = result.filter(
+        (m) => (m.signal === 'ENTRY_SHORT' || m.signal === 'ENTRY_LONG') && Date.now() - m.time <= 15 * 60 * 1000
+      );
+      const targetMetric =
+        lastClosedMetric && (lastClosedMetric.signal === 'ENTRY_SHORT' || lastClosedMetric.signal === 'ENTRY_LONG')
+          ? lastClosedMetric
+          : recentContractEntries.length > 0
+          ? recentContractEntries[recentContractEntries.length - 1]
+          : lastClosedMetric;
 
-        if (isFreshCandleClose) {
-          if (lastClosedMetric.signal === 'ARMED_UPPER') {
-            const armMsg = `⚡ [التأكيد الأول +${cfg.zScoreUpper}σ · شمعة مغلقة] أغلقت شمعة 1m عند Z-Score = +${lastClosedMetric.zScore.toFixed(2)}σ. في انتظار إغلاق شمعة التأكيد الثاني (≤ +${cfg.zScoreEntry}σ) لتنفيذ صفقة SHORT (DOWN).`;
-            console.log(armMsg);
-            limitlessService.logDirect('SYSTEM', armMsg);
-          } else if (lastClosedMetric.signal === 'ARMED_LOWER') {
-            const armMsg = `⚡ [التأكيد الأول ${lowerThresh}σ · شمعة مغلقة] أغلقت شمعة 1m عند Z-Score = ${lastClosedMetric.zScore.toFixed(2)}σ. في انتظار إغلاق شمعة التأكيد الثاني (≥ ${lowerEntryThresh}σ) لتنفيذ صفقة LONG (UP).`;
-            console.log(armMsg);
-            limitlessService.logDirect('SYSTEM', armMsg);
-          } else if (lastClosedMetric.signal === 'ENTRY_SHORT') {
-            if (!botActiveRef.current) {
-              const pauseWarn = `⚠️ تحقق التأكيد الثاني بعد إغلاق الشمعة (Z=+${lastClosedMetric.zScore.toFixed(2)}σ ≤ +${cfg.zScoreEntry}σ) ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
-              console.warn(pauseWarn);
-              limitlessService.logDirect('SYSTEM', pauseWarn);
-              setExecutionNotice({
-                type: 'WARNING',
-                message: pauseWarn,
-                timestamp: Date.now(),
-                action: 'START_BOT',
-              });
-            } else if (!isExecutingRef.current) {
-              const trigMsg = `🎯 [تحقق التأكيد الثاني ≤ +${cfg.zScoreEntry}σ · شمعة مغلقة] أغلقت شمعة 1m بارتداد Z-Score من فوق +${cfg.zScoreUpper}σ إلى +${lastClosedMetric.zScore.toFixed(2)}σ! جاري إرسال أمر فوري لشراء عقد DOWN (4% من الرصيد).`;
-              console.log(trigMsg);
-              limitlessService.logDirect('SYSTEM', trigMsg);
-              executeLiveTradeRef.current(lastClosedMetric.zScore, 'SHORT', lastClosedMetric.time);
-            }
-          } else if (lastClosedMetric.signal === 'ENTRY_LONG') {
-            if (!botActiveRef.current) {
-              const pauseWarn = `⚠️ تحقق التأكيد الثاني بعد إغلاق الشمعة (Z=${lastClosedMetric.zScore.toFixed(2)}σ ≥ ${lowerEntryThresh}σ) ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
-              console.warn(pauseWarn);
-              limitlessService.logDirect('SYSTEM', pauseWarn);
-              setExecutionNotice({
-                type: 'WARNING',
-                message: pauseWarn,
-                timestamp: Date.now(),
-                action: 'START_BOT',
-              });
-            } else if (!isExecutingRef.current) {
-              const trigMsg = `🎯 [تحقق التأكيد الثاني ≥ ${lowerEntryThresh}σ · شمعة مغلقة] أغلقت شمعة 1m بارتداد Z-Score من تحت ${lowerThresh}σ إلى ${lastClosedMetric.zScore.toFixed(2)}σ! جاري إرسال أمر فوري لشراء عقد UP (4% من الرصيد).`;
-              console.log(trigMsg);
-              limitlessService.logDirect('SYSTEM', trigMsg);
-              executeLiveTradeRef.current(lastClosedMetric.zScore, 'LONG', lastClosedMetric.time);
-            }
+      if (targetMetric && targetMetric.time > lastEvaluatedClosedCandleTimeRef.current) {
+        lastEvaluatedClosedCandleTimeRef.current = targetMetric.time;
+
+        if (targetMetric.signal === 'ARMED_UPPER') {
+          const armMsg = `⚡ [التأكيد الأول +${cfg.zScoreUpper}σ · شمعة مغلقة] أغلقت شمعة 1m عند Z-Score = +${targetMetric.zScore.toFixed(2)}σ. في انتظار إغلاق شمعة التأكيد الثاني (≤ +${cfg.zScoreEntry}σ) لتنفيذ صفقة SHORT (DOWN).`;
+          console.log(armMsg);
+          limitlessService.logDirect('SYSTEM', armMsg);
+        } else if (targetMetric.signal === 'ARMED_LOWER') {
+          const armMsg = `⚡ [التأكيد الأول ${lowerThresh}σ · شمعة مغلقة] أغلقت شمعة 1m عند Z-Score = ${targetMetric.zScore.toFixed(2)}σ. في انتظار إغلاق شمعة التأكيد الثاني (≥ ${lowerEntryThresh}σ) لتنفيذ صفقة LONG (UP).`;
+          console.log(armMsg);
+          limitlessService.logDirect('SYSTEM', armMsg);
+        } else if (targetMetric.signal === 'ENTRY_SHORT') {
+          if (!botActiveRef.current) {
+            const pauseWarn = `⚠️ تحقق التأكيد الثاني بعد إغلاق الشمعة (Z=+${targetMetric.zScore.toFixed(2)}σ ≤ +${cfg.zScoreEntry}σ) ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
+            console.warn(pauseWarn);
+            limitlessService.logDirect('SYSTEM', pauseWarn);
+            setExecutionNotice({
+              type: 'WARNING',
+              message: pauseWarn,
+              timestamp: Date.now(),
+              action: 'START_BOT',
+            });
+          } else if (!isExecutingRef.current) {
+            const trigMsg = `🎯 [تحقق التأكيد الثاني ≤ +${cfg.zScoreEntry}σ · شمعة مغلقة] أغلقت شمعة 1m بارتداد Z-Score من فوق +${cfg.zScoreUpper}σ إلى +${targetMetric.zScore.toFixed(2)}σ! جاري إرسال أمر FAK فوري لشراء عقد DOWN (4% من الرصيد).`;
+            console.log(trigMsg);
+            limitlessService.logDirect('SYSTEM', trigMsg);
+            executeLiveTradeRef.current(targetMetric.zScore, 'SHORT', targetMetric.time);
+          }
+        } else if (targetMetric.signal === 'ENTRY_LONG') {
+          if (!botActiveRef.current) {
+            const pauseWarn = `⚠️ تحقق التأكيد الثاني بعد إغلاق الشمعة (Z=${targetMetric.zScore.toFixed(2)}σ ≥ ${lowerEntryThresh}σ) ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
+            console.warn(pauseWarn);
+            limitlessService.logDirect('SYSTEM', pauseWarn);
+            setExecutionNotice({
+              type: 'WARNING',
+              message: pauseWarn,
+              timestamp: Date.now(),
+              action: 'START_BOT',
+            });
+          } else if (!isExecutingRef.current) {
+            const trigMsg = `🎯 [تحقق التأكيد الثاني ≥ ${lowerEntryThresh}σ · شمعة مغلقة] أغلقت شمعة 1m بارتداد Z-Score من تحت ${lowerThresh}σ إلى ${targetMetric.zScore.toFixed(2)}σ! جاري إرسال أمر FAK فوري لشراء عقد UP (4% من الرصيد).`;
+            console.log(trigMsg);
+            limitlessService.logDirect('SYSTEM', trigMsg);
+            executeLiveTradeRef.current(targetMetric.zScore, 'LONG', targetMetric.time);
           }
         }
       }
@@ -784,7 +796,12 @@ export function useTradingBot() {
         setActiveLimitlessMarket(newMarket);
         activeLimitlessMarketRef.current = newMarket;
         if (lastExecutedMarketSlugRef.current && lastExecutedMarketSlugRef.current !== newMarket.slug) {
+          lastExecutedMarketSlugRef.current = '';
+          lastExecutedTimestampRef.current = 0;
           setContractLockInfo({ isLocked: false });
+          try {
+            localStorage.removeItem('limitless_last_trade_guard');
+          } catch {}
         }
       }
     });
@@ -944,7 +961,12 @@ export function useTradingBot() {
           setActiveLimitlessMarket(data);
           activeLimitlessMarketRef.current = data;
           if (lastExecutedMarketSlugRef.current && lastExecutedMarketSlugRef.current !== data.slug) {
+            lastExecutedMarketSlugRef.current = '';
+            lastExecutedTimestampRef.current = 0;
             setContractLockInfo({ isLocked: false });
+            try {
+              localStorage.removeItem('limitless_last_trade_guard');
+            } catch {}
           }
         }
       }
@@ -1124,5 +1146,6 @@ export function useTradingBot() {
     refreshActiveMarket,
     contractLockInfo,
     clearTradeLock,
+    recentChartSignal,
   };
 }
