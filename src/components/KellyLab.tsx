@@ -49,8 +49,8 @@ export const KellyLab: React.FC<KellyLabProps> = ({
           </div>
           <p className="text-[10px] text-slate-500 mt-1">
             {isAr
-              ? 'أمر FAK بسعر العرض الحي بدون سقف سعر دخول'
-              : 'FAK Order at live market ask (No max entry price)'}
+              ? 'أمر GTC بسعر العرض الحي بدون سقف سعر دخول'
+              : 'GTC Order at live market ask (No max entry price)'}
           </p>
         </div>
 
@@ -73,7 +73,7 @@ export const KellyLab: React.FC<KellyLabProps> = ({
             <Percent className="w-3.5 h-3.5 text-amber-400" />
           </div>
           <div className="text-lg font-mono font-bold text-amber-400">
-            FAK (No Cap)
+            GTC (No Cap)
           </div>
           <p className="text-[10px] text-slate-500 mt-1 font-mono">
             {isAr ? 'بدون سقف سعر دخول' : 'Without max entry price'}

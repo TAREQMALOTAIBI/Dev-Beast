@@ -655,7 +655,7 @@ export function useTradingBot() {
         effectiveContracts,
         effectiveContractPrice,
         1,
-        'FAK',
+        'GTC',
         0,
         (updatedChunk) => {
           setCurrentChunks((prev) => {
@@ -676,7 +676,7 @@ export function useTradingBot() {
       const completedTrade: TradeOrder = {
         ...initialTrade,
         chunks: executed,
-        status: 'EXECUTED_FAK',
+        status: 'ACTIVE_GTC',
       };
 
       setActiveTrade(completedTrade);

@@ -418,7 +418,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             </div>
             <div className="flex justify-between text-[10px] pt-1 border-t border-slate-800/80">
               <span className="text-slate-500">{isAr ? 'الإجراء عند التحقق:' : 'Action:'}</span>
-              <span className="text-teal-400 font-bold">{isAr ? 'شراء عقد UP (4% · FAK بدون سقف)' : 'Buy UP (4% · FAK No Cap)'}</span>
+              <span className="text-teal-400 font-bold">{isAr ? 'شراء عقد UP (4% · GTC بدون سقف)' : 'Buy UP (4% · GTC No Cap)'}</span>
             </div>
           </div>
         </div>
@@ -476,7 +476,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             </div>
             <div className="flex justify-between text-[10px] pt-1 border-t border-slate-800/80">
               <span className="text-slate-500">{isAr ? 'الإجراء عند التحقق:' : 'Action:'}</span>
-              <span className="text-amber-400 font-bold">{isAr ? 'شراء عقد DOWN (4% · FAK بدون سقف)' : 'Buy DOWN (4% · FAK No Cap)'}</span>
+              <span className="text-amber-400 font-bold">{isAr ? 'شراء عقد DOWN (4% · GTC بدون سقف)' : 'Buy DOWN (4% · GTC No Cap)'}</span>
             </div>
           </div>
         </div>

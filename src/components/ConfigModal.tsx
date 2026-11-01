@@ -39,7 +39,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
       zScoreLowerEntry: -2.3,
       maxPriceCents: 0.99,
       maxRiskPercent: 0.04,
-      orderType: 'FAK',
+      orderType: 'GTC',
       fractionChunks: 1,
       chunkDelayMs: 500,
       winProbability: 0.55,
@@ -73,7 +73,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 {isAr ? 'إعدادات استراتيجية التداول (1m Binance · عقود 15 دقيقة)' : 'Trading Strategy Configuration (1m Binance · 15m Contracts)'}
               </h2>
               <div className="text-[11px] text-slate-400">
-                {isAr ? '45 شمعة (1m) · تأكيد مزدوج (2.5 ← 2.3) · حجم ثابت 4% لكل عقد 15m · FAK بدون سقف سعر' : '45 Candles (1m) · Dual Confirmation (2.5 -> 2.3) · Fixed 4% per 15m Contract · FAK No Price Cap'}
+                {isAr ? '45 شمعة (1m) · تأكيد مزدوج (2.5 ← 2.3) · حجم ثابت 4% لكل عقد 15m · GTC بدون سقف سعر' : '45 Candles (1m) · Dual Confirmation (2.5 -> 2.3) · Fixed 4% per 15m Contract · GTC No Price Cap'}
               </div>
             </div>
           </div>
@@ -326,12 +326,12 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                   zScoreLowerEntry: -2.3,
                   maxRiskPercent: 0.04,
                   maxPriceCents: 0.99,
-                  orderType: 'FAK',
+                  orderType: 'GTC',
                   cooldownMinutes: 15,
                 })}
                 className="px-2.5 py-1 rounded text-[11px] font-bold bg-emerald-950/80 hover:bg-emerald-900/90 text-emerald-300 border border-emerald-600/50 cursor-pointer"
               >
-                {isAr ? '🎯 الإعدادات المعتمدة (1m · 45 شمعة · تأكيد أول 2.5 وتأكيد ثاني 2.3 · 4% · FAK)' : '🎯 Approved Preset (1m · 45 Candles · 2.5 -> 2.3 · 4% · FAK)'}
+                {isAr ? '🎯 الإعدادات المعتمدة (1m · 45 شمعة · تأكيد أول 2.5 وتأكيد ثاني 2.3 · 4% · GTC)' : '🎯 Approved Preset (1m · 45 Candles · 2.5 -> 2.3 · 4% · GTC)'}
               </button>
             </div>
 
