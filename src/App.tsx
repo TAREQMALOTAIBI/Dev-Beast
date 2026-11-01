@@ -435,7 +435,7 @@ export default function App() {
                     <div className="flex justify-between text-slate-400">
                       <span>{isAr ? 'نمط التنفيذ المعتمد:' : 'Execution Mode:'}</span>
                       <span className="text-emerald-400 font-bold">
-                        {isAr ? 'أمر GTC موحد مباشر (بدون سقف سعر دخول)' : 'Direct GTC Order (Without Max Entry Price)'}
+                        {isAr ? 'أمر FAK موحد مباشر (بدون سقف سعر دخول)' : 'Direct FAK Order (Without Max Entry Price)'}
                       </span>
                     </div>
                     <div className="flex justify-between items-center text-slate-400 pt-1.5 border-t border-slate-800/80 text-[11px]">
@@ -489,16 +489,16 @@ export default function App() {
             <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 text-xs text-slate-300 space-y-3">
               <h3 className="font-bold text-slate-100 text-sm">
                 {isAr
-                  ? 'منهجية إدارة رأس المال وتنفيذ الأوامر (4% ثابت لكل عقد 15 دقيقة · أمر GTC بدون سقف سعر)'
-                  : 'Bankroll & Order Execution Methodology (Fixed 4% per 15m Contract · GTC Without Max Entry Price)'}
+                  ? 'منهجية إدارة رأس المال وتنفيذ الأوامر (4% ثابت لكل عقد 15 دقيقة · أمر FAK بدون سقف سعر)'
+                  : 'Bankroll & Order Execution Methodology (Fixed 4% per 15m Contract · FAK Without Max Entry Price)'}
               </h3>
               <p className="leading-relaxed">
                 {isAr
-                  ? 'يعتمد الروبوت على بث Binance لفريم الدقيقة الواحدة (1min) وحساب مؤشر Z-Score على آخر 45 شمعة تاريخية (1min). يتم تسليح الإشارة عند وصول التأكيد الأول (±2.5σ)، ويتم تنفيذ أمر شراء GTC فوري بدون سقف لسعر الدخول عند تحقق التأكيد الثاني (±2.3σ) بحجم ثابت قدره 4% من إجمالي رصيد المحفظة لكل عقد 15 دقيقة.'
-                  : 'The bot streams 1-minute Binance klines and computes Z-Score across 45 historical 1-minute candles. It arms on the First Confirmation (±2.5σ) and executes a live GTC order without a max entry price ceiling on the Second Confirmation (±2.3σ), allocating a fixed max 4% of bankroll per 15-minute contract.'}
+                  ? 'يعتمد الروبوت على بث Binance لفريم الدقيقة الواحدة (1min) وحساب مؤشر Z-Score على آخر 45 شمعة تاريخية (1min). يتم تسليح الإشارة عند وصول التأكيد الأول (±2.5σ)، ويتم تنفيذ أمر شراء FAK فوري بدون سقف لسعر الدخول عند تحقق التأكيد الثاني (±2.3σ) بحجم ثابت قدره 4% من إجمالي رصيد المحفظة لكل عقد 15 دقيقة.'
+                  : 'The bot streams 1-minute Binance klines and computes Z-Score across 45 historical 1-minute candles. It arms on the First Confirmation (±2.5σ) and executes a live FAK order without a max entry price ceiling on the Second Confirmation (±2.3σ), allocating a fixed max 4% of bankroll per 15-minute contract.'}
               </p>
               <div className="p-3 bg-slate-950 font-mono text-emerald-400 rounded-lg border border-slate-800">
-                Timeframe: 1m (45 Candles) | Z-Threshold: 1st Confirm ±2.5σ → 2nd Confirm ±2.3σ | Bet Size: Fixed 4% per 15m Contract | Order: GTC (No Max Entry Price)
+                Timeframe: 1m (45 Candles) | Z-Threshold: 1st Confirm ±2.5σ → 2nd Confirm ±2.3σ | Bet Size: Fixed 4% per 15m Contract | Order: FAK (No Max Entry Price)
               </div>
             </div>
           </div>
@@ -518,7 +518,7 @@ export default function App() {
             <span>·</span>
             <span>Binance 1m (45 Candles) · Z-Score (2.5 → 2.3)</span>
             <span>·</span>
-            <span>Limitless 15m Contract (Fixed 4% · GTC No Max Price)</span>
+            <span>Limitless 15m Contract (Fixed 4% · FAK No Max Price)</span>
           </div>
           <div className="font-mono text-[11px] text-slate-500">
             Node.js / TypeScript WebSocket Architecture

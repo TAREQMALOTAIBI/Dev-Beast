@@ -62,7 +62,7 @@ export function calculateZScore(
 
 /**
  * Calculates position sizing with Fixed 4% of bankroll per 15m contract
- * and GTC order without max Entry price.
+ * and FAK order without max Entry price.
  */
 export function calculateKellySizing(
   balance: number,

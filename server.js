@@ -972,11 +972,11 @@ async function executeLimitlessOrderOnServer(params = {}) {
       logger: new sdk.ConsoleLogger(),
     });
 
-    const orderTypeEnum = sdk.OrderType.GTC;
-    const executedOrderType = 'GTC';
+    const orderTypeEnum = sdk.OrderType.FAK;
+    const executedOrderType = 'FAK';
 
-    // Execute strictly GTC fractional order at live Best Ask without max entry price (no FOK/FAK fallback)
-    const gtcOrderArgs = {
+    // Execute strictly FAK (Fill-And-Kill) fractional order at live Best Ask without max entry price
+    const fakOrderArgs = {
       marketSlug: activeMarketSlug,
       tokenId: String(targetTokenId),
       side: sdk.Side.BUY,
@@ -985,7 +985,7 @@ async function executeLimitlessOrderOnServer(params = {}) {
       size: contractCount,
     };
 
-    console.log(`[Limitless LIVE ORDER] Sending GTC fractional order via SDK...`, {
+    console.log(`[Limitless LIVE ORDER] Sending FAK fractional order via SDK...`, {
       account: wallet.address,
       slug: activeMarketSlug,
       outcome: isLong ? 'UP' : 'DOWN',
@@ -995,9 +995,9 @@ async function executeLimitlessOrderOnServer(params = {}) {
       budgetUsd: fixed4PctUsdBudget,
     });
 
-    const result = await orderClient.createOrder(gtcOrderArgs);
+    const result = await orderClient.createOrder(fakOrderArgs);
 
-    console.log(`[EIP-712 LIVE ORDER] GTC order submitted successfully! ID: ${result?.id || result?.order?.id || 'OK'}`);
+    console.log(`[EIP-712 LIVE ORDER] FAK order submitted successfully! ID: ${result?.id || result?.order?.id || 'OK'}`);
 
     const orderIdResolved = result?.id || result?.order?.id || `ord_${Date.now()}`;
     const guardRecord = {
@@ -1157,7 +1157,7 @@ async function pollServerClosedCandlesStrategy() {
             market: liveMkt?.slug || 'btc-up-or-down-15-min',
             direction,
             outcome,
-            type: 'GTC',
+            type: 'FAK',
             price: 0.99,
             candleTime: latestClosedTime,
           });

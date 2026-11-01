@@ -23,9 +23,9 @@ const DEFAULT_CONFIG: BotConfig = {
   zScoreEntry: 2.3, // Second confirmation: +2.3
   zScoreLower: -2.5, // First confirmation: -2.5
   zScoreLowerEntry: -2.3, // Second confirmation: -2.3
-  maxPriceCents: 0.99, // GTC Order without max Entry price
+  maxPriceCents: 0.99, // FAK Order without max Entry price
   maxRiskPercent: 0.04, // Fixed 4% of bankroll per 15m contract
-  orderType: 'GTC', // Good-Til-Cancelled
+  orderType: 'FAK', // Fill-And-Kill
   fractionChunks: 1, // 1 unified single direct order
   chunkDelayMs: 0,
   winProbability: 0.55,
@@ -76,8 +76,8 @@ export function useTradingBot() {
         parsed.zScoreEntry = 2.3;
         parsed.zScoreLower = -2.5;
         parsed.zScoreLowerEntry = -2.3;
-        // Enforce GTC Order without max Entry price
-        parsed.orderType = 'GTC';
+        // Enforce FAK Order without max Entry price
+        parsed.orderType = 'FAK';
         parsed.maxPriceCents = 0.99;
         parsed.fractionChunks = 1;
         parsed.chunkDelayMs = 0;
@@ -631,19 +631,19 @@ export function useTradingBot() {
 
     try {
       console.log(
-        `[LIVE DIRECT EXECUTION - ${direction}] Sending unified GTC order of ${effectiveContracts} contracts to Limitless (${resolvedMarketSlug} - ${outcome}) @ $${effectiveContractPrice} [Fixed 4% Bankroll - No Max Entry Price]...`
+        `[LIVE DIRECT EXECUTION - ${direction}] Sending unified FAK order of ${effectiveContracts} contracts to Limitless (${resolvedMarketSlug} - ${outcome}) @ $${effectiveContractPrice} [Fixed 4% Bankroll - No Max Entry Price]...`
       );
 
       limitlessService.logDirect(
         'OUTGOING',
-        `🚀 [تنفيذ صفقة GTC مباشرة] إرسال أمر موحد لعدد ${effectiveContracts} عقود ${outcome} (${direction}) بسعر السوق $${effectiveContractPrice} إلى عقد 15m (${resolvedMarketSlug}) بحجم ثابت 4% من الرصيد...`
+        `🚀 [تنفيذ صفقة FAK مباشرة] إرسال أمر فوري FAK لعدد ${effectiveContracts} عقود ${outcome} (${direction}) بسعر السوق $${effectiveContractPrice} إلى عقد 15m (${resolvedMarketSlug}) بحجم ثابت 4% من الرصيد...`
       );
 
       const executed = await limitlessService.executeChunkedOrder(
         effectiveContracts,
         effectiveContractPrice,
         1,
-        'GTC',
+        'FAK',
         0,
         (updatedChunk) => {
           setCurrentChunks((prev) => {
@@ -664,7 +664,7 @@ export function useTradingBot() {
       const completedTrade: TradeOrder = {
         ...initialTrade,
         chunks: executed,
-        status: 'ACTIVE_GTC',
+        status: 'EXECUTED_FAK',
       };
 
       setActiveTrade(completedTrade);

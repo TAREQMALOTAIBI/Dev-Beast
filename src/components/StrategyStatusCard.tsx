@@ -296,7 +296,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             <div className="text-[11px] text-slate-300 font-semibold mb-2 flex items-center justify-between">
               <span className="flex items-center gap-1.5">
                 <Zap className="w-3.5 h-3.5 text-amber-400" />
-                <span>{isAr ? 'تنفيذ فوري وتجربة صفقة الآن (حجم ثابت 4% · أمر GTC بدون سقف سعر):' : 'Instant Trade (Fixed 4% Bankroll · GTC No Price Cap):'}</span>
+                <span>{isAr ? 'تنفيذ فوري وتجربة صفقة الآن (حجم ثابت 4% · أمر FAK بدون سقف سعر):' : 'Instant Trade (Fixed 4% Bankroll · FAK No Price Cap):'}</span>
               </span>
               <span className="text-[10px] text-emerald-400 font-mono">15m CLOB</span>
             </div>
@@ -305,7 +305,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
                 onClick={() => onTriggerManualTrade('LONG')}
                 disabled={isExecuting}
                 className="py-2 px-3 rounded-lg font-bold text-xs bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
-                title={isAr ? 'شراء عقد UP صعود مباشرة بسعر السوق اللحظي (أمر GTC بدون سقف سعر)' : 'Buy UP contract at live market ask (GTC without max entry price)'}
+                title={isAr ? 'شراء عقد UP صعود مباشرة بسعر السوق اللحظي (أمر FAK بدون سقف سعر)' : 'Buy UP contract at live market ask (FAK without max entry price)'}
               >
                 <TrendingUp className="w-3.5 h-3.5" />
                 <span>{isAr ? 'شراء UP (صعود) فوري' : 'Buy UP (Long)'}</span>
@@ -314,7 +314,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
                 onClick={() => onTriggerManualTrade('SHORT')}
                 disabled={isExecuting}
                 className="py-2 px-3 rounded-lg font-bold text-xs bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
-                title={isAr ? 'شراء عقد DOWN هبوط مباشرة بسعر السوق اللحظي (أمر GTC بدون سقف سعر)' : 'Buy DOWN contract at live market ask (GTC without max entry price)'}
+                title={isAr ? 'شراء عقد DOWN هبوط مباشرة بسعر السوق اللحظي (أمر FAK بدون سقف سعر)' : 'Buy DOWN contract at live market ask (FAK without max entry price)'}
               >
                 <TrendingDown className="w-3.5 h-3.5" />
                 <span>{isAr ? 'شراء DOWN (هبوط) فوري' : 'Buy DOWN (Short)'}</span>
@@ -332,7 +332,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             <span>{isAr ? 'إعدادات الاستراتيجية المعتمدة (شموع 1m مغلقة مؤكدة فقط):' : 'Approved Bot Parameters (Confirmed Closed 1m Candles Only):'}</span>
           </span>
           <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-500/50">
-            {isAr ? 'الشموع المغلقة فقط · GTC بدون سقف · 4% ثابت' : 'Closed Candles Only · GTC No Cap · Fixed 4%'}
+            {isAr ? 'الشموع المغلقة فقط · FAK بدون سقف · 4% ثابت' : 'Closed Candles Only · FAK No Cap · Fixed 4%'}
           </span>
         </div>
 
@@ -351,7 +351,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
           </div>
           <div className="p-2 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col">
             <span className="text-slate-400 text-[10px]">{isAr ? 'حجم الصفقة ونوع الأمر:' : 'Bet Size & Order:'}</span>
-            <span className="text-slate-100 font-bold">4% · GTC (No Cap)</span>
+            <span className="text-slate-100 font-bold">4% · FAK (No Cap)</span>
           </div>
         </div>
       </div>
@@ -411,7 +411,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             </div>
             <div className="flex justify-between text-[10px] pt-1 border-t border-slate-800/80">
               <span className="text-slate-500">{isAr ? 'الإجراء عند التحقق:' : 'Action:'}</span>
-              <span className="text-teal-400 font-bold">{isAr ? 'شراء عقد UP (4% · GTC بدون سقف)' : 'Buy UP (4% · GTC No Cap)'}</span>
+              <span className="text-teal-400 font-bold">{isAr ? 'شراء عقد UP (4% · FAK بدون سقف)' : 'Buy UP (4% · FAK No Cap)'}</span>
             </div>
           </div>
         </div>
@@ -469,7 +469,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             </div>
             <div className="flex justify-between text-[10px] pt-1 border-t border-slate-800/80">
               <span className="text-slate-500">{isAr ? 'الإجراء عند التحقق:' : 'Action:'}</span>
-              <span className="text-amber-400 font-bold">{isAr ? 'شراء عقد DOWN (4% · GTC بدون سقف)' : 'Buy DOWN (4% · GTC No Cap)'}</span>
+              <span className="text-amber-400 font-bold">{isAr ? 'شراء عقد DOWN (4% · FAK بدون سقف)' : 'Buy DOWN (4% · FAK No Cap)'}</span>
             </div>
           </div>
         </div>

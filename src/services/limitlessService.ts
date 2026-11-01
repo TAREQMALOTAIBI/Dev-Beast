@@ -631,7 +631,7 @@ export class LimitlessService {
       onChunkUpdate({ ...chunkState });
       soundController.playChunkExecuted(0);
       console.log(
-        `🚀 Live Direct Order transmitted to Limitless: ${contractsToBuy} contracts @ $${priceCents} (${orderType}) [Fixed 4% per 15m Contract - GTC No Max Price]`
+        `🚀 Live Direct Order transmitted to Limitless: ${contractsToBuy} contracts @ $${priceCents} (${orderType}) [Fixed 4% per 15m Contract - FAK No Max Price]`
       );
     } catch (err: any) {
       chunkState.status = 'FAILED';

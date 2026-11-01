@@ -39,7 +39,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
       zScoreLowerEntry: -2.3,
       maxPriceCents: 0.99,
       maxRiskPercent: 0.04,
-      orderType: 'GTC',
+      orderType: 'FAK',
       fractionChunks: 1,
       chunkDelayMs: 500,
       winProbability: 0.55,
@@ -73,7 +73,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 {isAr ? 'إعدادات استراتيجية التداول (1m Binance · عقود 15 دقيقة)' : 'Trading Strategy Configuration (1m Binance · 15m Contracts)'}
               </h2>
               <div className="text-[11px] text-slate-400">
-                {isAr ? '45 شمعة (1m) · تأكيد مزدوج (2.5 ← 2.3) · حجم ثابت 4% لكل عقد 15m · GTC بدون سقف سعر' : '45 Candles (1m) · Dual Confirmation (2.5 -> 2.3) · Fixed 4% per 15m Contract · GTC No Price Cap'}
+                {isAr ? '45 شمعة (1m) · تأكيد مزدوج (2.5 ← 2.3) · حجم ثابت 4% لكل عقد 15m · FAK بدون سقف سعر' : '45 Candles (1m) · Dual Confirmation (2.5 -> 2.3) · Fixed 4% per 15m Contract · FAK No Price Cap'}
               </div>
             </div>
           </div>
@@ -326,12 +326,12 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                   zScoreLowerEntry: -2.3,
                   maxRiskPercent: 0.04,
                   maxPriceCents: 0.99,
-                  orderType: 'GTC',
+                  orderType: 'FAK',
                   cooldownMinutes: 15,
                 })}
                 className="px-2.5 py-1 rounded text-[11px] font-bold bg-emerald-950/80 hover:bg-emerald-900/90 text-emerald-300 border border-emerald-600/50 cursor-pointer"
               >
-                {isAr ? '🎯 الإعدادات المعتمدة (1m · 45 شمعة · تأكيد أول 2.5 وتأكيد ثاني 2.3 · 4% · GTC)' : '🎯 Approved Preset (1m · 45 Candles · 2.5 -> 2.3 · 4% · GTC)'}
+                {isAr ? '🎯 الإعدادات المعتمدة (1m · 45 شمعة · تأكيد أول 2.5 وتأكيد ثاني 2.3 · 4% · FAK)' : '🎯 Approved Preset (1m · 45 Candles · 2.5 -> 2.3 · 4% · FAK)'}
               </button>
             </div>
 
@@ -416,19 +416,19 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
           {/* Section 4: Risk Sizing & Direct Order Execution */}
           <div className="border-t border-slate-800 pt-4">
             <h3 className="font-semibold text-slate-100 uppercase tracking-wider text-[11px] mb-3 text-sky-400">
-              {isAr ? 'حجم الصفقة ونوع الأمر (4% ثابت من الرصيد لكل عقد 15m · GTC بدون سقف سعر)' : 'Bet Size & Order Type (Fixed 4% Bankroll per 15m Contract · GTC No Max Price)'}
+              {isAr ? 'حجم الصفقة ونوع الأمر (4% ثابت من الرصيد لكل عقد 15m · FAK بدون سقف سعر)' : 'Bet Size & Order Type (Fixed 4% Bankroll per 15m Contract · FAK No Max Price)'}
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block text-slate-400 mb-1">
-                  {isAr ? 'نوع الأمر المعتمد (GTC فقط)' : 'Order Type (GTC Only)'}
+                  {isAr ? 'نوع الأمر المعتمد (FAK فقط)' : 'Order Type (FAK Only)'}
                 </label>
                 <select
-                  value="GTC"
-                  onChange={() => setDraft({ ...draft, orderType: 'GTC' })}
+                  value="FAK"
+                  onChange={() => setDraft({ ...draft, orderType: 'FAK' })}
                   className="w-full bg-slate-950 border border-emerald-600/60 rounded-lg px-3 py-2 text-emerald-300 font-mono font-bold"
                 >
-                  <option value="GTC">GTC (Good-Til-Cancelled Only)</option>
+                  <option value="FAK">FAK (Fill-And-Kill Only)</option>
                 </select>
               </div>
 
@@ -466,8 +466,8 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
             <div className="mt-2.5 p-2.5 rounded-lg bg-emerald-950/40 border border-emerald-700/50 text-[11px] text-emerald-300 space-y-1.5">
               <div className="font-semibold text-emerald-200">
                 {isAr
-                  ? '✓ أمر GTC بدون سقف لسعر الدخول: يتم تنفيذ الأمر مباشرة بسعر العرض الحي في دفتر الأوامر (Live Market Ask) دون تقييد بسقف سعر.'
-                  : '✓ GTC Order without Max Entry Price: Executes directly at the live market ask price without an entry price ceiling.'}
+                  ? '✓ أمر FAK بدون سقف لسعر الدخول: يتم تنفيذ الأمر مباشرة وبشكل فوري بسعر العرض الحي في دفتر الأوامر (Live Market Ask) دون تقييد بسقف سعر، مع إلغاء أي جزء غير منفذ فوراً لمنع تعليق الأوامر.'
+                  : '✓ FAK Order without Max Entry Price: Executes immediately at the live market ask price without an entry price ceiling, instantly killing any unfilled remainder to avoid resting orders.'}
               </div>
               <div className="text-sky-300">
                 {isAr
