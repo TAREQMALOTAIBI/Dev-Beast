@@ -1067,6 +1067,7 @@ app.post('/api/limitless/order', async (req, res) => {
 // Guarantees trades execute 24/7 on the VM even if the browser tab is throttled or closed
 // ============================================================================
 let serverLastEvaluatedClosedCandleTime = 0;
+let serverLastEvaluatedEntrySignalTime = 0;
 
 function computeServerRollingZScore(windowPrices) {
   const n = windowPrices.length;
@@ -1078,6 +1079,24 @@ function computeServerRollingZScore(windowPrices) {
   return stdDev > 0 ? (currentPrice - mean) / stdDev : 0;
 }
 
+async function fetchServerBinanceKlines(symbol = 'BTCUSDT', interval = '1m', limit = 100) {
+  const urls = [
+    `https://data-api.binance.vision/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
+    `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
+  ];
+  for (const url of urls) {
+    try {
+      const r = await fetch(url);
+      if (!r.ok) continue;
+      const data = await r.json();
+      if (Array.isArray(data) && data.length > 0) return data;
+    } catch {
+      // Try next endpoint
+    }
+  }
+  return null;
+}
+
 async function pollServerClosedCandlesStrategy() {
   try {
     const pk = (process.env.PRIVATE_KEY || '').trim();
@@ -1085,9 +1104,7 @@ async function pollServerClosedCandlesStrategy() {
     const secret = (process.env.LMTS_TOKEN_SECRET || process.env['.MTS_TOKEN_SECRET'] || '').trim();
     if (!pk || !tokenId || !secret) return;
 
-    const klinesRes = await fetch('https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=100');
-    if (!klinesRes.ok) return;
-    const rawKlines = await klinesRes.json();
+    const rawKlines = await fetchServerBinanceKlines('BTCUSDT', '1m', 100);
     if (!Array.isArray(rawKlines) || rawKlines.length < 46) return;
 
     const now = Date.now();
@@ -1104,14 +1121,14 @@ async function pollServerClosedCandlesStrategy() {
 
     let hadArmedUpper = false;
     let hadArmedLower = false;
-    let latestSignal = null;
-    let latestZ = 0;
+    let latestEntrySignal = null;
+    let latestEntryZ = 0;
+    let latestEntryTime = 0;
     const latestClosedTime = times[times.length - 1];
 
     for (let i = 44; i < closes.length; i++) {
       const windowSlice = closes.slice(i - 44, i + 1);
       const z = computeServerRollingZScore(windowSlice);
-      latestZ = z;
       let sig = null;
 
       // Short (DOWN): First confirmation >= +2.5, Second confirmation <= +2.3
@@ -1136,52 +1153,76 @@ async function pollServerClosedCandlesStrategy() {
         hadArmedLower = false;
       }
 
-      if (i === closes.length - 1 || ((sig === 'ENTRY_SHORT' || sig === 'ENTRY_LONG') && now - times[i] <= 15 * 60 * 1000)) {
-        if (sig === 'ENTRY_SHORT' || sig === 'ENTRY_LONG') {
-          latestSignal = sig;
-          latestZ = z;
-        } else if (!latestSignal && i === closes.length - 1) {
-          latestSignal = sig;
-        }
+      if ((sig === 'ENTRY_SHORT' || sig === 'ENTRY_LONG') && now - times[i] <= 15 * 60 * 1000) {
+        latestEntrySignal = sig;
+        latestEntryZ = z;
+        latestEntryTime = times[i];
       }
     }
 
     if (latestClosedTime > serverLastEvaluatedClosedCandleTime) {
       serverLastEvaluatedClosedCandleTime = latestClosedTime;
+    }
 
-      if (latestSignal === 'ENTRY_SHORT' || latestSignal === 'ENTRY_LONG') {
-        const direction = latestSignal === 'ENTRY_LONG' ? 'LONG' : 'SHORT';
-        const outcome = direction === 'LONG' ? 'UP' : 'DOWN';
-        console.log(
-          `[VM AUTONOMOUS 1m ENGINE] Closed candle (${new Date(latestClosedTime).toISOString()}) confirmed ${latestSignal} at Z=${latestZ.toFixed(2)}σ! Executing on-chain order...`
-        );
+    if (
+      (latestEntrySignal === 'ENTRY_SHORT' || latestEntrySignal === 'ENTRY_LONG') &&
+      latestEntryTime > serverLastEvaluatedEntrySignalTime
+    ) {
+      serverLastEvaluatedEntrySignalTime = latestEntryTime;
+      const direction = latestEntrySignal === 'ENTRY_LONG' ? 'LONG' : 'SHORT';
+      const outcome = direction === 'LONG' ? 'UP' : 'DOWN';
+      console.log(
+        `[VM AUTONOMOUS 1m ENGINE] Closed candle (${new Date(latestEntryTime).toISOString()}) confirmed ${latestEntrySignal} at Z=${latestEntryZ.toFixed(2)}σ! Executing on-chain GTC order...`
+      );
 
-        setTimeout(async () => {
-          if (isServerExecutingOrder) return;
-          const liveMkt = cachedActiveBtc || (await fetchLive15MinBtcMarket());
-          const guard = inMemoryTradeGuard || loadTradeGuardFromDisk();
-          if (guard && liveMkt?.slug && guard.marketSlug === liveMkt.slug) {
-            return; // Already executed for this 15m contract
-          }
-          console.log(`[VM AUTONOMOUS 1m ENGINE] Executing ${direction} (${outcome}) order directly from server...`);
-          await executeLimitlessOrderOnServer({
-            market: liveMkt?.slug || 'btc-up-or-down-15-min',
-            direction,
-            outcome,
-            type: 'GTC',
-            price: 0.99,
-            candleTime: latestClosedTime,
-          });
-        }, 1500);
-      }
+      setTimeout(async () => {
+        if (isServerExecutingOrder) return;
+        const liveMkt = cachedActiveBtc || (await fetchLive15MinBtcMarket());
+        const guard = inMemoryTradeGuard || loadTradeGuardFromDisk();
+        if (guard && liveMkt?.slug && guard.marketSlug === liveMkt.slug) {
+          return; // Already executed for this 15m contract
+        }
+        console.log(`[VM AUTONOMOUS 1m ENGINE] Executing ${direction} (${outcome}) GTC order directly from server...`);
+        await executeLimitlessOrderOnServer({
+          market: liveMkt?.slug || 'btc-up-or-down-15-min',
+          direction,
+          outcome,
+          type: 'GTC',
+          price: 0.99,
+          candleTime: latestEntryTime,
+        });
+      }, 1000);
     }
   } catch {
     // safe continuation
   }
 }
 
-setInterval(pollServerClosedCandlesStrategy, 8000);
+setInterval(pollServerClosedCandlesStrategy, 3000);
 pollServerClosedCandlesStrategy();
+
+// Binance Klines Proxy with global data-api.binance.vision failover for US Google Cloud VMs
+app.get('/api/binance/*', async (req, res) => {
+  try {
+    const targetPath = req.originalUrl.replace(/^\/api\/binance/, '');
+    const urls = [
+      `https://data-api.binance.vision${targetPath}`,
+      `https://api.binance.com${targetPath}`,
+    ];
+    for (const u of urls) {
+      try {
+        const r = await fetch(u);
+        if (r.ok) {
+          const data = await r.json();
+          return res.json(data);
+        }
+      } catch {}
+    }
+    res.status(502).json({ error: 'Unable to reach Binance market data endpoints' });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
 
 // General Limitless API proxy to avoid CORS and browser restrictions
 app.all('/api/limitless/*', async (req, res) => {

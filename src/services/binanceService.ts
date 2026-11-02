@@ -9,6 +9,8 @@ export class BinanceService {
   private isPollingActive = false;
   private lastCandleTime = 0;
 
+  private closedSyncTimer: number | null = null;
+
   // Real candidate endpoints in order of browser compatibility (port 443 preferred over 9443)
   private getWsEndpoints(symbol: string, interval: string): string[] {
     const s = symbol.toLowerCase();
@@ -24,15 +26,15 @@ export class BinanceService {
    */
   public async fetchHistoricalCandles(
     symbol: string = 'BTCUSDT',
-    interval: string = '1h',
+    interval: string = '1m',
     limit: number = 100,
     restUrl: string = 'https://api.binance.com/api/v3/klines'
   ): Promise<CandleData[]> {
     const endpoints = [
+      'https://data-api.binance.vision/api/v3/klines',
       restUrl,
       'https://api.binance.com/api/v3/klines',
       '/api/binance/api/v3/klines',
-      'https://api.binance.vision/api/v3/klines',
     ];
 
     for (const url of endpoints) {
@@ -69,7 +71,7 @@ export class BinanceService {
           }
           return candles;
         }
-      } catch (err) {
+      } catch {
         // Silently try next fallback endpoint
       }
     }
@@ -78,17 +80,19 @@ export class BinanceService {
   }
 
   /**
-   * Connects to live Binance market data with multi-endpoint failover
-   * and automatic real-time live polling fallback if browser WebSocket is blocked
+   * Connects to live Binance market data with multi-endpoint failover,
+   * continuous closed-candle REST verification, and automatic live polling fallback
    */
   public connectWebSocket(
     symbol: string,
     interval: string,
     onTick: (candle: CandleData, isClosed: boolean) => void,
-    onStatusChange: (status: 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED') => void
+    onStatusChange: (status: 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED') => void,
+    onClosedCandlesSync?: (recentCandles: CandleData[]) => void
   ) {
     this.isExplicitlyClosed = false;
     this.stopPolling();
+    this.startClosedCandlesSync(symbol, interval, onClosedCandlesSync);
 
     const endpoints = this.getWsEndpoints(symbol, interval);
     const targetUrl = endpoints[this.wsEndpointIndex % endpoints.length];
@@ -108,6 +112,7 @@ export class BinanceService {
           const message = JSON.parse(event.data);
           if (message.e === 'kline' && message.k) {
             const k = message.k;
+            const prevTime = this.lastCandleTime;
             const candle: CandleData = {
               time: Number(k.t),
               open: parseFloat(k.o),
@@ -119,6 +124,11 @@ export class BinanceService {
             };
             this.lastCandleTime = candle.time;
             onTick(candle, Boolean(k.x));
+
+            // If a candle just closed or rolled over to a new minute, immediately reconcile official closed candles via REST
+            if (Boolean(k.x) || (prevTime > 0 && candle.time > prevTime)) {
+              this.syncOfficialClosedCandlesNow(symbol, interval, onClosedCandlesSync);
+            }
           }
         } catch {
           // Handled safely
@@ -126,11 +136,9 @@ export class BinanceService {
       };
 
       this.ws.onerror = () => {
-        // Do not throw console.error - gracefully fail over to next endpoint or live polling
         this.wsEndpointIndex++;
         if (this.wsEndpointIndex >= endpoints.length) {
-          // All direct browser WebSockets blocked by sandbox/CSP - activate Live High-Frequency Poller
-          this.startLivePolling(symbol, interval, onTick, onStatusChange);
+          this.startLivePolling(symbol, interval, onTick, onStatusChange, onClosedCandlesSync);
         }
       };
 
@@ -138,13 +146,58 @@ export class BinanceService {
         if (!this.isExplicitlyClosed && !this.isPollingActive) {
           if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
           this.reconnectTimer = window.setTimeout(() => {
-            this.connectWebSocket(symbol, interval, onTick, onStatusChange);
+            this.connectWebSocket(symbol, interval, onTick, onStatusChange, onClosedCandlesSync);
           }, 3000);
         }
       };
     } catch {
-      // If direct WebSocket instantiation is disallowed by environment, switch to live polling
-      this.startLivePolling(symbol, interval, onTick, onStatusChange);
+      this.startLivePolling(symbol, interval, onTick, onStatusChange, onClosedCandlesSync);
+    }
+  }
+
+  private async syncOfficialClosedCandlesNow(
+    symbol: string,
+    interval: string,
+    onClosedCandlesSync?: (recentCandles: CandleData[]) => void
+  ) {
+    if (this.isExplicitlyClosed || !onClosedCandlesSync) return;
+    try {
+      const recent = await this.fetchHistoricalCandles(symbol, interval, 20);
+      if (recent.length > 0) {
+        onClosedCandlesSync(recent);
+      }
+    } catch {
+      // Safe continuation
+    }
+  }
+
+  /**
+   * Periodic 4-second official REST closed-candle reconciliation
+   * Guarantees that backgrounded tabs or missed WebSocket frames never miss a closed 1m candle
+   */
+  private startClosedCandlesSync(
+    symbol: string,
+    interval: string,
+    onClosedCandlesSync?: (recentCandles: CandleData[]) => void
+  ) {
+    this.stopClosedCandlesSync();
+    if (!onClosedCandlesSync) return;
+
+    const runSync = async () => {
+      if (this.isExplicitlyClosed) return;
+      await this.syncOfficialClosedCandlesNow(symbol, interval, onClosedCandlesSync);
+      if (!this.isExplicitlyClosed) {
+        this.closedSyncTimer = window.setTimeout(runSync, 4000);
+      }
+    };
+
+    this.closedSyncTimer = window.setTimeout(runSync, 4000);
+  }
+
+  private stopClosedCandlesSync() {
+    if (this.closedSyncTimer) {
+      clearTimeout(this.closedSyncTimer);
+      this.closedSyncTimer = null;
     }
   }
 
@@ -156,7 +209,8 @@ export class BinanceService {
     symbol: string,
     interval: string,
     onTick: (candle: CandleData, isClosed: boolean) => void,
-    onStatusChange: (status: 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED') => void
+    onStatusChange: (status: 'CONNECTING' | 'CONNECTED' | 'DISCONNECTED') => void,
+    onClosedCandlesSync?: (recentCandles: CandleData[]) => void
   ) {
     if (this.isPollingActive) return;
     this.isPollingActive = true;
@@ -165,19 +219,14 @@ export class BinanceService {
     const poll = async () => {
       if (this.isExplicitlyClosed) return;
       try {
-        const prevCandleTime = this.lastCandleTime;
-        const candles = await this.fetchHistoricalCandles(symbol, interval, 2);
+        const candles = await this.fetchHistoricalCandles(symbol, interval, 20);
         if (candles.length > 0) {
-          const latest = candles[candles.length - 1];
-          if (prevCandleTime > 0 && latest.time > prevCandleTime && candles.length >= 2) {
-            const justClosedCandle: CandleData = {
-              ...candles[candles.length - 2],
-              isClosed: true,
-            };
-            onTick(justClosedCandle, true);
+          if (onClosedCandlesSync) {
+            onClosedCandlesSync(candles);
+          } else {
+            const latest = candles[candles.length - 1];
+            onTick({ ...latest, isClosed: Boolean(latest.isClosed) }, Boolean(latest.isClosed));
           }
-          this.lastCandleTime = latest.time;
-          onTick({ ...latest, isClosed: Boolean(latest.isClosed) }, Boolean(latest.isClosed));
         }
       } catch {
         // Continue polling safely
@@ -202,6 +251,7 @@ export class BinanceService {
   public disconnect() {
     this.isExplicitlyClosed = true;
     this.stopPolling();
+    this.stopClosedCandlesSync();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

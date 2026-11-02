@@ -1132,7 +1132,7 @@ export default defineConfig(() => {
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
       proxy: {
         '/api/binance': {
-          target: 'https://api.binance.com',
+          target: 'https://data-api.binance.vision',
           changeOrigin: true,
           rewrite: (p) => p.replace(/^\/api\/binance/, ''),
         },
