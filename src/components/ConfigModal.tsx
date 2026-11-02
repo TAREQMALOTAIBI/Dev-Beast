@@ -325,13 +325,13 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                   zScoreLower: -2.5,
                   zScoreLowerEntry: -2.3,
                   maxRiskPercent: 0.04,
-                  maxPriceCents: 0.99,
+                  maxPriceCents: 0.20,
                   orderType: 'GTC',
                   cooldownMinutes: 15,
                 })}
                 className="px-2.5 py-1 rounded text-[11px] font-bold bg-emerald-950/80 hover:bg-emerald-900/90 text-emerald-300 border border-emerald-600/50 cursor-pointer"
               >
-                {isAr ? '🎯 الإعدادات المعتمدة (1m · 45 شمعة · تأكيد أول 2.5 وتأكيد ثاني 2.3 · 4% · GTC)' : '🎯 Approved Preset (1m · 45 Candles · 2.5 -> 2.3 · 4% · GTC)'}
+                {isAr ? '🎯 الإعدادات المعتمدة (1m · 45 شمعة · تأكيد أول 2.5 وتأكيد ثاني 2.3 · 4% · GTC ≤ 20¢)' : '🎯 Approved Preset (1m · 45 Candles · 2.5 -> 2.3 · 4% · GTC ≤ 20¢)'}
               </button>
             </div>
 
@@ -416,7 +416,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
           {/* Section 4: Risk Sizing & Direct Order Execution */}
           <div className="border-t border-slate-800 pt-4">
             <h3 className="font-semibold text-slate-100 uppercase tracking-wider text-[11px] mb-3 text-sky-400">
-              {isAr ? 'حجم الصفقة ونوع الأمر (4% ثابت من الرصيد لكل عقد 15m · GTC بدون سقف سعر)' : 'Bet Size & Order Type (Fixed 4% Bankroll per 15m Contract · GTC No Max Price)'}
+              {isAr ? 'حجم الصفقة ونوع الأمر (4% ثابت من الرصيد لكل عقد 15m · GTC بحد دخول ≤ 20 سنت)' : 'Bet Size & Order Type (Fixed 4% Bankroll per 15m Contract · GTC Limit ≤ 20¢)'}
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
@@ -434,15 +434,15 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
 
               <div>
                 <label className="block text-slate-400 mb-1">
-                  {isAr ? 'سقف سعر الدخول (بدون سقف = 0.99)' : 'Max Entry Price (0.99 = No Cap)'}
+                  {isAr ? 'سقف سعر الدخول (0.20 = 20 سنت وتحت)' : 'Max Entry Price (0.20 = ≤ 20¢)'}
                 </label>
                 <input
                   type="number"
                   step="0.01"
                   min="0.01"
-                  max="0.99"
+                  max="0.20"
                   value={draft.maxPriceCents}
-                  onChange={(e) => setDraft({ ...draft, maxPriceCents: parseFloat(e.target.value) || 0.99 })}
+                  onChange={(e) => setDraft({ ...draft, maxPriceCents: Math.min(parseFloat(e.target.value) || 0.20, 0.20) })}
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
                 />
               </div>
@@ -466,8 +466,8 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
             <div className="mt-2.5 p-2.5 rounded-lg bg-emerald-950/40 border border-emerald-700/50 text-[11px] text-emerald-300 space-y-1.5">
               <div className="font-semibold text-emerald-200">
                 {isAr
-                  ? '✓ أمر GTC بدون سقف لسعر الدخول: يتم تنفيذ الأمر مباشرة بسعر العرض الحي في دفتر الأوامر (Live Market Ask) دون تقييد بسقف سعر.'
-                  : '✓ GTC Order without Max Entry Price: Executes directly at the live market ask price without an entry price ceiling.'}
+                  ? '✓ أمر GTC بحد دخول 20 سنت وتحت (≤ $0.20): يتم إرسال الأمر بسعر 20 سنت أو أقل بحيث لا يتم الشراء أبداً فوق 20 سنت.'
+                  : '✓ GTC Order with ≤ 20¢ ($0.20) Entry Limit: Places order at 20¢ or below so you never enter above 20 cents.'}
               </div>
               <div className="text-sky-300">
                 {isAr

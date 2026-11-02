@@ -919,17 +919,15 @@ function setupApiMiddlewares(middlewares: any) {
           }));
         }
 
-        // Extract live market ask price for this outcome (GTC Order without max Entry price)
-        const marketAsk = isLong
-          ? (marketData?.tradePrices?.buy?.market?.[0] ?? marketData?.prices?.[0] ?? 0.50)
-          : (marketData?.tradePrices?.buy?.market?.[1] ?? marketData?.prices?.[1] ?? 0.50);
-
-        let inputPrice = Number(price) > 1 ? Number(price) / 100 : (Number(price) || marketAsk);
-        if (!inputPrice || inputPrice >= 0.99) {
-          inputPrice = marketAsk;
-        }
-        // Price must have max 3 decimal places for Limitless SDK tick alignment (0.001)
-        const tickAlignedPrice = Math.max(0.001, Math.min(0.999, parseFloat(Number(inputPrice).toFixed(3))));
+        // Direct GTC Limit Price at 20 cents ($0.20) — sent immediately upon 2nd confirmation to rest in orderbook at <= 20¢
+        const MAX_ENTRY_PRICE_CAP = 0.20;
+        const numericClientPrice = Number(price) > 1 ? Number(price) / 100 : Number(price);
+        const desiredLimitPrice =
+          numericClientPrice && numericClientPrice > 0 && numericClientPrice <= MAX_ENTRY_PRICE_CAP
+            ? numericClientPrice
+            : MAX_ENTRY_PRICE_CAP;
+        // Price must have max 3 decimal places for Limitless SDK tick alignment (0.001) and strictly <= 0.20
+        const tickAlignedPrice = Math.max(0.001, Math.min(MAX_ENTRY_PRICE_CAP, parseFloat(Number(desiredLimitPrice).toFixed(3))));
 
         const { ethers } = await import('ethers');
         const sdk = await import('@limitless-exchange/sdk');

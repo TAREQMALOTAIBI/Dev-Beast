@@ -49,8 +49,8 @@ export const KellyLab: React.FC<KellyLabProps> = ({
           </div>
           <p className="text-[10px] text-slate-500 mt-1">
             {isAr
-              ? 'أمر GTC بسعر العرض الحي بدون سقف سعر دخول'
-              : 'GTC Order at live market ask (No max entry price)'}
+              ? 'أمر GTC بحد دخول 20 سنت وتحت (≤ $0.20)'
+              : 'GTC Order with max entry limit ≤ $0.20 (20¢)'}
           </p>
         </div>
 
@@ -69,14 +69,14 @@ export const KellyLab: React.FC<KellyLabProps> = ({
 
         <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800/80">
           <div className="text-slate-400 mb-1 flex items-center justify-between">
-            <span>{isAr ? 'نوع الأمر وسقف السعر' : 'Order Type & Price Cap'}</span>
+            <span>{isAr ? 'نوع الأمر وحد الدخول' : 'Order Type & Entry Limit'}</span>
             <Percent className="w-3.5 h-3.5 text-amber-400" />
           </div>
           <div className="text-lg font-mono font-bold text-amber-400">
-            GTC (No Cap)
+            GTC (≤ 20¢)
           </div>
           <p className="text-[10px] text-slate-500 mt-1 font-mono">
-            {isAr ? 'بدون سقف سعر دخول' : 'Without max entry price'}
+            {isAr ? 'حد دخول عند 20 سنت وتحت ($0.20)' : 'Max entry price ≤ $0.20 (20¢)'}
           </p>
         </div>
 
@@ -124,7 +124,7 @@ export const KellyLab: React.FC<KellyLabProps> = ({
             <div className="text-xl font-mono font-bold text-sky-400">
               {kelly.numberOfContracts}{' '}
               <span className="text-xs text-slate-400 font-normal">
-                ({isAr ? 'بسعر السوق الحي' : '@ Live Market Price'})
+                ({isAr ? 'بحد دخول ≤ 20¢' : '@ ≤ 20¢ Limit'})
               </span>
             </div>
           </div>
@@ -135,7 +135,7 @@ export const KellyLab: React.FC<KellyLabProps> = ({
               <span>{isAr ? 'نوع الأمر المعتمد' : 'Order Execution'}</span>
             </div>
             <div className="text-xs font-mono text-emerald-300 font-semibold mt-1">
-              {isAr ? 'GTC بدون سقف سعر دخول' : 'GTC Without Max Entry Price'}
+              {isAr ? 'GTC بحد دخول 20 سنت وتحت' : 'GTC Limit ≤ 20¢ ($0.20)'}
             </div>
           </div>
         </div>

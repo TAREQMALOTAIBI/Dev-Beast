@@ -904,30 +904,16 @@ async function executeLimitlessOrderOnServer(params = {}) {
       };
     }
 
-    // Resolve true live market Best Ask price for this outcome (GTC Order without max Entry price)
-    // Note: In Limitless CLOB, orderbook asks[0].price is the Best Ask for YES, and (1 - bids[0].price) is the Best Ask for NO
-    const obYesAsk =
-      liveOb?.asks?.[0]?.price && Number(liveOb.asks[0].price) > 0 && Number(liveOb.asks[0].price) < 1
-        ? Number(liveOb.asks[0].price)
-        : null;
-    const obNoAsk =
-      liveOb?.bids?.[0]?.price && Number(liveOb.bids[0].price) > 0 && Number(liveOb.bids[0].price) < 1
-        ? parseFloat((1 - Number(liveOb.bids[0].price)).toFixed(3))
-        : null;
-
-    const marketAsk = isLong
-      ? (marketData?.tradePrices?.buy?.market?.[0] ?? obYesAsk ?? marketData?.prices?.[0] ?? 0.52)
-      : (marketData?.tradePrices?.buy?.market?.[1] ?? obNoAsk ?? marketData?.prices?.[1] ?? 0.52);
-
-    // Always prefer the live marketAsk over a default 0.50 or 0.99 placeholder from the client
+    // Direct GTC Limit Price at 20 cents ($0.20) — sent immediately upon 2nd confirmation to rest in orderbook at <= 20¢
+    const MAX_ENTRY_PRICE_CAP = 0.20;
     const numericClientPrice = Number(price) > 1 ? Number(price) / 100 : Number(price);
-    const inputPrice =
-      !numericClientPrice || numericClientPrice >= 0.99 || Math.abs(numericClientPrice - 0.5) < 0.001
-        ? marketAsk
-        : marketAsk || numericClientPrice;
+    const desiredLimitPrice =
+      numericClientPrice && numericClientPrice > 0 && numericClientPrice <= MAX_ENTRY_PRICE_CAP
+        ? numericClientPrice
+        : MAX_ENTRY_PRICE_CAP;
 
-    // Price must have max 3 decimal places for Limitless SDK tick alignment (0.001)
-    const tickAlignedPrice = Math.max(0.001, Math.min(0.999, parseFloat(Number(inputPrice).toFixed(3))));
+    // Price must have max 3 decimal places for Limitless SDK tick alignment (0.001) and strictly <= 0.20
+    const tickAlignedPrice = Math.max(0.001, Math.min(MAX_ENTRY_PRICE_CAP, parseFloat(Number(desiredLimitPrice).toFixed(3))));
 
     const { ethers } = await import('ethers');
     const sdk = await import('@limitless-exchange/sdk');
@@ -1188,7 +1174,7 @@ async function pollServerClosedCandlesStrategy() {
           direction,
           outcome,
           type: 'GTC',
-          price: 0.99,
+          price: 0.20,
           candleTime: latestEntryTime,
         });
       }, 1000);

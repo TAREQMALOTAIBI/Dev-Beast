@@ -429,15 +429,15 @@ export default function App() {
                       </span>
                     </div>
                     <div className="flex justify-between text-slate-400">
-                      <span>{isAr ? 'نوع الأمر وسعر التنفيذ:' : 'Order Type & Price:'}</span>
+                      <span>{isAr ? 'نوع الأمر وحد الدخول:' : 'Order Type & Limit:'}</span>
                       <span className="text-sky-400 font-bold">
-                        {config.orderType} ({isAr ? 'بسعر السوق الحي بدون سقف' : 'Live Market Price - No Cap'})
+                        {config.orderType} ({isAr ? '20 سنت وتحت ≤ $0.20' : '≤ 20¢ ($0.20)'})
                       </span>
                     </div>
                     <div className="flex justify-between text-slate-400">
                       <span>{isAr ? 'نمط التنفيذ المعتمد:' : 'Execution Mode:'}</span>
                       <span className="text-emerald-400 font-bold">
-                        {isAr ? 'أمر GTC موحد مباشر (بدون سقف سعر دخول)' : 'Direct GTC Order (Without Max Entry Price)'}
+                        {isAr ? 'أمر GTC موحد مباشر (بحد دخول 20 سنت وتحت)' : 'Direct GTC Order (Entry Limit ≤ 20¢)'}
                       </span>
                     </div>
                     <div className="flex justify-between items-center text-slate-400 pt-1.5 border-t border-slate-800/80 text-[11px]">

@@ -23,7 +23,7 @@ const DEFAULT_CONFIG: BotConfig = {
   zScoreEntry: 2.3, // Second confirmation: +2.3
   zScoreLower: -2.5, // First confirmation: -2.5
   zScoreLowerEntry: -2.3, // Second confirmation: -2.3
-  maxPriceCents: 0.99, // GTC Order without max Entry price
+  maxPriceCents: 0.20, // GTC Order entry limit: 20 cents ($0.20) and below
   maxRiskPercent: 0.04, // Fixed 4% of bankroll per 15m contract
   orderType: 'GTC', // Good-Til-Cancelled
   fractionChunks: 1, // 1 unified single direct order
@@ -76,9 +76,9 @@ export function useTradingBot() {
         parsed.zScoreEntry = 2.3;
         parsed.zScoreLower = -2.5;
         parsed.zScoreLowerEntry = -2.3;
-        // Enforce GTC Order without max Entry price
+        // Enforce GTC Order with max Entry price limit at 20 cents ($0.20) and below
         parsed.orderType = 'GTC';
-        parsed.maxPriceCents = 0.99;
+        parsed.maxPriceCents = 0.20;
         parsed.fractionChunks = 1;
         parsed.chunkDelayMs = 0;
         // Enforce max Fixed 4% of bankroll per 15m contract
@@ -558,24 +558,10 @@ export function useTradingBot() {
     const isLong = direction === 'LONG';
     const outcome = isLong ? 'UP' : 'DOWN';
 
-    // Live contract pricing based on chosen outcome (UP or DOWN) — GTC without max Entry price
-    const currentMarketData = activeLimitlessMarketRef.current;
-    const obAsks = orderbookRef.current?.orderbook?.asks;
-    const obBids = orderbookRef.current?.orderbook?.bids;
-    const bestYesAsk = obAsks && obAsks.length > 0 && obAsks[0].price > 0 && obAsks[0].price < 1 ? obAsks[0].price : null;
-    const bestNoAsk = obBids && obBids.length > 0 && obBids[0].price > 0 && obBids[0].price < 1 ? 1 - obBids[0].price : null;
-
-    const yesPrice = currentMarketData?.tradePrices?.buy?.market?.[0]
-      ?? bestYesAsk
-      ?? currentMarketData?.prices?.[0]
-      ?? 0.52;
-    const noPrice = currentMarketData?.tradePrices?.buy?.market?.[1]
-      ?? bestNoAsk
-      ?? currentMarketData?.prices?.[1]
-      ?? (1 - yesPrice);
-    const liveContractPrice = isLong ? yesPrice : noPrice;
-    // Align to 3 decimals as strictly required by Limitless SDK (multiple of 0.001) — NO max entry price ceiling
-    const effectiveContractPrice = parseFloat(Math.max(0.001, Math.min(0.999, liveContractPrice)).toFixed(3));
+    // Direct GTC Limit Price at 20 cents ($0.20) — sent immediately after 2nd confirmation without any 3rd orderbook condition
+    // Rests in the orderbook at 20¢ (or fills immediately if asks are already <= 20¢)
+    const maxEntryCap = Math.min(cfg.maxPriceCents && cfg.maxPriceCents > 0 ? cfg.maxPriceCents : 0.20, 0.20);
+    const effectiveContractPrice = parseFloat(Math.max(0.001, maxEntryCap).toFixed(3));
 
     // Hard Risk Guard: Fixed 4% of bankroll per 15m contract
     const maxRiskCap = Math.min(cfg.maxRiskPercent || 0.04, 0.04);
@@ -647,12 +633,12 @@ export function useTradingBot() {
 
     try {
       console.log(
-        `[LIVE DIRECT EXECUTION - ${direction}] Sending unified GTC order of ${effectiveContracts} contracts to Limitless (${resolvedMarketSlug} - ${outcome}) @ $${effectiveContractPrice} [Fixed 4% Bankroll - No Max Entry Price]...`
+        `[LIVE DIRECT EXECUTION - ${direction}] Sending unified GTC order of ${effectiveContracts} contracts to Limitless (${resolvedMarketSlug} - ${outcome}) @ $${effectiveContractPrice} [Fixed 4% Bankroll - Max Entry ≤ 20¢]...`
       );
 
       limitlessService.logDirect(
         'OUTGOING',
-        `🚀 [تنفيذ صفقة GTC مباشرة] إرسال أمر فوري GTC لعدد ${effectiveContracts} عقود ${outcome} (${direction}) بسعر السوق $${effectiveContractPrice} إلى عقد 15m (${resolvedMarketSlug}) بحجم ثابت 4% من الرصيد...`
+        `🚀 [تنفيذ صفقة GTC بحد دخول ≤ 20¢] إرسال أمر GTC لعدد ${effectiveContracts} عقود ${outcome} (${direction}) بسعر $${effectiveContractPrice} (≤ 20 سنت) إلى عقد 15m (${resolvedMarketSlug}) بحجم ثابت 4% من الرصيد...`
       );
 
       const executed = await limitlessService.executeChunkedOrder(
@@ -707,7 +693,7 @@ export function useTradingBot() {
       setCurrentBalance((prev) => Math.max(0, prev - invested));
       currentBalanceRef.current = Math.max(0, currentBalanceRef.current - invested);
 
-      const successNotice = `✅ تم إرسال صفقة بنجاح: شراء ${outcome} (${direction}) لعدد ${effectiveContracts} عقد بقيمة $${invested.toFixed(2)} (4% ثابتة من الرصيد بدون سقف سعر دخول) على عقد الـ 15 دقيقة ${resolvedMarketSlug}`;
+      const successNotice = `✅ تم إرسال صفقة بنجاح: شراء ${outcome} (${direction}) لعدد ${effectiveContracts} عقد بسعر $${effectiveContractPrice} (≤ 20¢) وبقيمة $${invested.toFixed(2)} (4% ثابتة من الرصيد) على عقد الـ 15 دقيقة ${resolvedMarketSlug}`;
       limitlessService.logDirect('SYSTEM', successNotice);
       setExecutionNotice({
         type: 'SUCCESS',
