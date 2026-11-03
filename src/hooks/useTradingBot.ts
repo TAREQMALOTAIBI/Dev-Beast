@@ -11,7 +11,7 @@ import {
 } from '../types/bot';
 import { binanceService } from '../services/binanceService';
 import { limitlessService, LimitlessStatus } from '../services/limitlessService';
-import { calculateZScore, calculateKellySizing } from '../utils/math';
+import { calculateZScore, calculateKellySizing, evaluateThreeFilters, ThreeFiltersStatus } from '../utils/math';
 import { soundController } from '../utils/audio';
 
 const DEFAULT_CONFIG: BotConfig = {
@@ -19,10 +19,10 @@ const DEFAULT_CONFIG: BotConfig = {
   timeframe: '1m',
   periods: 30, // 30-period SMA
   strategyDirection: 'BOTH', // 'BOTH' | 'LONG_ONLY' | 'SHORT_ONLY'
-  zScoreUpper: 2.0, // First confirmation: +2.0
-  zScoreEntry: 1.0, // Second confirmation: +1.0
-  zScoreLower: -2.0, // First confirmation: -2.0
-  zScoreLowerEntry: -1.0, // Second confirmation: -1.0
+  zScoreUpper: 2.2, // Single Direct Confirmation: +2.20σ
+  zScoreEntry: 2.2, // Single Direct Confirmation: +2.20σ
+  zScoreLower: -2.2, // Single Direct Confirmation: -2.20σ
+  zScoreLowerEntry: -2.2, // Single Direct Confirmation: -2.20σ
   maxPriceCents: 0.20, // GTC Order Max Share Price: $0.20 or 20% (20¢)
   maxRiskPercent: 0.04, // Maximum capital ratio: 4% of bankroll per 15m contract
   orderType: 'GTC', // Good-Til-Cancelled
@@ -71,11 +71,11 @@ export function useTradingBot() {
         if (!parsed.strategyDirection) {
           parsed.strategyDirection = 'BOTH';
         }
-        // Enforce Z-Score First confirmation 2.0 and Second confirmation 1.0
-        parsed.zScoreUpper = 2.0;
-        parsed.zScoreEntry = 1.0;
-        parsed.zScoreLower = -2.0;
-        parsed.zScoreLowerEntry = -1.0;
+        // Enforce Single Direct Confirmation at ±2.20σ + 3 Filters
+        parsed.zScoreUpper = 2.2;
+        parsed.zScoreEntry = 2.2;
+        parsed.zScoreLower = -2.2;
+        parsed.zScoreLowerEntry = -2.2;
         // Enforce GTC Order with Max_Share_Price $0.20 (20¢ / 20%)
         parsed.orderType = 'GTC';
         parsed.maxPriceCents = 0.20;
@@ -114,6 +114,7 @@ export function useTradingBot() {
   const [isEntrySignal, setIsEntrySignal] = useState<boolean>(false);
   const [currentBalance, setCurrentBalance] = useState<number>(0);
   const [liveUsdcBalance, setLiveUsdcBalance] = useState<number>(0);
+  const [threeFiltersStatus, setThreeFiltersStatus] = useState<ThreeFiltersStatus | null>(null);
   const [executionNotice, setExecutionNotice] = useState<{
     type: 'SUCCESS' | 'WARNING' | 'ERROR';
     message: string;
@@ -150,7 +151,24 @@ export function useTradingBot() {
   const [tradeHistory, setTradeHistory] = useState<TradeOrder[]>(() => {
     try {
       const saved = localStorage.getItem('limitless_bot_trade_history');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.map((item, idx) => ({
+            ...item,
+            id: item?.id || `trade-${idx}`,
+            timestamp: Number(item?.timestamp) || Date.now(),
+            market: String(item?.market || 'btc-up-or-down-15-min'),
+            direction: item?.direction === 'LONG' ? 'LONG' : 'SHORT',
+            triggerZScore: Number.isFinite(Number(item?.triggerZScore)) ? Number(item.triggerZScore) : 0,
+            totalContracts: Number.isFinite(Number(item?.totalContracts)) ? Number(item.totalContracts) : 0,
+            contractPrice: Number.isFinite(Number(item?.contractPrice)) ? Number(item.contractPrice) : 0.2,
+            totalInvestmentUsd: Number.isFinite(Number(item?.totalInvestmentUsd)) ? Number(item.totalInvestmentUsd) : 0,
+            chunks: Array.isArray(item?.chunks) ? item.chunks : [],
+            status: item?.status || 'COMPLETED',
+          }));
+        }
+      }
     } catch {}
     return [];
   });
@@ -178,6 +196,7 @@ export function useTradingBot() {
   const entryLongCandlesRef = useRef<Set<number>>(new Set());
   const lastEvaluatedClosedCandleTimeRef = useRef<number>(0);
   const lastEvaluatedEntrySignalTimeRef = useRef<number>(0);
+  const lastFilterBlockLogTimeRef = useRef<number>(0);
   const binanceStatusRef = useRef<'CONNECTING' | 'CONNECTED' | 'DISCONNECTED'>(binanceStatus);
   const botActiveRef = useRef<boolean>(botActive);
   const configRef = useRef<BotConfig>(config);
@@ -315,67 +334,70 @@ export function useTradingBot() {
       let signal: 'ARMED_UPPER' | 'ARMED_LOWER' | 'ENTRY_SHORT' | 'ENTRY_LONG' | 'ARMED' | 'ENTRY' | null = null;
       let dir: 'SHORT' | 'LONG' | null = null;
 
-      // On the current live unclosed candle, preserve intra-candle arming from previous live WebSocket ticks
-      if (isLatestLiveCandle && !isInitialLoad) {
-        hadArmedUpper = hadArmedUpper || crossedUpperThresholdRef.current;
-        hadArmedLower = hadArmedLower || crossedLowerThresholdRef.current;
-      }
-
       // Evaluate on every candle (including the current live unclosed candle) with a full 30-period SMA window
       if (hasFullWindow) {
         const candleTime = candleList[i].time;
-        const wasCandleArmedUpper = armedUpperCandlesRef.current.has(candleTime);
-        const wasCandleArmedLower = armedLowerCandlesRef.current.has(candleTime);
         const wasCandleEntryShort = entryShortCandlesRef.current.has(candleTime);
         const wasCandleEntryLong = entryLongCandlesRef.current.has(candleTime);
 
-        // Upper Direction (Short / DOWN): First confirmation >= +2.0, Second confirmation <= +1.90
+        const sliceUpToI = closes.slice(0, i + 1);
+        const candleFilters = isLatestLiveCandle
+          ? evaluateThreeFilters({
+              closes: sliceUpToI,
+              mean: stats.mean,
+              stdDev: stats.stdDev,
+              openPriceRaw: activeLimitlessMarketRef.current?.openPrice,
+              expirationTimestamp: activeLimitlessMarketRef.current?.expirationTimestamp,
+              minRemainingMinutes: 6,
+            })
+          : evaluateThreeFilters({
+              closes: sliceUpToI,
+              mean: stats.mean,
+              stdDev: stats.stdDev,
+              openPriceRaw: null,
+              expirationTimestamp: null,
+              minRemainingMinutes: 6,
+            });
+
+        // Upper Direction (Short / DOWN): Single Direct Confirmation >= +2.20σ + 3 Filters
         if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'SHORT_ONLY') {
           if (wasCandleEntryShort) {
             hadArmedUpper = false;
             signal = 'ENTRY_SHORT';
             dir = 'SHORT';
-          } else if (stats.zScore >= cfg.zScoreUpper || wasCandleArmedUpper) {
-            hadArmedUpper = true;
-            armedUpperCandleTimeRef.current = candleTime;
-            if (!isInitialLoad && stats.zScore >= cfg.zScoreUpper) {
-              armedUpperCandlesRef.current.add(candleTime);
+          } else if (stats.zScore >= cfg.zScoreUpper) {
+            if (candleFilters.canEnterShort) {
+              hadArmedUpper = true;
+              signal = 'ENTRY_SHORT';
+              dir = 'SHORT';
+            } else {
+              hadArmedUpper = true;
+              armedUpperCandleTimeRef.current = candleTime;
+              signal = 'ARMED_UPPER';
+              dir = 'SHORT';
             }
-            signal = 'ARMED_UPPER';
-            dir = 'SHORT';
-          } else if (hadArmedUpper && stats.zScore <= cfg.zScoreEntry && stats.zScore > 0) {
-            // For historical closed candles, mark disarmed; for the live unclosed candle, keep armed until trade is actually dispatched
-            if (!isLatestLiveCandle) {
-              hadArmedUpper = false;
-            }
-            signal = 'ENTRY_SHORT';
-            dir = 'SHORT';
           } else if (stats.zScore <= 0) {
             hadArmedUpper = false;
           }
         }
 
-        // Lower Direction (Long / UP): First confirmation <= -2.0, Second confirmation >= -1.90
+        // Lower Direction (Long / UP): Single Direct Confirmation <= -2.20σ + 3 Filters
         if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'LONG_ONLY') {
           if (wasCandleEntryLong) {
             hadArmedLower = false;
             signal = 'ENTRY_LONG';
             dir = 'LONG';
-          } else if (stats.zScore <= lowerThresh || wasCandleArmedLower) {
-            hadArmedLower = true;
-            armedLowerCandleTimeRef.current = candleTime;
-            if (!isInitialLoad && stats.zScore <= lowerThresh) {
-              armedLowerCandlesRef.current.add(candleTime);
+          } else if (stats.zScore <= lowerThresh) {
+            if (candleFilters.canEnterLong) {
+              hadArmedLower = true;
+              signal = 'ENTRY_LONG';
+              dir = 'LONG';
+            } else {
+              hadArmedLower = true;
+              armedLowerCandleTimeRef.current = candleTime;
+              signal = 'ARMED_LOWER';
+              dir = 'LONG';
             }
-            signal = 'ARMED_LOWER';
-            dir = 'LONG';
-          } else if (hadArmedLower && stats.zScore >= lowerEntryThresh && stats.zScore < 0) {
-            // For historical closed candles, mark disarmed; for the live unclosed candle, keep armed until trade is actually dispatched
-            if (!isLatestLiveCandle) {
-              hadArmedLower = false;
-            }
-            signal = 'ENTRY_LONG';
-            dir = 'LONG';
           } else if (stats.zScore >= 0) {
             hadArmedLower = false;
           }
@@ -410,8 +432,15 @@ export function useTradingBot() {
       const liveMetric = result[result.length - 1];
       setCurrentZScore(liveMetric.zScore);
 
-      const wasArmedUpper = crossedUpperThresholdRef.current;
-      const wasArmedLower = crossedLowerThresholdRef.current;
+      const liveFilters = evaluateThreeFilters({
+        closes,
+        mean: liveMetric.mean,
+        stdDev: liveMetric.stdDev,
+        openPriceRaw: activeLimitlessMarketRef.current?.openPrice,
+        expirationTimestamp: activeLimitlessMarketRef.current?.expirationTimestamp,
+        minRemainingMinutes: 6,
+      });
+      setThreeFiltersStatus(liveFilters);
 
       crossedUpperThresholdRef.current = hadArmedUpper;
       setCrossedUpperThreshold(hadArmedUpper);
@@ -420,20 +449,23 @@ export function useTradingBot() {
 
       setRecentChartSignal(null);
 
-      // 1) Log First Confirmation (ARMED_UPPER / ARMED_LOWER) immediately on live WebSocket tick
+      // 1) Log if ±2.20σ was reached but one of the 3 filters blocked entry
       if (!isInitialLoad) {
-        if (liveMetric.signal === 'ARMED_UPPER' && !wasArmedUpper) {
-          const armMsg = `⚡ [التأكيد الأول +${cfg.zScoreUpper.toFixed(2)}σ · بث حي فوري] وصل السعر الحي على فريم 1m إلى Z-Score = +${liveMetric.zScore.toFixed(2)}σ. في انتظار ارتداد السعر للتأكيد الثاني (≤ +${cfg.zScoreEntry.toFixed(2)}σ) لتنفيذ صفقة SHORT (DOWN) فوراً دون انتظار إغلاق الشمعة.`;
-          console.log(armMsg);
-          limitlessService.logDirect('SYSTEM', armMsg);
-        } else if (liveMetric.signal === 'ARMED_LOWER' && !wasArmedLower) {
-          const armMsg = `⚡ [التأكيد الأول ${lowerThresh.toFixed(2)}σ · بث حي فوري] وصل السعر الحي على فريم 1m إلى Z-Score = ${liveMetric.zScore.toFixed(2)}σ. في انتظار ارتداد السعر للتأكيد الثاني (≥ ${lowerEntryThresh.toFixed(2)}σ) لتنفيذ صفقة LONG (UP) فوراً دون انتظار إغلاق الشمعة.`;
-          console.log(armMsg);
-          limitlessService.logDirect('SYSTEM', armMsg);
+        const now = Date.now();
+        if (liveMetric.signal === 'ARMED_UPPER' && now - lastFilterBlockLogTimeRef.current > 15000) {
+          lastFilterBlockLogTimeRef.current = now;
+          const blockMsg = `🛡️ [فلتر الحماية الثلاثي] وصل Z-Score إلى +${liveMetric.zScore.toFixed(2)}σ (≥ +${cfg.zScoreUpper.toFixed(2)}σ) ولكن تم حظر دخول SHORT مؤقتاً لأن: ${liveFilters.blockReasonShort || 'أحد الفلاتر الثلاثة غير متحقق'}.`;
+          console.log(blockMsg);
+          limitlessService.logDirect('SYSTEM', blockMsg);
+        } else if (liveMetric.signal === 'ARMED_LOWER' && now - lastFilterBlockLogTimeRef.current > 15000) {
+          lastFilterBlockLogTimeRef.current = now;
+          const blockMsg = `🛡️ [فلتر الحماية الثلاثي] وصل Z-Score إلى ${liveMetric.zScore.toFixed(2)}σ (≤ ${lowerThresh.toFixed(2)}σ) ولكن تم حظر دخول LONG مؤقتاً لأن: ${liveFilters.blockReasonLong || 'أحد الفلاتر الثلاثة غير متحقق'}.`;
+          console.log(blockMsg);
+          limitlessService.logDirect('SYSTEM', blockMsg);
         }
       }
 
-      // 2) Immediately evaluate Second Confirmation Entry Signals (ENTRY_SHORT / ENTRY_LONG) on live WebSocket tick
+      // 2) Immediately evaluate Single Confirmation + 3 Filters Entry Signals (ENTRY_SHORT / ENTRY_LONG) on live WebSocket tick
       if (!isInitialLoad && (liveMetric.signal === 'ENTRY_SHORT' || liveMetric.signal === 'ENTRY_LONG')) {
         const now = Date.now();
         // Enforce Single-Entry Lock per 15m Market + brief 5s anti-spam cooldown if a tick was just evaluated
@@ -442,8 +474,8 @@ export function useTradingBot() {
             lastEvaluatedEntrySignalTimeRef.current = now;
             const isShortSig = liveMetric.signal === 'ENTRY_SHORT';
             const pauseWarn = isShortSig
-              ? `⚠️ تحقق التأكيد الثاني اللحظي (Z=+${liveMetric.zScore.toFixed(2)}σ ≤ +${cfg.zScoreEntry.toFixed(2)}σ) ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`
-              : `⚠️ تحقق التأكيد الثاني اللحظي (Z=${liveMetric.zScore.toFixed(2)}σ ≥ ${lowerEntryThresh.toFixed(2)}σ) ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
+              ? `⚠️ تحقق التأكيد المباشر (+${liveMetric.zScore.toFixed(2)}σ ≥ +${cfg.zScoreUpper.toFixed(2)}σ) + الفلاتر الثلاثة، ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`
+              : `⚠️ تحقق التأكيد المباشر (${liveMetric.zScore.toFixed(2)}σ ≤ ${lowerThresh.toFixed(2)}σ) + الفلاتر الثلاثة، ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
             console.warn(pauseWarn);
             limitlessService.logDirect('SYSTEM', pauseWarn);
             setExecutionNotice({
@@ -458,7 +490,7 @@ export function useTradingBot() {
               crossedUpperThresholdRef.current = false;
               setCrossedUpperThreshold(false);
               entryShortCandlesRef.current.add(liveMetric.time);
-              const trigMsg = `🎯 [تحقق التأكيد الثاني اللحظي ≤ +${cfg.zScoreEntry.toFixed(2)}σ · بث حي 1m] ارتد Z-Score اللحظي من فوق +${cfg.zScoreUpper.toFixed(2)}σ إلى +${liveMetric.zScore.toFixed(2)}σ! جاري إرسال أمر GTC فوري لشراء عقد DOWN بسقف سعر ≤ $0.20 (20% / 20¢) وحجم 4% من الرصيد.`;
+              const trigMsg = `🎯 [تحقق التأكيد المباشر ≥ +${cfg.zScoreUpper.toFixed(2)}σ + الفلاتر الثلاثة · بث حي 1m] وصل Z-Score إلى +${liveMetric.zScore.toFixed(2)}σ مع تطابق الفلاتر الثلاثة! جاري إرسال أمر GTC فوري لشراء عقد DOWN بسقف سعر ≤ $0.20 (20% / 20¢) وحجم 4% من الرصيد.`;
               console.log(trigMsg);
               limitlessService.logDirect('SYSTEM', trigMsg);
               executeLiveTradeRef.current(liveMetric.zScore, 'SHORT', liveMetric.time, false);
@@ -466,7 +498,7 @@ export function useTradingBot() {
               crossedLowerThresholdRef.current = false;
               setCrossedLowerThreshold(false);
               entryLongCandlesRef.current.add(liveMetric.time);
-              const trigMsg = `🎯 [تحقق التأكيد الثاني اللحظي ≥ ${lowerEntryThresh.toFixed(2)}σ · بث حي 1m] ارتد Z-Score اللحظي من تحت ${lowerThresh.toFixed(2)}σ إلى ${liveMetric.zScore.toFixed(2)}σ! جاري إرسال أمر GTC فوري لشراء عقد UP بسقف سعر ≤ $0.20 (20% / 20¢) وحجم 4% من الرصيد.`;
+              const trigMsg = `🎯 [تحقق التأكيد المباشر ≤ ${lowerThresh.toFixed(2)}σ + الفلاتر الثلاثة · بث حي 1m] وصل Z-Score إلى ${liveMetric.zScore.toFixed(2)}σ مع تطابق الفلاتر الثلاثة! جاري إرسال أمر GTC فوري لشراء عقد UP بسقف سعر ≤ $0.20 (20% / 20¢) وحجم 4% من الرصيد.`;
               console.log(trigMsg);
               limitlessService.logDirect('SYSTEM', trigMsg);
               executeLiveTradeRef.current(liveMetric.zScore, 'LONG', liveMetric.time, false);
@@ -1209,7 +1241,7 @@ export function useTradingBot() {
 
   const triggerManualTrade = useCallback(
     (direction: 'SHORT' | 'LONG' = 'SHORT') => {
-      const defaultZ = direction === 'SHORT' ? 1.0 : -1.0;
+      const defaultZ = direction === 'SHORT' ? 2.2 : -2.2;
       executeLiveTrade(currentZScore || defaultZ, direction, undefined, true);
     },
     [executeLiveTrade, currentZScore]
@@ -1246,6 +1278,7 @@ export function useTradingBot() {
     isEntrySignal,
     currentBalance,
     liveUsdcBalance,
+    threeFiltersStatus,
     executionNotice,
     setExecutionNotice,
     isLiveBalance,

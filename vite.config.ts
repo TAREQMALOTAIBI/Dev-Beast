@@ -873,7 +873,11 @@ function setupApiMiddlewares(middlewares: any) {
             await new Promise((r) => setTimeout(r, 150));
           }
           const completedGuard = inMemoryTradeGuard || loadTradeGuardFromDisk();
-          if (completedGuard && completedGuard.marketSlug) {
+          if (
+            completedGuard &&
+            completedGuard.marketSlug &&
+            Date.now() - (Number(completedGuard.timestamp) || 0) < 60000
+          ) {
             res.statusCode = 200;
             return res.end(JSON.stringify({
               success: true,
@@ -898,9 +902,6 @@ function setupApiMiddlewares(middlewares: any) {
         }));
       }
 
-      // Contract lock check removed per user request: unrestricted trading on valid signals
-      // (In-flight mutex above remains to prevent concurrent double-clicks)
-
       isServerExecutingOrder = true;
 
       try {
@@ -910,14 +911,27 @@ function setupApiMiddlewares(middlewares: any) {
         const secret = (bodySecret || process.env.LMTS_TOKEN_SECRET || '').trim();
         const hasLiveAuth = Boolean(pk && tokenId && secret);
 
-        let activeMarketSlug = (market || '').trim();
+        let activeMarketSlug = (market || cachedActiveBtc?.slug || '').trim();
         let marketData: any = null;
+        const now = Date.now();
 
         // ====================================================================
         // STRICT SAFETY GUARD: 15-MINUTE BTC ONLY
         // ====================================================================
         let isExpiredOrResolved = false;
-        if (activeMarketSlug && is15MinBtcMarket({ slug: activeMarketSlug })) {
+        if (
+          cachedActiveBtc &&
+          cachedActiveBtc.slug &&
+          is15MinBtcMarket(cachedActiveBtc) &&
+          cachedActiveBtc.status === 'FUNDED' &&
+          cachedActiveBtc.tokens?.yes &&
+          cachedActiveBtc.tokens?.no &&
+          (!cachedActiveBtc.expirationTimestamp || Number(cachedActiveBtc.expirationTimestamp) > now + 2000) &&
+          (!activeMarketSlug || activeMarketSlug === 'btc-up-or-down-15-min' || activeMarketSlug === cachedActiveBtc.slug)
+        ) {
+          activeMarketSlug = cachedActiveBtc.slug;
+          marketData = cachedActiveBtc;
+        } else if (activeMarketSlug && is15MinBtcMarket({ slug: activeMarketSlug })) {
           try {
             const mRes = await fetch(`https://api.limitless.exchange/markets/${encodeURIComponent(activeMarketSlug)}`);
             if (mRes.ok) {

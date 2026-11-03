@@ -8,12 +8,147 @@ import { BotConfig, KellyMath, ZScoreMetric } from '../types/bot';
  * stdDev = sqrt(variance)
  * zScore = (currentPrice - mean) / stdDev
  */
+export interface ThreeFiltersStatus {
+  openPriceFilter: {
+    passedShort: boolean;
+    passedLong: boolean;
+    openPrice: number | null;
+    sma30: number;
+    diffFromOpen: number | null;
+  };
+  ema60Filter: {
+    passedShort: boolean;
+    passedLong: boolean;
+    ema60: number;
+    ema60SlopeSigma: number;
+    trendState: 'NEUTRAL' | 'STRONG_UP' | 'STRONG_DOWN';
+  };
+  timeFilter: {
+    passed: boolean;
+    remainingMinutes: number | null;
+    minRequiredMinutes: number;
+  };
+  canEnterShort: boolean;
+  canEnterLong: boolean;
+  blockReasonShort: string | null;
+  blockReasonLong: string | null;
+}
+
+export function computeEmaSeries(prices: number[], period = 60): number[] {
+  if (!prices.length) return [];
+  const k = 2 / (period + 1);
+  const ema: number[] = [prices[0]];
+  for (let i = 1; i < prices.length; i++) {
+    ema.push(prices[i] * k + ema[i - 1] * (1 - k));
+  }
+  return ema;
+}
+
+export function evaluateThreeFilters(params: {
+  closes: number[];
+  mean: number;
+  stdDev: number;
+  openPriceRaw?: string | number | null;
+  expirationTimestamp?: number | null;
+  minRemainingMinutes?: number;
+}): ThreeFiltersStatus {
+  const {
+    closes,
+    mean,
+    stdDev,
+    openPriceRaw,
+    expirationTimestamp,
+    minRemainingMinutes = 6,
+  } = params;
+
+  // 1) Filter 1: SMA-30 vs Contract Open Price ("Price to Beat")
+  const parsedOpen = openPriceRaw !== undefined && openPriceRaw !== null
+    ? Number(String(openPriceRaw).replace(/[^0-9.-]/g, ''))
+    : NaN;
+  const validOpenPrice = !isNaN(parsedOpen) && parsedOpen > 0 ? parsedOpen : null;
+  const openPriceTolerance = 15; // $15 tolerance buffer
+  const passedOpenShort = validOpenPrice === null ? true : mean <= validOpenPrice + openPriceTolerance;
+  const passedOpenLong = validOpenPrice === null ? true : mean >= validOpenPrice - openPriceTolerance;
+  const diffFromOpen = validOpenPrice !== null ? mean - validOpenPrice : null;
+
+  // 2) Filter 2: Higher Timeframe EMA-60 Trend Slope Filter
+  const emaSeries = computeEmaSeries(closes, 60);
+  const emaNow = emaSeries.length > 0 ? emaSeries[emaSeries.length - 1] : mean;
+  const lookbackIdx = Math.max(0, emaSeries.length - 6); // 5 minutes ago
+  const ema5mAgo = emaSeries.length > 0 ? emaSeries[lookbackIdx] : emaNow;
+  const ema60SlopeSigma = stdDev > 0 ? (emaNow - ema5mAgo) / stdDev : 0;
+
+  const isStrongUpBreakout = ema60SlopeSigma > 0.35 && mean > emaNow;
+  const isStrongDownBreakout = ema60SlopeSigma < -0.35 && mean < emaNow;
+  const trendState: 'NEUTRAL' | 'STRONG_UP' | 'STRONG_DOWN' = isStrongUpBreakout
+    ? 'STRONG_UP'
+    : isStrongDownBreakout
+    ? 'STRONG_DOWN'
+    : 'NEUTRAL';
+
+  const passedEmaShort = !isStrongUpBreakout;
+  const passedEmaLong = !isStrongDownBreakout;
+
+  // 3) Filter 3: Minimum Time Remaining in 15m Contract (>= 6 minutes)
+  const now = Date.now();
+  const expMs = Number(expirationTimestamp) || 0;
+  const remainingMinutes = expMs > now ? (expMs - now) / 60000 : expMs > 0 ? 0 : null;
+  const passedTime = remainingMinutes === null ? true : remainingMinutes >= minRemainingMinutes;
+
+  const canEnterShort = passedOpenShort && passedEmaShort && passedTime;
+  const canEnterLong = passedOpenLong && passedEmaLong && passedTime;
+
+  let blockReasonShort: string | null = null;
+  if (!passedTime) {
+    blockReasonShort = `الوقت المتبقي في العقد (${(remainingMinutes ?? 0).toFixed(1)} د) أقل من ${minRemainingMinutes} دقائق`;
+  } else if (!passedOpenShort && validOpenPrice !== null) {
+    blockReasonShort = `متوسط SMA-30 ($${mean.toFixed(1)}) أعلى من سعر افتتاح العقد ($${validOpenPrice.toFixed(1)})`;
+  } else if (!passedEmaShort) {
+    blockReasonShort = `ترند صاعد حاد على EMA-60 (+${ema60SlopeSigma.toFixed(2)}σ)`;
+  }
+
+  let blockReasonLong: string | null = null;
+  if (!passedTime) {
+    blockReasonLong = `الوقت المتبقي في العقد (${(remainingMinutes ?? 0).toFixed(1)} د) أقل من ${minRemainingMinutes} دقائق`;
+  } else if (!passedOpenLong && validOpenPrice !== null) {
+    blockReasonLong = `متوسط SMA-30 ($${mean.toFixed(1)}) أقل من سعر افتتاح العقد ($${validOpenPrice.toFixed(1)})`;
+  } else if (!passedEmaLong) {
+    blockReasonLong = `ترند هابط حاد على EMA-60 (${ema60SlopeSigma.toFixed(2)}σ)`;
+  }
+
+  return {
+    openPriceFilter: {
+      passedShort: passedOpenShort,
+      passedLong: passedOpenLong,
+      openPrice: validOpenPrice,
+      sma30: mean,
+      diffFromOpen,
+    },
+    ema60Filter: {
+      passedShort: passedEmaShort,
+      passedLong: passedEmaLong,
+      ema60: emaNow,
+      ema60SlopeSigma,
+      trendState,
+    },
+    timeFilter: {
+      passed: passedTime,
+      remainingMinutes,
+      minRequiredMinutes: minRemainingMinutes,
+    },
+    canEnterShort,
+    canEnterLong,
+    blockReasonShort,
+    blockReasonLong,
+  };
+}
+
 export function calculateZScore(
   closePrices: number[],
-  upperThreshold = 2.0,
-  entryThreshold = 1.0,
-  lowerThreshold = -2.0,
-  lowerEntryThreshold = -1.0
+  upperThreshold = 2.2,
+  entryThreshold = 2.2,
+  lowerThreshold = -2.2,
+  lowerEntryThreshold = -2.2
 ): {
   mean: number;
   variance: number;
@@ -121,23 +256,25 @@ export function calculateKellySizing(
  * Format currency with 2 decimals
  */
 export function formatUsd(amount: number): string {
+  const safeAmount = Number.isFinite(Number(amount)) ? Number(amount) : 0;
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(amount);
+  }).format(safeAmount);
 }
 
 /**
  * Format crypto price with adaptive precision
  */
 export function formatPrice(price: number): string {
-  if (price >= 1000) {
-    return price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const safePrice = Number.isFinite(Number(price)) ? Number(price) : 0;
+  if (safePrice >= 1000) {
+    return safePrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
-  if (price >= 1) {
-    return price.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+  if (safePrice >= 1) {
+    return safePrice.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
   }
-  return price.toLocaleString('en-US', { minimumFractionDigits: 6, maximumFractionDigits: 6 });
+  return safePrice.toLocaleString('en-US', { minimumFractionDigits: 6, maximumFractionDigits: 6 });
 }

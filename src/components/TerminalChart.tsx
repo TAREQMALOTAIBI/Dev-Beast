@@ -58,23 +58,35 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
     return { minPrice: min - buffer, maxPrice: max + buffer };
   }, [visibleCandles, visibleMetrics]);
 
+  const safeUpper = Number.isFinite(Number(upperThreshold)) ? Number(upperThreshold) : 2.2;
+  const safeEntry = Number.isFinite(Number(entryThreshold)) ? Number(entryThreshold) : 2.2;
+  const safeLower = Number.isFinite(Number(lowerThreshold)) ? Number(lowerThreshold) : -2.2;
+  const safeLowerEntry = Number.isFinite(Number(lowerEntryThreshold)) ? Number(lowerEntryThreshold) : -2.2;
+
   // Coordinate scales
   const chartWidth = width - padding.left - padding.right;
   const candleY = (val: number) => {
-    return candleHeight - padding.bottom - ((val - minPrice) / (maxPrice - minPrice || 1)) * (candleHeight - padding.top - padding.bottom);
+    const safeVal = Number.isFinite(val) ? val : minPrice;
+    const range = maxPrice - minPrice;
+    const ratio = range > 0 && Number.isFinite(range) ? (safeVal - minPrice) / range : 0.5;
+    const y = candleHeight - padding.bottom - ratio * (candleHeight - padding.top - padding.bottom);
+    return Number.isFinite(y) ? y : candleHeight / 2;
   };
 
   const candleX = (idx: number) => {
     const step = chartWidth / (visibleCandles.length || 1);
-    return padding.left + idx * step + step / 2;
+    const x = padding.left + idx * step + step / 2;
+    return Number.isFinite(x) ? x : padding.left;
   };
 
   // Z-Score scale (-3.2 to +3.2)
   const zMin = -3.2;
   const zMax = 3.2;
   const zY = (val: number) => {
-    const clamped = Math.max(zMin, Math.min(zMax, val));
-    return zScoreHeight - 20 - ((clamped - zMin) / (zMax - zMin)) * (zScoreHeight - 35);
+    const safeVal = Number.isFinite(val) ? val : 0;
+    const clamped = Math.max(zMin, Math.min(zMax, safeVal));
+    const y = zScoreHeight - 20 - ((clamped - zMin) / (zMax - zMin)) * (zScoreHeight - 35);
+    return Number.isFinite(y) ? y : zScoreHeight / 2;
   };
 
   // SVG Paths for Mean, Upper Band, Entry Band, Lower Entry Band, and Lower Band
@@ -181,7 +193,7 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
             </span>
             {hoveredMetric && (
               <span className="text-slate-300 bg-slate-800/80 px-2 py-0.5 rounded">
-                Z: <span className="text-sky-300 font-bold">{hoveredMetric.zScore.toFixed(2)}σ</span>
+                Z: <span className="text-sky-300 font-bold">{Number(hoveredMetric.zScore || 0).toFixed(2)}σ</span>
               </span>
             )}
           </div>
@@ -226,15 +238,15 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
           })}
 
           {/* Upper Threshold Band (Red dashed line) */}
-          <path d={upperBandPath} fill="none" stroke="#f43f5e" strokeWidth="1.2" strokeDasharray="4 3" opacity="0.8" />
+          {upperBandPath && <path d={upperBandPath} fill="none" stroke="#f43f5e" strokeWidth="1.2" strokeDasharray="4 3" opacity="0.8" />}
           {/* Upper Entry Band (Amber dashed line) */}
-          <path d={entryBandPath} fill="none" stroke="#f59e0b" strokeWidth="1" strokeDasharray="2 2" opacity="0.85" />
+          {entryBandPath && <path d={entryBandPath} fill="none" stroke="#f59e0b" strokeWidth="1" strokeDasharray="2 2" opacity="0.85" />}
           {/* Mean Line (Sky blue line) */}
-          <path d={meanPath} fill="none" stroke="#38bdf8" strokeWidth="1.5" opacity="0.9" />
+          {meanPath && <path d={meanPath} fill="none" stroke="#38bdf8" strokeWidth="1.5" opacity="0.9" />}
           {/* Lower Entry Band (Teal dashed line) */}
-          <path d={lowerEntryBandPath} fill="none" stroke="#2dd4bf" strokeWidth="1" strokeDasharray="2 2" opacity="0.85" />
+          {lowerEntryBandPath && <path d={lowerEntryBandPath} fill="none" stroke="#2dd4bf" strokeWidth="1" strokeDasharray="2 2" opacity="0.85" />}
           {/* Lower Threshold Band (Emerald dashed line) */}
-          <path d={lowerBandPath} fill="none" stroke="#10b981" strokeWidth="1.2" strokeDasharray="4 3" opacity="0.8" />
+          {lowerBandPath && <path d={lowerBandPath} fill="none" stroke="#10b981" strokeWidth="1.2" strokeDasharray="4 3" opacity="0.8" />}
 
           {/* Candlesticks */}
           {visibleCandles.map((c, i) => {
@@ -322,19 +334,19 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
               {periods}-PERIOD BIDIRECTIONAL Z-SCORE OSCILLATOR (σ)
             </text>
 
-            {/* Upper Entry Threshold Line (+2.0σ) */}
+            {/* Upper Entry Threshold Line (+2.20σ) */}
             <line
               x1={padding.left}
-              y1={zY(upperThreshold)}
+              y1={zY(safeUpper)}
               x2={width - padding.right}
-              y2={zY(upperThreshold)}
+              y2={zY(safeUpper)}
               stroke="#f43f5e"
               strokeWidth="1.5"
               strokeDasharray="4 2"
               opacity="0.9"
             />
-            <text x={width - padding.right + 8} y={zY(upperThreshold) + 3} fill="#f43f5e" fontSize="9" fontWeight="bold" fontFamily="JetBrains Mono, monospace">
-              +{upperThreshold.toFixed(1)}σ (Short Entry)
+            <text x={width - padding.right + 8} y={zY(safeUpper) + 3} fill="#f43f5e" fontSize="9" fontWeight="bold" fontFamily="JetBrains Mono, monospace">
+              +{safeUpper.toFixed(2)}σ (Short Entry)
             </text>
 
             {/* Zero Baseline */}
@@ -351,23 +363,23 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
               0.0σ Mean
             </text>
 
-            {/* Lower Entry Threshold Line (-2.0σ) */}
+            {/* Lower Entry Threshold Line (-2.20σ) */}
             <line
               x1={padding.left}
-              y1={zY(lowerThreshold)}
+              y1={zY(safeLower)}
               x2={width - padding.right}
-              y2={zY(lowerThreshold)}
+              y2={zY(safeLower)}
               stroke="#10b981"
               strokeWidth="1.5"
               strokeDasharray="4 2"
               opacity="0.9"
             />
-            <text x={width - padding.right + 8} y={zY(lowerThreshold) + 3} fill="#10b981" fontSize="9" fontWeight="bold" fontFamily="JetBrains Mono, monospace">
-              {lowerThreshold.toFixed(1)}σ (Long Entry)
+            <text x={width - padding.right + 8} y={zY(safeLower) + 3} fill="#10b981" fontSize="9" fontWeight="bold" fontFamily="JetBrains Mono, monospace">
+              {safeLower.toFixed(2)}σ (Long Entry)
             </text>
 
             {/* Z-Score Curve */}
-            <path d={zScorePath} fill="none" stroke="#38bdf8" strokeWidth="2" />
+            {zScorePath && <path d={zScorePath} fill="none" stroke="#38bdf8" strokeWidth="2" />}
 
             {/* Active Points */}
             {visibleMetrics.map((m, i) => {
@@ -421,23 +433,15 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-3 h-0.5 bg-rose-500 inline-block border-b border-dashed border-rose-500"></span>
-            <span>+{upperThreshold.toFixed(1)}σ 1st Confirm (Short)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-0.5 bg-amber-400 inline-block border-b border-dashed border-amber-400"></span>
-            <span>+{entryThreshold.toFixed(1)}σ 2nd Confirm Entry (▼)</span>
+            <span>+{safeUpper.toFixed(2)}σ Direct Short Entry (▼)</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-3 h-0.5 bg-emerald-500 inline-block border-b border-dashed border-emerald-500"></span>
-            <span>{lowerThreshold.toFixed(1)}σ 1st Confirm (Long)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-0.5 bg-teal-400 inline-block border-b border-dashed border-teal-400"></span>
-            <span>{lowerEntryThreshold.toFixed(1)}σ 2nd Confirm Entry (▲)</span>
+            <span>{safeLower.toFixed(2)}σ Direct Long Entry (▲)</span>
           </div>
         </div>
         <div className="text-emerald-400 font-mono font-semibold">
-          ⚡ Z-Score Dual Confirmation ({upperThreshold.toFixed(1)}σ → {entryThreshold.toFixed(1)}σ)
+          ⚡ Z-Score Single Direct Confirmation (±{safeUpper.toFixed(2)}σ + 3 Smart Filters)
         </div>
       </div>
     </div>

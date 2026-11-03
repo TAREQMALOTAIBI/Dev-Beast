@@ -33,10 +33,10 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
       timeframe: '1m',
       periods: 30,
       strategyDirection: 'BOTH',
-      zScoreUpper: 2.0,
-      zScoreEntry: 1.0,
-      zScoreLower: -2.0,
-      zScoreLowerEntry: -1.0,
+      zScoreUpper: 2.2,
+      zScoreEntry: 2.2,
+      zScoreLower: -2.2,
+      zScoreLowerEntry: -2.2,
       maxPriceCents: 0.20,
       maxRiskPercent: 0.04,
       orderType: 'GTC',
@@ -73,7 +73,9 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 {isAr ? 'إعدادات استراتيجية التداول (1m Live WS · عقود 15 دقيقة)' : 'Trading Strategy Configuration (1m Live WS · 15m Contracts)'}
               </h2>
               <div className="text-[11px] text-slate-400">
-                {isAr ? '30-SMA (1m) · تقييم لحظي مع كل تحديث WebSocket · تأكيد (2.0 ← 1.0) · 4% رأس المال · GTC ≤ 20% ($0.20)' : '30-SMA (1m) · Live WS Unclosed Candle Eval · Confirm (2.0 -> 1.0) · 4% Capital · GTC ≤ 20% ($0.20)'}
+                {isAr
+                  ? '30-SMA (1m) · تأكيد واحد مباشر (±2.20σ) + الفلاتر الثلاثة · 4% رأس المال · GTC ≤ 20% ($0.20)'
+                  : '30-SMA (1m) · Direct Single Confirm (±2.20σ) + 3 Filters · 4% Capital · GTC ≤ 20% ($0.20)'}
               </div>
             </div>
           </div>
@@ -282,10 +284,10 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
           <div className="border-t border-slate-800 pt-4 space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold text-slate-100 uppercase tracking-wider text-[11px] text-sky-400">
-                {isAr ? 'عتبات Z-Score: التأكيد الأول (2.0) والتأكيد الثاني (1.0)' : 'Z-Score Thresholds: 1st Confirmation (2.0) & 2nd Confirmation (1.0)'}
+                {isAr ? 'عتبة Z-Score: تأكيد واحد مباشر (±2.20σ) + الفلاتر الثلاثة' : 'Z-Score Threshold: Single Direct Confirmation (±2.20σ) + 3 Filters'}
               </h3>
               <span className="text-[10px] text-emerald-400 font-bold bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/40">
-                {isAr ? '⚡ تأكيد مزدوج (2.0 → 1.0)' : '⚡ Dual Confirm (2.0 → 1.0)'}
+                {isAr ? '⚡ تأكيد واحد ±2.20σ + 3 فلاتر' : '⚡ Single ±2.20σ + 3 Filters'}
               </span>
             </div>
 
@@ -320,10 +322,10 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                   ...draft,
                   timeframe: '1m',
                   periods: 30,
-                  zScoreUpper: 2.0,
-                  zScoreEntry: 1.0,
-                  zScoreLower: -2.0,
-                  zScoreLowerEntry: -1.0,
+                  zScoreUpper: 2.2,
+                  zScoreEntry: 2.2,
+                  zScoreLower: -2.2,
+                  zScoreLowerEntry: -2.2,
                   maxRiskPercent: 0.04,
                   maxPriceCents: 0.20,
                   orderType: 'GTC',
@@ -332,80 +334,60 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 })}
                 className="px-2.5 py-1 rounded text-[11px] font-bold bg-emerald-950/80 hover:bg-emerald-900/90 text-emerald-300 border border-emerald-600/50 cursor-pointer"
               >
-                {isAr ? '🎯 الإعدادات المعتمدة (1m Live WS · 30-SMA · تأكيد 2.0 ← 1.0 · 4% · GTC ≤ 20% / $0.20)' : '🎯 Approved Preset (1m Live WS · 30-SMA · 2.0 -> 1.0 · 4% · GTC ≤ 20% / $0.20)'}
+                {isAr ? '🎯 الإعدادات المعتمدة (1m Live WS · 30-SMA · تأكيد واحد ±2.20σ + 3 فلاتر · 4% · GTC ≤ 20%)' : '🎯 Approved Preset (1m Live WS · 30-SMA · Single ±2.20σ + 3 Filters · 4% · GTC ≤ 20%)'}
               </button>
             </div>
 
-            {/* Thresholds Grid: Upper & Lower (First & Second Confirmation) */}
+            {/* Thresholds Grid: Upper & Lower (Single Direct Confirmation) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-              {/* Upper Thresholds (Short / DOWN) */}
+              {/* Upper Threshold (Short / DOWN) */}
               <div className="p-2.5 rounded-lg bg-slate-950/60 border border-rose-900/40 space-y-2">
                 <div className="text-rose-300 font-bold text-[11px]">
-                  {isAr ? 'شروط الهبوط (Short / DOWN):' : 'Short / DOWN Confirmations:'}
+                  {isAr ? 'شرط الهبوط المباشر (Short / DOWN):' : 'Short / DOWN Direct Confirmation:'}
                 </div>
                 <div>
                   <label className="block text-slate-400 mb-1 text-[11px]">
-                    {isAr ? 'التأكيد الأول (First Confirmation +2.0):' : 'First Confirmation (+2.0):'}
+                    {isAr ? 'التأكيد المباشر للدخول (≥ +2.20σ):' : 'Direct Entry Confirmation (≥ +2.20σ):'}
                   </label>
                   <input
                     type="number"
                     step="0.05"
                     value={draft.zScoreUpper}
                     onChange={(e) => {
-                      const val = parseFloat(e.target.value) || 2.0;
-                      setDraft({ ...draft, zScoreUpper: val, zScoreLower: -Math.abs(val) });
-                    }}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-100 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-400 mb-1 text-[11px]">
-                    {isAr ? 'التأكيد الثاني - الدخول (Second Confirmation +1.0):' : 'Second Confirmation - Entry (+1.0):'}
-                  </label>
-                  <input
-                    type="number"
-                    step="0.05"
-                    value={draft.zScoreEntry}
-                    onChange={(e) => {
-                      const val = parseFloat(e.target.value) || 1.0;
-                      setDraft({ ...draft, zScoreEntry: val, zScoreLowerEntry: -Math.abs(val) });
+                      const val = parseFloat(e.target.value) || 2.2;
+                      setDraft({
+                        ...draft,
+                        zScoreUpper: val,
+                        zScoreEntry: val,
+                        zScoreLower: -Math.abs(val),
+                        zScoreLowerEntry: -Math.abs(val),
+                      });
                     }}
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-100 font-mono"
                   />
                 </div>
               </div>
 
-              {/* Lower Thresholds (Long / UP) */}
+              {/* Lower Threshold (Long / UP) */}
               <div className="p-2.5 rounded-lg bg-slate-950/60 border border-emerald-900/40 space-y-2">
                 <div className="text-emerald-300 font-bold text-[11px]">
-                  {isAr ? 'شروط الصعود (Long / UP):' : 'Long / UP Confirmations:'}
+                  {isAr ? 'شرط الصعود المباشر (Long / UP):' : 'Long / UP Direct Confirmation:'}
                 </div>
                 <div>
                   <label className="block text-slate-400 mb-1 text-[11px]">
-                    {isAr ? 'التأكيد الأول (First Confirmation -2.0):' : 'First Confirmation (-2.0):'}
+                    {isAr ? 'التأكيد المباشر للدخول (≤ -2.20σ):' : 'Direct Entry Confirmation (≤ -2.20σ):'}
                   </label>
                   <input
                     type="number"
                     step="0.05"
-                    value={draft.zScoreLower ?? -2.0}
+                    value={draft.zScoreLower ?? -2.2}
                     onChange={(e) => {
-                      const val = parseFloat(e.target.value) || -2.0;
-                      setDraft({ ...draft, zScoreLower: val });
-                    }}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-100 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-400 mb-1 text-[11px]">
-                    {isAr ? 'التأكيد الثاني - الدخول (Second Confirmation -1.0):' : 'Second Confirmation - Entry (-1.0):'}
-                  </label>
-                  <input
-                    type="number"
-                    step="0.05"
-                    value={draft.zScoreLowerEntry ?? -1.0}
-                    onChange={(e) => {
-                      const val = parseFloat(e.target.value) || -1.0;
-                      setDraft({ ...draft, zScoreLowerEntry: val });
+                      const val = parseFloat(e.target.value) || -2.2;
+                      setDraft({
+                        ...draft,
+                        zScoreLower: val,
+                        zScoreLowerEntry: val,
+                      });
                     }}
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-100 font-mono"
                   />
@@ -467,8 +449,8 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
             <div className="mt-2.5 p-2.5 rounded-lg bg-emerald-950/40 border border-emerald-700/50 text-[11px] text-emerald-300 space-y-1.5">
               <div className="font-semibold text-emerald-200">
                 {isAr
-                  ? '✓ أمر GTC بسقف دخول 20% وتحت ($0.20 / 20 سنت): يتم إرسال الأمر بسعر 20% كحد أقصى عند تحقق التأكيد الثاني (1.0).'
-                  : '✓ GTC Order with ≤ 20% ($0.20 / 20¢) Max Share Price: Places GTC limit order at $0.20 or below upon 2nd confirmation (1.0).'}
+                  ? '✓ أمر GTC بسقف دخول 20% وتحت ($0.20 / 20 سنت): يتم إرسال الأمر فوراً لحظة لمس ±2.20σ وتطابق الفلاتر الثلاثة (Open Price + EMA 60 + الوقت المتبقي ≥ 6 دقائق).'
+                  : '✓ GTC Order with ≤ 20% ($0.20 / 20¢) Max Share Price: Places GTC limit order immediately upon ±2.20σ + 3 Filters (Open Price + EMA 60 + Time >= 6m).'}
               </div>
               <div className="text-sky-300">
                 {isAr

@@ -44,6 +44,7 @@ export default function App() {
     isEntrySignal,
     currentBalance,
     liveUsdcBalance,
+    threeFiltersStatus,
     executionNotice,
     setExecutionNotice,
     isLiveBalance,
@@ -242,9 +243,9 @@ export default function App() {
                     </span>
                     <ExternalLink className="w-2.5 h-2.5 opacity-70" />
                   </a>
-                  {liveWallet.ethBalance > 0 && (
+                  {Number(liveWallet.ethBalance) > 0 && (
                     <span className="text-slate-500 text-[10px]">
-                      ({liveWallet.ethBalance.toFixed(4)} ETH gas)
+                      ({Number(liveWallet.ethBalance || 0).toFixed(4)} ETH gas)
                     </span>
                   )}
                 </div>
@@ -395,6 +396,7 @@ export default function App() {
                   config={config}
                   lang={lang}
                   metric={latestMetric}
+                  threeFiltersStatus={threeFiltersStatus}
                   executionNotice={executionNotice}
                   onClearNotice={() => setExecutionNotice(null)}
                   contractLockInfo={contractLockInfo}
@@ -419,7 +421,7 @@ export default function App() {
                     <div className="flex justify-between text-slate-400">
                       <span>{isAr ? 'نسبة الدخول الثابتة:' : 'Fixed Bet Size:'}</span>
                       <span className="text-emerald-400 font-bold">
-                        {(kelly.riskToTake * 100).toFixed(2)}% (Fixed 4% / 15m Contract)
+                        {(Number(kelly.riskToTake || 0.04) * 100).toFixed(2)}% (Fixed 4% / 15m Contract)
                       </span>
                     </div>
                     <div className="flex justify-between text-slate-400">
@@ -496,11 +498,11 @@ export default function App() {
               </h3>
               <p className="leading-relaxed">
                 {isAr
-                  ? 'يعتمد الروبوت على البث الحي المباشر (btcusdt@kline_1m) مع التقييم الفوري عند كل تحديث سعري للشمعة الحية غير المغلقة (دون انتظار إغلاق شمعة الدقيقة)، وحساب مؤشر Z-Score على متوسط متحرك لـ 30 شمعة (30-period SMA - 1m). يتم تسليح الإشارة عند وصول التأكيد الأول (±2.0σ)، ويتم إرسال أمر شراء GTC عند تحقق التأكيد الثاني (±1.0σ) بسقف دخول 20% وتحت ($0.20 / 20¢) وبنسبة رأس مال قصوى 4% مع قفل دخول واحد فقط لكل عقد 15 دقيقة.'
-                  : 'The bot streams live btcusdt@kline_1m updates and evaluates on every live WebSocket tick using the current unclosed candle price (without waiting for the 1m candle to close) across a 30-period SMA (1m). It arms on the First Confirmation (±2.0σ) and submits a GTC order on the Second Confirmation (±1.0σ) with Max_Share_Price ≤ 20% ($0.20), Maximum Capital Ratio 4%, and Single-Entry Lock per 15m Market.'}
+                  ? 'يعتمد الروبوت على البث الحي المباشر (btcusdt@kline_1m) مع التقييم الفوري عند كل تحديث سعري للشمعة الحية غير المغلقة، وحساب مؤشر Z-Score على متوسط متحرك لـ 30 شمعة (30-period SMA - 1m). يتم الدخول المباشر بتأكيد واحد عند وصول السعر إلى عتبة التطرف (±2.20σ) بشرط تحقق الفلاتر الثلاثة معاً (فلتر سعر الافتتاح Open Price، فلتر اتجاه EMA-60، وفلتر الوقت المتبقي ≥ 6 دقائق)، مع إرسال أمر GTC بسقف دخول 20% وتحت ($0.20 / 20¢) وبنسبة رأس مال قصوى 4% وقفل دخول واحد لكل عقد 15 دقيقة.'
+                  : 'The bot streams live btcusdt@kline_1m updates and evaluates on every live WebSocket tick across a 30-period SMA (1m). It executes via Single Direct Confirmation at ±2.20σ when all 3 Smart Filters pass (Open Price alignment, EMA-60 Trend Slope, and ≥ 6m Time Remaining), submitting a GTC order with Max_Share_Price ≤ 20% ($0.20), Maximum Capital Ratio 4%, and Single-Entry Lock per 15m Market.'}
               </p>
               <div className="p-3 bg-slate-950 font-mono text-emerald-400 rounded-lg border border-slate-800">
-                WS: btcusdt@kline_1m (Live Unclosed Tick Eval) | SMA: 30-Period (1m) | Z-Threshold: 2.0 → 1.0 | Order: GTC ≤ 20% ($0.20) | Max Capital: 4% | Single-Entry Lock / 15m
+                WS: btcusdt@kline_1m (Live Tick Eval) | SMA: 30-Period (1m) | Z-Threshold: ±2.20σ Direct + 3 Filters | Order: GTC ≤ 20% ($0.20) | Max Capital: 4% | Single-Entry Lock / 15m
               </div>
             </div>
           </div>
@@ -518,7 +520,7 @@ export default function App() {
           <div className="flex items-center gap-2">
             <span>{isAr ? 'نظام التداول الحي المباشر' : 'Live Trading System'}</span>
             <span>·</span>
-            <span>Binance 1m Live WS (30-SMA) · Z-Score (2.0 → 1.0)</span>
+            <span>Binance 1m Live WS (30-SMA) · Z-Score (±2.20σ Direct + 3 Filters)</span>
             <span>·</span>
             <span>Limitless 15m Contract (Max 4% · GTC ≤ 20% / $0.20 · Single-Entry Lock)</span>
           </div>

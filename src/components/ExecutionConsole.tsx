@@ -57,7 +57,9 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
   // Compute best bid, ask, and spread from real CLOB orderbook
   const bestBid = orderbook?.orderbook?.bids?.[0];
   const bestAsk = orderbook?.orderbook?.asks?.[0];
-  const spread = bestAsk && bestBid ? bestAsk.price - bestBid.price : null;
+  const bestBidPrice = bestBid !== undefined ? Number(bestBid.price) : NaN;
+  const bestAskPrice = bestAsk !== undefined ? Number(bestAsk.price) : NaN;
+  const spread = Number.isFinite(bestAskPrice) && Number.isFinite(bestBidPrice) ? bestAskPrice - bestBidPrice : null;
 
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900/90 backdrop-blur-sm overflow-hidden flex flex-col">
@@ -234,8 +236,8 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
                     <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
                     <span>
                       {isAr
-                        ? 'تنفيذ مباشر للأمر كاملاً دفعة واحدة بنوع GTC دون سقف سعر دخول (حجم ثابت 4% لكل عقد 15 دقيقة)'
-                        : 'Direct execution for full order via GTC without max entry price (Fixed 4% per 15m contract)'}
+                        ? 'تنفيذ مباشر للأمر كاملاً دفعة واحدة بنوع GTC بسقف دخول ≤ 20% ($0.20) وتأكيد مباشر ±2.20σ + 3 فلاتر (4% لكل عقد 15 دقيقة)'
+                        : 'Direct full order via GTC with Max Share Price ≤ 20% ($0.20) & Single Confirm ±2.20σ + 3 Filters (4% per 15m contract)'}
                     </span>
                   </div>
                   {activeTrade && (
@@ -320,7 +322,7 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
                     <div className="flex justify-between text-slate-400">
                       <span>{isAr ? `السعر (${chunk?.payload?.type || 'GTC'}):` : `Price (${chunk?.payload?.type || 'GTC'}):`}</span>
                       <span className="text-slate-200">
-                        {chunk ? `$${chunk.price.toFixed(2)}` : '—'}
+                        {chunk ? `$${Number(chunk.price || 0).toFixed(2)}` : '—'}
                       </span>
                     </div>
                     <div className="flex justify-between text-slate-400">
@@ -358,37 +360,40 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
             <div className="p-2.5 bg-slate-950/60 rounded-lg border border-slate-800">
               <div className="text-slate-500 text-[10px]">Best Bid</div>
               <div className="text-emerald-400 font-bold text-sm">
-                {bestBid ? `$${bestBid.price.toFixed(4)}` : '—'}
+                {Number.isFinite(bestBidPrice) ? `$${bestBidPrice.toFixed(4)}` : '—'}
               </div>
               <div className="text-[10px] text-slate-500">
-                {bestBid ? `${(bestBid.size / 1000000).toFixed(0)} shares` : ''}
+                {bestBid ? `${(Number(bestBid.size || 0) / 1000000).toFixed(0)} shares` : ''}
               </div>
             </div>
 
             <div className="p-2.5 bg-slate-950/60 rounded-lg border border-slate-800">
               <div className="text-slate-500 text-[10px]">Best Ask</div>
               <div className="text-rose-400 font-bold text-sm">
-                {bestAsk ? `$${bestAsk.price.toFixed(4)}` : '—'}
+                {Number.isFinite(bestAskPrice) ? `$${bestAskPrice.toFixed(4)}` : '—'}
               </div>
               <div className="text-[10px] text-slate-500">
-                {bestAsk ? `${(bestAsk.size / 1000000).toFixed(0)} shares` : ''}
+                {bestAsk ? `${(Number(bestAsk.size || 0) / 1000000).toFixed(0)} shares` : ''}
               </div>
             </div>
 
             <div className="p-2.5 bg-slate-950/60 rounded-lg border border-slate-800">
               <div className="text-slate-500 text-[10px]">Spread</div>
               <div className="text-amber-400 font-bold text-sm">
-                {spread !== null ? `$${spread.toFixed(4)}` : '—'}
+                {spread !== null && Number.isFinite(spread) ? `$${spread.toFixed(4)}` : '—'}
               </div>
               <div className="text-[10px] text-slate-500">
-                Midpoint: {orderbook?.orderbook?.adjustedMidpoint?.toFixed(4) || '—'}
+                Midpoint:{' '}
+                {orderbook?.orderbook?.adjustedMidpoint !== undefined
+                  ? Number(orderbook.orderbook.adjustedMidpoint || 0).toFixed(4)
+                  : '—'}
               </div>
             </div>
 
             <div className="p-2.5 bg-slate-950/60 rounded-lg border border-slate-800">
               <div className="text-slate-500 text-[10px]">Oracle Feed</div>
               <div className="text-sky-400 font-bold text-sm">
-                {oracle ? `$${oracle.value.toFixed(2)}` : 'Active'}
+                {oracle && Number.isFinite(Number(oracle.value)) ? `$${Number(oracle.value).toFixed(2)}` : 'Active'}
               </div>
               <div className="text-[10px] text-slate-500">
                 Chainlink / Pyth Live
@@ -408,8 +413,8 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
                 {orderbook?.orderbook?.bids?.length ? (
                   orderbook.orderbook.bids.slice(0, 10).map((bid, i) => (
                     <div key={i} className="flex justify-between py-0.5 text-slate-300">
-                      <span className="text-emerald-400 font-semibold">${bid.price.toFixed(4)}</span>
-                      <span className="text-slate-400">{(bid.size / 1000000).toLocaleString()}</span>
+                      <span className="text-emerald-400 font-semibold">${Number(bid.price || 0).toFixed(4)}</span>
+                      <span className="text-slate-400">{(Number(bid.size || 0) / 1000000).toLocaleString()}</span>
                     </div>
                   ))
                 ) : (
@@ -428,8 +433,8 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
                 {orderbook?.orderbook?.asks?.length ? (
                   orderbook.orderbook.asks.slice(0, 10).map((ask, i) => (
                     <div key={i} className="flex justify-between py-0.5 text-slate-300">
-                      <span className="text-rose-400 font-semibold">${ask.price.toFixed(4)}</span>
-                      <span className="text-slate-400">{(ask.size / 1000000).toLocaleString()}</span>
+                      <span className="text-rose-400 font-semibold">${Number(ask.price || 0).toFixed(4)}</span>
+                      <span className="text-slate-400">{(Number(ask.size || 0) / 1000000).toLocaleString()}</span>
                     </div>
                   ))
                 ) : (
@@ -553,10 +558,10 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
                   </td>
                 </tr>
               ) : (
-                tradeHistory.map((trade) => (
-                  <tr key={trade.id} className="hover:bg-slate-800/40 transition-colors">
+                tradeHistory.map((trade, idx) => (
+                  <tr key={trade.id || idx} className="hover:bg-slate-800/40 transition-colors">
                     <td className="px-4 py-2 text-slate-400">
-                      {new Date(trade.timestamp).toLocaleTimeString()}
+                      {trade.timestamp ? new Date(trade.timestamp).toLocaleTimeString() : '—'}
                     </td>
                     <td className="px-4 py-2 text-slate-200 font-semibold">{trade.market}</td>
                     <td className="px-4 py-2">
@@ -570,13 +575,13 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
                         {trade.direction === 'LONG' ? '▲ LONG / UP' : '▼ SHORT / DOWN'}
                       </span>
                     </td>
-                    <td className="px-4 py-2 text-sky-400">{trade.triggerZScore.toFixed(2)}σ</td>
+                    <td className="px-4 py-2 text-sky-400">{Number(trade.triggerZScore || 0).toFixed(2)}σ</td>
                     <td className="px-4 py-2 text-right text-slate-100">{trade.totalContracts}</td>
                     <td className="px-4 py-2 text-right text-slate-300">
-                      ${trade.contractPrice.toFixed(2)}
+                      ${Number(trade.contractPrice || 0).toFixed(2)}
                     </td>
                     <td className="px-4 py-2 text-right text-slate-300">
-                      {formatUsd(trade.totalInvestmentUsd)}
+                      {formatUsd(Number(trade.totalInvestmentUsd || 0))}
                     </td>
                     <td className="px-4 py-2 text-right">
                       <span className="text-emerald-400 font-semibold">{trade.status || 'TRANSMITTED'}</span>

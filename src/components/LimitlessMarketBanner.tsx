@@ -155,12 +155,16 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
 
   // Parse Open Price (Price to Beat)
   const rawOpenPrice = market?.openPrice;
-  const priceToBeat = rawOpenPrice ? parseFloat(String(rawOpenPrice)) : null;
+  const parsedBeat = rawOpenPrice !== undefined && rawOpenPrice !== null
+    ? Number(String(rawOpenPrice).replace(/[^0-9.-]/g, ''))
+    : NaN;
+  const priceToBeat = Number.isFinite(parsedBeat) && parsedBeat > 0 ? parsedBeat : null;
 
   // Comparison between current spot/oracle price and price to beat
-  const activeCurrentPrice = oracle?.value || currentBinancePrice || 0;
+  const rawActivePrice = Number(oracle?.value || currentBinancePrice || 0);
+  const activeCurrentPrice = Number.isFinite(rawActivePrice) && rawActivePrice > 0 ? rawActivePrice : 0;
   const priceDifference = priceToBeat && activeCurrentPrice ? activeCurrentPrice - priceToBeat : null;
-  const priceDifferencePct = priceToBeat && priceDifference ? (priceDifference / priceToBeat) * 100 : null;
+  const priceDifferencePct = priceToBeat && priceDifference !== null ? (priceDifference / priceToBeat) * 100 : null;
   const isCurrentlyUp = priceDifference !== null ? priceDifference >= 0 : true;
 
   return (
@@ -424,9 +428,13 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
           <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-800/80">
             <span>{isAr ? 'دفتر الأوامر (CLOB):' : 'Limitless Book:'}</span>
             <div className="flex items-center gap-2 font-mono">
-              <span className="text-emerald-400">Bid: {bestBid ? `$${bestBid.price.toFixed(3)}` : `${yesPrice.toFixed(2)}`}</span>
+              <span className="text-emerald-400">
+                Bid: {bestBid && bestBid.price !== undefined ? `$${Number(bestBid.price).toFixed(3)}` : `${yesPrice.toFixed(2)}`}
+              </span>
               <span className="text-slate-600">/</span>
-              <span className="text-rose-400">Ask: {bestAsk ? `$${bestAsk.price.toFixed(3)}` : `${(yesPrice + 0.03).toFixed(2)}`}</span>
+              <span className="text-rose-400">
+                Ask: {bestAsk && bestAsk.price !== undefined ? `$${Number(bestAsk.price).toFixed(3)}` : `${(yesPrice + 0.03).toFixed(2)}`}
+              </span>
             </div>
           </div>
         </div>
@@ -440,11 +448,11 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
           <span>
             {isAr ? (
               <>
-                <strong className="text-slate-200">توضيح المعمارية:</strong> بث حي لحظي <strong className="text-sky-400">btcusdt@kline_1m (30-SMA، تقييم كل تحديث حي دون انتظار إغلاق الشمعة)</strong> بتأكيد أول <strong className="text-amber-300">2.0</strong> وتأكيد ثاني <strong className="text-emerald-400">1.0</strong>، وتنفيذ أمر <strong className="text-emerald-400">GTC بسقف دخول 20% وتحت ($0.20)</strong> وبنسبة رأس مال قصوى <strong className="text-white">4%</strong> مع قفل دخول واحد لكل عقد 15 دقيقة!
+                <strong className="text-slate-200">توضيح المعمارية:</strong> بث حي لحظي <strong className="text-sky-400">btcusdt@kline_1m (30-SMA، تقييم فوري لكل تحديث)</strong> بتأكيد واحد مباشر عند <strong className="text-emerald-400">±2.20σ</strong> مع <strong className="text-amber-300">الفلاتر الثلاثة الذكية (Open Price + EMA 60 + ≥ 6m)</strong>، وتنفيذ أمر <strong className="text-emerald-400">GTC بسقف دخول 20% وتحت ($0.20)</strong> وبنسبة رأس مال <strong className="text-white">4%</strong>!
               </>
             ) : (
               <>
-                <strong className="text-slate-200">Architecture:</strong> Live <strong className="text-sky-400">btcusdt@kline_1m (30-period SMA, evaluated on every live WS tick)</strong> with 1st confirm <strong className="text-amber-300">2.0</strong> &amp; 2nd confirm <strong className="text-emerald-400">1.0</strong>, executing <strong className="text-emerald-400">GTC @ max 20% ($0.20)</strong> at <strong className="text-white">4%</strong> max capital ratio with Single-Entry Lock per 15m Market!
+                <strong className="text-slate-200">Architecture:</strong> Live <strong className="text-sky-400">btcusdt@kline_1m (30-period SMA, evaluated on every live WS tick)</strong> with Single Direct Confirmation at <strong className="text-emerald-400">±2.20σ</strong> + <strong className="text-amber-300">3 Smart Filters (Open Price + EMA 60 + ≥ 6m)</strong>, executing <strong className="text-emerald-400">GTC @ max 20% ($0.20)</strong> at <strong className="text-white">4%</strong> capital!
               </>
             )}
           </span>

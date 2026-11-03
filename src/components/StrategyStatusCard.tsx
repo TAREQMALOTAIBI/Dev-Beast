@@ -30,6 +30,7 @@ interface StrategyStatusCardProps {
   config: BotConfig;
   lang: 'en' | 'ar';
   metric?: import('../types/bot').ZScoreMetric | null;
+  threeFiltersStatus?: import('../utils/math').ThreeFiltersStatus | null;
   executionNotice?: {
     type: 'SUCCESS' | 'WARNING' | 'ERROR';
     message: string;
@@ -68,6 +69,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
   config,
   lang,
   metric,
+  threeFiltersStatus,
   executionNotice,
   onClearNotice,
   contractLockInfo,
@@ -76,32 +78,34 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
 }) => {
   const isAr = lang === 'ar';
 
-  const lowerThresh = config.zScoreLower !== undefined ? config.zScoreLower : -config.zScoreUpper;
-  const lowerEntryThresh = config.zScoreLowerEntry !== undefined ? config.zScoreLowerEntry : -config.zScoreEntry;
+  const safeUpperThresh = Number.isFinite(Number(config?.zScoreUpper)) ? Number(config.zScoreUpper) : 2.2;
+  const lowerThresh =
+    config?.zScoreLower !== undefined && Number.isFinite(Number(config.zScoreLower))
+      ? Number(config.zScoreLower)
+      : -safeUpperThresh;
+  const safeCurrentZ = Number.isFinite(Number(currentZScore)) ? Number(currentZScore) : 0;
 
-  // Upper direction phase (Short / Down): First confirmation >= +2.5, Second confirmation <= +2.3
+  // Upper direction phase (Short / Down): Direct Single Confirmation >= +2.20σ + 3 Filters
   let upperPhase: 'MONITORING' | 'ARMED' | 'ENTRY_TRIGGERED' = 'MONITORING';
   if (isEntrySignal && (activeSignal === 'ENTRY_SHORT' || lastTradeDirection === 'SHORT')) {
     upperPhase = 'ENTRY_TRIGGERED';
-  } else if (crossedUpperThreshold || currentZScore >= config.zScoreUpper) {
+  } else if (crossedUpperThreshold || safeCurrentZ >= safeUpperThresh) {
     upperPhase = 'ARMED';
   }
 
-  // Lower direction phase (Long / Up): First confirmation <= -2.5, Second confirmation >= -2.3
+  // Lower direction phase (Long / Up): Direct Single Confirmation <= -2.20σ + 3 Filters
   let lowerPhase: 'MONITORING' | 'ARMED' | 'ENTRY_TRIGGERED' = 'MONITORING';
   if (isEntrySignal && (activeSignal === 'ENTRY_LONG' || lastTradeDirection === 'LONG')) {
     lowerPhase = 'ENTRY_TRIGGERED';
-  } else if (crossedLowerThreshold || currentZScore <= lowerThresh) {
+  } else if (crossedLowerThreshold || safeCurrentZ <= lowerThresh) {
     lowerPhase = 'ARMED';
   }
 
   // Z-Score percentage within -3.5 to +3.5 range
-  const normalizedZPct = Math.min(100, Math.max(0, ((currentZScore + 3.5) / 7) * 100));
+  const normalizedZPct = Math.min(100, Math.max(0, ((safeCurrentZ + 3.5) / 7) * 100));
 
   const lowerArmPct = Math.min(100, Math.max(0, ((lowerThresh + 3.5) / 7) * 100));
-  const lowerEntryPct = Math.min(100, Math.max(0, ((lowerEntryThresh + 3.5) / 7) * 100));
-  const upperEntryPct = Math.min(100, Math.max(0, ((config.zScoreEntry + 3.5) / 7) * 100));
-  const upperArmPct = Math.min(100, Math.max(0, ((config.zScoreUpper + 3.5) / 7) * 100));
+  const upperArmPct = Math.min(100, Math.max(0, ((safeUpperThresh + 3.5) / 7) * 100));
 
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900/90 backdrop-blur-sm p-4 flex flex-col gap-3.5 shadow-lg">
@@ -110,7 +114,11 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
         <div className="flex items-center gap-2">
           <Radio className={`w-4 h-4 ${botActive ? 'text-emerald-400 animate-pulse' : 'text-slate-500'}`} />
           <h3 className="font-bold text-slate-100 text-xs tracking-wider uppercase flex items-center gap-1.5">
-            <span>{isAr ? 'استراتيجية الانعكاس اللحظي (1m Live WS · 30-SMA · 2.0 → 1.0)' : 'Z-Score Live WS Strategy (1m · 30-SMA · 2.0 → 1.0)'}</span>
+            <span>
+              {isAr
+                ? `استراتيجية الدخول المباشر (1m Live · 30-SMA · ±${safeUpperThresh.toFixed(2)}σ + الفلاتر الـ 3)`
+                : `Direct Z-Score Strategy (1m · 30-SMA · ±${safeUpperThresh.toFixed(2)}σ + 3 Filters)`}
+            </span>
           </h3>
         </div>
 
@@ -291,8 +299,12 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
             <span>
               {isAr
-                ? (botActive ? '⚡ محرك البث الحي نشط (4% ثابت · قفل صفقة واحدة لكل عقد 15m): ينفذ فوراً عند التأكيد الثاني (±1.00σ) دون انتظار إغلاق الشمعة' : 'التنفيذ التلقائي متوقف حالياً. اضغط الزر أعلاه لتشغيل الروبوت.')
-                : (botActive ? '⚡ Live WS engine active (Fixed 4% · Single-Entry Lock per 15m): Executes immediately on 2nd confirmation (±1.00σ) without waiting for candle close.' : 'Automated execution is paused. Click above to start.')}
+                ? (botActive
+                    ? `⚡ محرك البث الحي نشط (4% ثابت · قفل 15m): ينفذ فوراً عند التأكيد المباشر (±${safeUpperThresh.toFixed(2)}σ) بشرط تحقق الفلاتر الثلاثة`
+                    : 'التنفيذ التلقائي متوقف حالياً. اضغط الزر أعلاه لتشغيل الروبوت.')
+                : (botActive
+                    ? `⚡ Live WS engine active (Fixed 4% · 15m Lock): Executes immediately on Single Confirm (±${safeUpperThresh.toFixed(2)}σ) + 3 Filters.`
+                    : 'Automated execution is paused. Click above to start.')}
             </span>
           </div>
         )}
@@ -331,15 +343,15 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
         )}
       </div>
 
-        {/* Strategy Summary Strip */}
-      <div className="p-3 rounded-xl border border-slate-800 bg-slate-950/70 space-y-2">
+      {/* Strategy Summary Strip */}
+      <div className="p-3 rounded-xl border border-slate-800 bg-slate-950/70 space-y-2.5">
         <div className="flex items-center justify-between border-b border-slate-800/80 pb-2 flex-wrap gap-1.5">
           <span className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-            <span>{isAr ? 'إعدادات الاستراتيجية المعتمدة (تقييم لحظي مباشر مع كل تحديث WebSocket 1m):' : 'Approved Bot Parameters (Live 1m WebSocket Unclosed Candle Evaluation):'}</span>
+            <span>{isAr ? 'إعدادات الاستراتيجية المعتمدة (تأكيد واحد مباشر + الفلاتر الثلاثة):' : 'Approved Bot Parameters (Single Direct Confirm + 3 Filters):'}</span>
           </span>
           <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-500/50">
-            {isAr ? 'بث حي فوري · 30-SMA · GTC (≤ 20%) · 4%' : 'Live Tick WS · 30-SMA · GTC (≤ 20%) · 4%'}
+            {isAr ? `تأكيد واحد ±${safeUpperThresh.toFixed(2)}σ + 3 فلاتر` : `Single ±${safeUpperThresh.toFixed(2)}σ + 3 Filters`}
           </span>
         </div>
 
@@ -349,18 +361,98 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             <span className="text-sky-300 font-bold">1m Live · 30-SMA</span>
           </div>
           <div className="p-2 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col">
-            <span className="text-slate-400 text-[10px]">{isAr ? 'التأكيد الأول (لحظي):' : '1st Confirm (Live):'}</span>
-            <span className="text-amber-400 font-bold">±{config.zScoreUpper.toFixed(2)}σ</span>
+            <span className="text-slate-400 text-[10px]">{isAr ? 'عتبة الدخول المباشر:' : 'Direct Entry:'}</span>
+            <span className="text-emerald-400 font-bold">±{safeUpperThresh.toFixed(2)}σ (تأكيد واحد)</span>
           </div>
           <div className="p-2 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col">
-            <span className="text-slate-400 text-[10px]">{isAr ? 'التأكيد الثاني (دخول):' : '2nd Confirm (Entry):'}</span>
-            <span className="text-emerald-400 font-bold">±{config.zScoreEntry.toFixed(2)}σ</span>
+            <span className="text-slate-400 text-[10px]">{isAr ? 'الفلاتر المفعّلة:' : 'Active Filters:'}</span>
+            <span className="text-amber-400 font-bold">Open + EMA60 + ≥6m</span>
           </div>
           <div className="p-2 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col">
             <span className="text-slate-400 text-[10px]">{isAr ? 'سقف الدخول ورأس المال:' : 'Max Price & Capital:'}</span>
             <span className="text-slate-100 font-bold">4% · GTC ≤ 20%</span>
           </div>
         </div>
+
+        {/* Live 3 Filters Status Strip */}
+        {threeFiltersStatus && (
+          <div className="pt-2 border-t border-slate-800/80 space-y-1.5">
+            <div className="text-[10px] font-bold text-sky-400 flex items-center justify-between">
+              <span>{isAr ? '🛡️ حالة الفلاتر الثلاثة الحية (يجب تحققها لحظة لمس ±2.20σ):' : '🛡️ Live 3-Filters Status (Required at ±2.20σ):'}</span>
+              <span className="font-mono text-[10px] text-slate-400">
+                {isAr
+                  ? `UP: ${threeFiltersStatus.canEnterLong ? '✓ جاهز' : '✗ محظور'} | DOWN: ${threeFiltersStatus.canEnterShort ? '✓ جاهز' : '✗ محظور'}`
+                  : `UP: ${threeFiltersStatus.canEnterLong ? '✓ OK' : '✗ BLOCKED'} | DOWN: ${threeFiltersStatus.canEnterShort ? '✓ OK' : '✗ BLOCKED'}`}
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 text-[10px] font-mono">
+              {/* Filter 1: SMA-30 vs Open Price */}
+              <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800/90 flex flex-col justify-between gap-1">
+                <span className="text-slate-400 font-sans font-semibold">
+                  {isAr ? '1) فلتر سعر الافتتاح (Open Price):' : '1) Open Price Filter:'}
+                </span>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-300">
+                    {threeFiltersStatus.openPriceFilter?.openPrice
+                      ? `Open: $${Number(threeFiltersStatus.openPriceFilter.openPrice || 0).toFixed(0)}`
+                      : isAr ? 'بانتظار السعر...' : 'Syncing...'}
+                  </span>
+                  <span className="flex items-center gap-1 font-bold">
+                    <span className={threeFiltersStatus.openPriceFilter?.passedLong ? 'text-emerald-400' : 'text-slate-600'}>
+                      UP:{threeFiltersStatus.openPriceFilter?.passedLong ? '✓' : '✗'}
+                    </span>
+                    <span className="text-slate-600">/</span>
+                    <span className={threeFiltersStatus.openPriceFilter?.passedShort ? 'text-rose-400' : 'text-slate-600'}>
+                      DN:{threeFiltersStatus.openPriceFilter?.passedShort ? '✓' : '✗'}
+                    </span>
+                  </span>
+                </div>
+              </div>
+
+              {/* Filter 2: EMA-60 Trend Slope */}
+              <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800/90 flex flex-col justify-between gap-1">
+                <span className="text-slate-400 font-sans font-semibold">
+                  {isAr ? '2) فلتر الاتجاه الأكبر (EMA-60):' : '2) EMA-60 Trend Filter:'}
+                </span>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-300">
+                    Slope: {Number(threeFiltersStatus.ema60Filter?.ema60SlopeSigma || 0) >= 0 ? '+' : ''}
+                    {Number(threeFiltersStatus.ema60Filter?.ema60SlopeSigma || 0).toFixed(2)}σ
+                  </span>
+                  <span className="flex items-center gap-1 font-bold">
+                    <span className={threeFiltersStatus.ema60Filter?.passedLong ? 'text-emerald-400' : 'text-slate-600'}>
+                      UP:{threeFiltersStatus.ema60Filter?.passedLong ? '✓' : '✗'}
+                    </span>
+                    <span className="text-slate-600">/</span>
+                    <span className={threeFiltersStatus.ema60Filter?.passedShort ? 'text-rose-400' : 'text-slate-600'}>
+                      DN:{threeFiltersStatus.ema60Filter?.passedShort ? '✓' : '✗'}
+                    </span>
+                  </span>
+                </div>
+              </div>
+
+              {/* Filter 3: Minimum Time Remaining (>= 6m) */}
+              <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800/90 flex flex-col justify-between gap-1">
+                <span className="text-slate-400 font-sans font-semibold">
+                  {isAr ? '3) فلتر الوقت المتبقي (≥ 6 د):' : '3) Time Left Filter (≥ 6m):'}
+                </span>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-300">
+                    {threeFiltersStatus.timeFilter?.remainingMinutes !== null &&
+                    threeFiltersStatus.timeFilter?.remainingMinutes !== undefined
+                      ? `${Number(threeFiltersStatus.timeFilter.remainingMinutes).toFixed(1)}m`
+                      : '--'}
+                  </span>
+                  <span className={`font-bold ${threeFiltersStatus.timeFilter.passed ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    {threeFiltersStatus.timeFilter.passed
+                      ? (isAr ? '✓ وقت كافٍ' : '✓ VALID')
+                      : (isAr ? '⏳ < 6 دقائق' : '⏳ < 6m LEFT')}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Dual Direction Live Strategy Status Wings */}
@@ -392,33 +484,31 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
               }`}
             >
               {lowerPhase === 'ENTRY_TRIGGERED'
-                ? (isAr ? '🎯 تحقق التأكيد الثاني - دخول Long!' : '🎯 LONG TRIGGERED')
+                ? (isAr ? '🎯 تحقق الشرط + الفلاتر - دخول Long!' : '🎯 LONG TRIGGERED')
                 : lowerPhase === 'ARMED'
-                ? (isAr ? `⚡ التأكيد الأول متحقق (${lowerThresh.toFixed(2)}σ)` : `⚡ 1ST CONFIRMED (${lowerThresh.toFixed(2)}σ)`)
+                ? (isAr ? `🛡️ عند ${lowerThresh.toFixed(2)}σ (بانتظار الفلاتر)` : `🛡️ AT ${lowerThresh.toFixed(2)}σ (FILTER HOLD)`)
                 : (isAr ? 'مراقبة البث الحي' : 'LIVE MONITORING')}
             </span>
           </div>
 
           <div className="text-[11px] text-slate-300 space-y-1.5 font-mono">
             <div className="flex items-center justify-between">
-              <span className="text-slate-400">{isAr ? '1) التأكيد الأول:' : '1) 1st Confirm:'} z &le; {lowerThresh.toFixed(2)}σ</span>
-              <span className={`font-bold ${crossedLowerThreshold || currentZScore <= lowerThresh ? 'text-emerald-400' : 'text-slate-500'}`}>
-                {crossedLowerThreshold || currentZScore <= lowerThresh ? (isAr ? '✓ مسلّح (Armed)' : '✓ ARMED') : `(${currentZScore.toFixed(2)}σ)`}
+              <span className="text-slate-400">{isAr ? '1) التأكيد المباشر:' : '1) Direct Confirm:'} z &le; {lowerThresh.toFixed(2)}σ</span>
+              <span className={`font-bold ${safeCurrentZ <= lowerThresh ? 'text-emerald-400' : 'text-slate-500'}`}>
+                {safeCurrentZ <= lowerThresh ? (isAr ? '✓ متحقق' : '✓ REACHED') : `(${safeCurrentZ.toFixed(2)}σ)`}
               </span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-slate-400">{isAr ? '2) التأكيد الثاني (دخول):' : '2) 2nd Confirm:'} z &ge; {lowerEntryThresh.toFixed(2)}σ</span>
-              <span className={`font-bold ${lowerPhase === 'ENTRY_TRIGGERED' ? 'text-emerald-400' : crossedLowerThreshold ? 'text-amber-400' : 'text-slate-500'}`}>
-                {lowerPhase === 'ENTRY_TRIGGERED'
-                  ? (isAr ? '✓ تم الدخول' : '✓ TRIGGERED')
-                  : crossedLowerThreshold
-                  ? (isAr ? '⏳ بانتظار الارتداد اللحظي' : '⏳ WAITING LIVE REBOUND')
-                  : (isAr ? 'بانتظار التأكيد 1' : 'WAIT 1ST')}
+              <span className="text-slate-400">{isAr ? '2) الفلاتر الثلاثة:' : '2) 3 Smart Filters:'}</span>
+              <span className={`font-bold ${threeFiltersStatus?.canEnterLong !== false ? 'text-emerald-400' : 'text-amber-400'}`}>
+                {threeFiltersStatus?.canEnterLong !== false
+                  ? (isAr ? '✓ متحققة للصعود' : '✓ ALL PASSED')
+                  : (isAr ? '✗ محظور حالياً' : '✗ FILTER BLOCKED')}
               </span>
             </div>
             <div className="flex justify-between text-[10px] pt-1 border-t border-slate-800/80">
               <span className="text-slate-500">{isAr ? 'الإجراء عند التحقق:' : 'Action:'}</span>
-              <span className="text-teal-400 font-bold">{isAr ? 'شراء عقد UP (4% · GTC ≤ 20% / $0.20)' : 'Buy UP (4% · GTC ≤ 20% / $0.20)'}</span>
+              <span className="text-teal-400 font-bold">{isAr ? 'شراء عقد UP فوري (4% · GTC ≤ 20%)' : 'Buy UP (4% · GTC ≤ 20%)'}</span>
             </div>
           </div>
         </div>
@@ -450,33 +540,31 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
               }`}
             >
               {upperPhase === 'ENTRY_TRIGGERED'
-                ? (isAr ? '🎯 تحقق التأكيد الثاني - دخول Short!' : '🎯 SHORT TRIGGERED')
+                ? (isAr ? '🎯 تحقق الشرط + الفلاتر - دخول Short!' : '🎯 SHORT TRIGGERED')
                 : upperPhase === 'ARMED'
-                ? (isAr ? `⚡ التأكيد الأول متحقق (+${config.zScoreUpper.toFixed(2)}σ)` : `⚡ 1ST CONFIRMED (+${config.zScoreUpper.toFixed(2)}σ)`)
+                ? (isAr ? `🛡️ عند +${safeUpperThresh.toFixed(2)}σ (بانتظار الفلاتر)` : `🛡️ AT +${safeUpperThresh.toFixed(2)}σ (FILTER HOLD)`)
                 : (isAr ? 'مراقبة البث الحي' : 'LIVE MONITORING')}
             </span>
           </div>
 
           <div className="text-[11px] text-slate-300 space-y-1.5 font-mono">
             <div className="flex items-center justify-between">
-              <span className="text-slate-400">{isAr ? '1) التأكيد الأول:' : '1) 1st Confirm:'} z &ge; +{config.zScoreUpper.toFixed(2)}σ</span>
-              <span className={`font-bold ${crossedUpperThreshold || currentZScore >= config.zScoreUpper ? 'text-rose-400' : 'text-slate-500'}`}>
-                {crossedUpperThreshold || currentZScore >= config.zScoreUpper ? (isAr ? '✓ مسلّح (Armed)' : '✓ ARMED') : `(${currentZScore > 0 ? '+' : ''}${currentZScore.toFixed(2)}σ)`}
+              <span className="text-slate-400">{isAr ? '1) التأكيد المباشر:' : '1) Direct Confirm:'} z &ge; +{safeUpperThresh.toFixed(2)}σ</span>
+              <span className={`font-bold ${safeCurrentZ >= safeUpperThresh ? 'text-rose-400' : 'text-slate-500'}`}>
+                {safeCurrentZ >= safeUpperThresh ? (isAr ? '✓ متحقق' : '✓ REACHED') : `(${safeCurrentZ > 0 ? '+' : ''}${safeCurrentZ.toFixed(2)}σ)`}
               </span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-slate-400">{isAr ? '2) التأكيد الثاني (دخول):' : '2) 2nd Confirm:'} z &le; +{config.zScoreEntry.toFixed(2)}σ</span>
-              <span className={`font-bold ${upperPhase === 'ENTRY_TRIGGERED' ? 'text-rose-400' : crossedUpperThreshold ? 'text-amber-400' : 'text-slate-500'}`}>
-                {upperPhase === 'ENTRY_TRIGGERED'
-                  ? (isAr ? '✓ تم الدخول' : '✓ TRIGGERED')
-                  : crossedUpperThreshold
-                  ? (isAr ? '⏳ بانتظار التراجع اللحظي' : '⏳ WAITING LIVE PULLBACK')
-                  : (isAr ? 'بانتظار التأكيد 1' : 'WAIT 1ST')}
+              <span className="text-slate-400">{isAr ? '2) الفلاتر الثلاثة:' : '2) 3 Smart Filters:'}</span>
+              <span className={`font-bold ${threeFiltersStatus?.canEnterShort !== false ? 'text-rose-400' : 'text-amber-400'}`}>
+                {threeFiltersStatus?.canEnterShort !== false
+                  ? (isAr ? '✓ متحققة للهبوط' : '✓ ALL PASSED')
+                  : (isAr ? '✗ محظور حالياً' : '✗ FILTER BLOCKED')}
               </span>
             </div>
             <div className="flex justify-between text-[10px] pt-1 border-t border-slate-800/80">
               <span className="text-slate-500">{isAr ? 'الإجراء عند التحقق:' : 'Action:'}</span>
-              <span className="text-amber-400 font-bold">{isAr ? 'شراء عقد DOWN (4% · GTC ≤ 20% / $0.20)' : 'Buy DOWN (4% · GTC ≤ 20% / $0.20)'}</span>
+              <span className="text-amber-400 font-bold">{isAr ? 'شراء عقد DOWN فوري (4% · GTC ≤ 20%)' : 'Buy DOWN (4% · GTC ≤ 20%)'}</span>
             </div>
           </div>
         </div>
@@ -489,26 +577,26 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             {isAr ? 'قيمة Z-Score اللحظية:' : 'Current Z-Score:'}{' '}
             <span
               className={`font-bold text-sm ${
-                currentZScore >= config.zScoreUpper
+                safeCurrentZ >= safeUpperThresh
                   ? 'text-rose-400'
-                  : currentZScore <= lowerThresh
+                  : safeCurrentZ <= lowerThresh
                   ? 'text-emerald-400'
-                  : currentZScore > 0
+                  : safeCurrentZ > 0
                   ? 'text-amber-400'
                   : 'text-sky-300'
               }`}
             >
-              {currentZScore > 0 ? `+${currentZScore.toFixed(2)}σ` : `${currentZScore.toFixed(2)}σ`}
+              {safeCurrentZ > 0 ? `+${safeCurrentZ.toFixed(2)}σ` : `${safeCurrentZ.toFixed(2)}σ`}
             </span>
           </span>
 
           <div className="flex items-center gap-3 text-[11px] font-mono">
             <span className="text-emerald-400">
-              {isAr ? 'صعود:' : 'Long:'} {lowerThresh.toFixed(1)}σ → {lowerEntryThresh.toFixed(1)}σ
+              {isAr ? 'دخول صعود:' : 'Long:'} &le; {lowerThresh.toFixed(2)}σ
             </span>
             <span className="text-slate-600">|</span>
             <span className="text-rose-400">
-              {isAr ? 'هبوط:' : 'Short:'} +{config.zScoreUpper.toFixed(1)}σ → +{config.zScoreEntry.toFixed(1)}σ
+              {isAr ? 'دخول هبوط:' : 'Short:'} &ge; +{safeUpperThresh.toFixed(2)}σ
             </span>
           </div>
         </div>
@@ -522,39 +610,27 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
               style={{ left: '50%' }}
               title="0.0σ Mean"
             />
-            {/* Lower 1st Confirmation (-2.5σ) */}
+            {/* Lower Direct Confirmation (-2.20σ) */}
             <div
               className="absolute top-0 bottom-0 w-0.5 bg-emerald-400 z-20 shadow-xs shadow-emerald-400"
               style={{ left: `${lowerArmPct}%` }}
-              title={`1st Confirmation (Long): ${lowerThresh}σ`}
+              title={`Direct Confirmation (Long): ${lowerThresh}σ`}
             />
-            {/* Lower 2nd Confirmation (-2.3σ) */}
-            <div
-              className="absolute top-0 bottom-0 w-0.5 bg-teal-300/80 z-20"
-              style={{ left: `${lowerEntryPct}%` }}
-              title={`2nd Confirmation (Long Entry): ${lowerEntryThresh}σ`}
-            />
-            {/* Upper 2nd Confirmation (+2.3σ) */}
-            <div
-              className="absolute top-0 bottom-0 w-0.5 bg-amber-400/80 z-20"
-              style={{ left: `${upperEntryPct}%` }}
-              title={`2nd Confirmation (Short Entry): +${config.zScoreEntry}σ`}
-            />
-            {/* Upper 1st Confirmation (+2.5σ) */}
+            {/* Upper Direct Confirmation (+2.20σ) */}
             <div
               className="absolute top-0 bottom-0 w-0.5 bg-rose-500 z-20 shadow-xs shadow-rose-500"
               style={{ left: `${upperArmPct}%` }}
-              title={`1st Confirmation (Short): +${config.zScoreUpper}σ`}
+              title={`Direct Confirmation (Short): +${safeUpperThresh}σ`}
             />
 
             {/* Value fill from left (-3.5) to right (+3.5) */}
             <div
               className={`h-full transition-all duration-300 ${
-                currentZScore >= config.zScoreUpper
+                safeCurrentZ >= safeUpperThresh
                   ? 'bg-rose-500'
-                  : currentZScore <= lowerThresh
+                  : safeCurrentZ <= lowerThresh
                   ? 'bg-emerald-400'
-                  : currentZScore > 0
+                  : safeCurrentZ > 0
                   ? 'bg-amber-400/80'
                   : 'bg-sky-500/80'
               }`}
@@ -563,14 +639,14 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
           </div>
 
           <div className="flex justify-between text-[10px] font-mono text-slate-500 px-0.5">
-            <span className="text-emerald-400 font-bold">{lowerThresh.toFixed(2)}σ → {lowerEntryThresh.toFixed(2)}σ (Long)</span>
+            <span className="text-emerald-400 font-bold">{lowerThresh.toFixed(2)}σ (Direct Long + 3 Filters)</span>
             <span className="text-slate-400">0.0σ ({config.periods}-SMA)</span>
-            <span className="text-rose-400 font-bold">+{config.zScoreUpper.toFixed(2)}σ → +{config.zScoreEntry.toFixed(2)}σ (Short)</span>
+            <span className="text-rose-400 font-bold">+{safeUpperThresh.toFixed(2)}σ (Direct Short + 3 Filters)</span>
           </div>
         </div>
 
         {/* Real-Time Mathematical Formula Verification Proof */}
-        {metric && metric.stdDev > 0 && (
+        {metric && Number(metric.stdDev) > 0 && (
           <div className="mt-2.5 p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 text-[11px] font-mono space-y-1.5">
             <div className="flex items-center justify-between text-slate-400 border-b border-slate-900 pb-1 text-[10px]">
               <span className="font-sans font-semibold text-slate-300">
@@ -582,20 +658,21 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-slate-300">
               <div>
                 <span className="text-slate-500">{isAr ? 'السعر (P): ' : 'Price (P): '}</span>
-                <span className="font-bold text-slate-100">${metric.price.toFixed(2)}</span>
+                <span className="font-bold text-slate-100">${Number(metric.price || 0).toFixed(2)}</span>
               </div>
               <div>
                 <span className="text-slate-500">{isAr ? 'المتوسط (μ): ' : 'Mean (μ): '}</span>
-                <span className="font-bold text-slate-100">${metric.mean.toFixed(2)}</span>
+                <span className="font-bold text-slate-100">${Number(metric.mean || 0).toFixed(2)}</span>
               </div>
               <div>
                 <span className="text-slate-500">{isAr ? 'الانحراف (σ): ' : 'StdDev (σ): '}</span>
-                <span className="font-bold text-slate-100">${metric.stdDev.toFixed(2)}</span>
+                <span className="font-bold text-slate-100">${Number(metric.stdDev || 0).toFixed(2)}</span>
               </div>
               <div>
                 <span className="text-slate-500">{isAr ? 'الفارق (P-μ): ' : 'Diff (P-μ): '}</span>
-                <span className={`font-bold ${metric.price - metric.mean >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                  {metric.price - metric.mean >= 0 ? '+' : ''}{(metric.price - metric.mean).toFixed(2)}
+                <span className={`font-bold ${Number(metric.price || 0) - Number(metric.mean || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                  {Number(metric.price || 0) - Number(metric.mean || 0) >= 0 ? '+' : ''}
+                  {(Number(metric.price || 0) - Number(metric.mean || 0)).toFixed(2)}
                 </span>
               </div>
             </div>
@@ -603,7 +680,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             <div className="pt-1.5 text-[10px] text-slate-400 border-t border-slate-900 flex flex-wrap items-center justify-between gap-1">
               <span className="text-slate-400">Z = (Price - Mean) / StdDev</span>
               <span className="text-emerald-300 font-bold bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/40">
-                ({(metric.price - metric.mean).toFixed(2)}) / {metric.stdDev.toFixed(2)} = {metric.zScore > 0 ? '+' : ''}{metric.zScore.toFixed(2)}σ
+                ({(Number(metric.price || 0) - Number(metric.mean || 0)).toFixed(2)}) / {Number(metric.stdDev || 0).toFixed(2)} = {Number(metric.zScore || 0) > 0 ? '+' : ''}{Number(metric.zScore || 0).toFixed(2)}σ
               </span>
             </div>
           </div>
