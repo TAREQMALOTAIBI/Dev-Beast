@@ -865,8 +865,30 @@ function setupApiMiddlewares(middlewares: any) {
         }));
       }
 
-      // 1. Concurrency In-Flight Mutex (Immediate 0.1ms rejection of parallel calls)
+      // 1. Concurrency In-Flight Mutex
       if (isServerExecutingOrder) {
+        if (!body.isManual) {
+          const waitStart = Date.now();
+          while (isServerExecutingOrder && Date.now() - waitStart < 4500) {
+            await new Promise((r) => setTimeout(r, 150));
+          }
+          const completedGuard = inMemoryTradeGuard || loadTradeGuardFromDisk();
+          if (completedGuard && completedGuard.marketSlug) {
+            res.statusCode = 200;
+            return res.end(JSON.stringify({
+              success: true,
+              mode: 'ALREADY_EXECUTED_BY_SERVER',
+              orderId: completedGuard.orderId,
+              orderType: completedGuard.orderType || 'GTC',
+              marketSlug: completedGuard.marketSlug,
+              direction: completedGuard.direction,
+              outcome: completedGuard.outcome,
+              price: completedGuard.price,
+              size: completedGuard.size,
+              guard: completedGuard,
+            }));
+          }
+        }
         console.warn('[VM SHIELD BLOCKED] Concurrent order already in-flight.');
         res.statusCode = 429;
         return res.end(JSON.stringify({
@@ -945,6 +967,21 @@ function setupApiMiddlewares(middlewares: any) {
         // Enforce 1 bet per 15m contract
         const existingGuard = inMemoryTradeGuard || loadTradeGuardFromDisk();
         if (existingGuard && existingGuard.marketSlug === activeMarketSlug) {
+          if (!body.isManual) {
+            res.statusCode = 200;
+            return res.end(JSON.stringify({
+              success: true,
+              mode: 'ALREADY_EXECUTED_BY_SERVER',
+              orderId: existingGuard.orderId,
+              orderType: existingGuard.orderType || 'GTC',
+              marketSlug: existingGuard.marketSlug,
+              direction: existingGuard.direction,
+              outcome: existingGuard.outcome,
+              price: existingGuard.price,
+              size: existingGuard.size,
+              guard: existingGuard,
+            }));
+          }
           res.statusCode = 429;
           return res.end(JSON.stringify({
             success: false,

@@ -812,6 +812,31 @@ async function executeLimitlessOrderOnServer(params = {}) {
   }
 
   if (isServerExecutingOrder) {
+    if (!params?.isManual) {
+      // Wait up to 4.5s for the concurrent server/browser order to complete so we return its success rather than a false error
+      const waitStart = Date.now();
+      while (isServerExecutingOrder && Date.now() - waitStart < 4500) {
+        await new Promise((r) => setTimeout(r, 150));
+      }
+      const completedGuard = inMemoryTradeGuard || loadTradeGuardFromDisk();
+      if (completedGuard && completedGuard.marketSlug) {
+        return {
+          httpStatus: 200,
+          body: {
+            success: true,
+            mode: 'ALREADY_EXECUTED_BY_SERVER',
+            orderId: completedGuard.orderId,
+            orderType: completedGuard.orderType || 'GTC',
+            marketSlug: completedGuard.marketSlug,
+            direction: completedGuard.direction,
+            outcome: completedGuard.outcome,
+            price: completedGuard.price,
+            size: completedGuard.size,
+            guard: completedGuard,
+          },
+        };
+      }
+    }
     console.warn('[VM SHIELD BLOCKED] Concurrent order already in-flight.');
     return {
       httpStatus: 429,
@@ -894,6 +919,24 @@ async function executeLimitlessOrderOnServer(params = {}) {
     // Enforce max 1 bet per 15m contract
     const existingGuard = inMemoryTradeGuard || loadTradeGuardFromDisk();
     if (existingGuard && existingGuard.marketSlug === activeMarketSlug) {
+      if (!params?.isManual) {
+        // Automated order from browser arrived right after server autonomous engine executed the same signal: return seamless success
+        return {
+          httpStatus: 200,
+          body: {
+            success: true,
+            mode: 'ALREADY_EXECUTED_BY_SERVER',
+            orderId: existingGuard.orderId,
+            orderType: existingGuard.orderType || 'GTC',
+            marketSlug: existingGuard.marketSlug,
+            direction: existingGuard.direction,
+            outcome: existingGuard.outcome,
+            price: existingGuard.price,
+            size: existingGuard.size,
+            guard: existingGuard,
+          },
+        };
+      }
       return {
         httpStatus: 429,
         body: {
@@ -1118,6 +1161,7 @@ let serverLastEvaluatedEntrySignalTime = 0;
 let serverKlinesBuffer = []; // [{ time, close, isClosed }]
 let serverBinanceWs = null;
 let serverBinanceWsEndpointIdx = 0;
+let lastServerBinanceWsTickTime = 0;
 
 function computeServerRollingZScore(windowPrices) {
   const n = windowPrices.length;
@@ -1175,20 +1219,20 @@ function evaluateServerLiveWindow(closes, latestCandleTime, isHistoricalSeed = f
   let triggeredSignal = null;
 
   // Short (DOWN): First confirmation >= +2.0, Second confirmation <= +1.90
+  // Note: Do NOT clear serverArmedUpper until order is actually executed (or Z crosses <= 0)
   if (liveZ >= 2.0) {
     serverArmedUpper = true;
   } else if (serverArmedUpper && liveZ <= 1.90 && liveZ > 0) {
-    serverArmedUpper = false;
     triggeredSignal = 'ENTRY_SHORT';
   } else if (liveZ <= 0) {
     serverArmedUpper = false;
   }
 
   // Long (UP): First confirmation <= -2.0, Second confirmation >= -1.90
+  // Note: Do NOT clear serverArmedLower until order is actually executed (or Z crosses >= 0)
   if (liveZ <= -2.0) {
     serverArmedLower = true;
   } else if (serverArmedLower && liveZ >= -1.90 && liveZ < 0) {
-    serverArmedLower = false;
     triggeredSignal = 'ENTRY_LONG';
   } else if (liveZ >= 0) {
     serverArmedLower = false;
@@ -1204,6 +1248,7 @@ function evaluateServerLiveWindow(closes, latestCandleTime, isHistoricalSeed = f
   const now = Date.now();
   if (
     (triggeredSignal === 'ENTRY_SHORT' || triggeredSignal === 'ENTRY_LONG') &&
+    !isServerExecutingOrder &&
     now - serverLastEvaluatedEntrySignalTime >= 5000
   ) {
     serverLastEvaluatedEntrySignalTime = now;
@@ -1218,9 +1263,12 @@ function evaluateServerLiveWindow(closes, latestCandleTime, isHistoricalSeed = f
       const liveMkt = cachedActiveBtc || (await fetchLive15MinBtcMarket());
       const guard = inMemoryTradeGuard || loadTradeGuardFromDisk();
       if (guard && liveMkt?.slug && guard.marketSlug === liveMkt.slug) {
-        return; // Single-Entry Lock per 15m Market already active
+        // Single-Entry Lock per 15m Market already active for this market, safe to disarm
+        if (direction === 'SHORT') serverArmedUpper = false;
+        else serverArmedLower = false;
+        return;
       }
-      await executeLimitlessOrderOnServer({
+      const orderRes = await executeLimitlessOrderOnServer({
         market: liveMkt?.slug || 'btc-up-or-down-15-min',
         direction,
         outcome,
@@ -1228,12 +1276,23 @@ function evaluateServerLiveWindow(closes, latestCandleTime, isHistoricalSeed = f
         price: 0.05,
         candleTime: latestCandleTime || now,
       });
+      if (orderRes?.body?.success) {
+        // Disarm only after confirmed order execution
+        if (direction === 'SHORT') serverArmedUpper = false;
+        else serverArmedLower = false;
+      }
     }, 300);
   }
 }
 
 async function syncServerBinanceCandles(isInitial = false) {
   try {
+    // If live WebSocket is actively streaming ticks, never let REST overwrite the live unclosed candle or trigger evaluations
+    const wsIsLive = !isInitial && lastServerBinanceWsTickTime > 0 && Date.now() - lastServerBinanceWsTickTime < 10000;
+    if (wsIsLive) {
+      return;
+    }
+
     const rawKlines = await fetchServerBinanceKlines('BTCUSDT', '1m', 60);
     if (!Array.isArray(rawKlines) || rawKlines.length < 30) return;
 
@@ -1271,6 +1330,7 @@ async function initServerBinanceLiveWs() {
           try {
             const msg = JSON.parse(String(raw));
             if (msg?.e === 'kline' && msg?.k) {
+              lastServerBinanceWsTickTime = Date.now();
               const kTime = Number(msg.k.t);
               const kClose = parseFloat(msg.k.c);
               const kClosed = Boolean(msg.k.x);
@@ -1309,7 +1369,7 @@ async function initServerBinanceLiveWs() {
 }
 
 initServerBinanceLiveWs();
-setInterval(() => syncServerBinanceCandles(false), 3000);
+setInterval(() => syncServerBinanceCandles(false), 5000);
 
 // Binance Klines Proxy with global data-api.binance.vision failover for US Google Cloud VMs
 app.get('/api/binance/*', async (req, res) => {

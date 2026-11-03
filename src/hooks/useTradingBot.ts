@@ -172,8 +172,13 @@ export function useTradingBot() {
   const crossedLowerThresholdRef = useRef<boolean>(false);
   const armedUpperCandleTimeRef = useRef<number>(0);
   const armedLowerCandleTimeRef = useRef<number>(0);
+  const armedUpperCandlesRef = useRef<Set<number>>(new Set());
+  const armedLowerCandlesRef = useRef<Set<number>>(new Set());
+  const entryShortCandlesRef = useRef<Set<number>>(new Set());
+  const entryLongCandlesRef = useRef<Set<number>>(new Set());
   const lastEvaluatedClosedCandleTimeRef = useRef<number>(0);
   const lastEvaluatedEntrySignalTimeRef = useRef<number>(0);
+  const binanceStatusRef = useRef<'CONNECTING' | 'CONNECTED' | 'DISCONNECTED'>(binanceStatus);
   const botActiveRef = useRef<boolean>(botActive);
   const configRef = useRef<BotConfig>(config);
   const currentBalanceRef = useRef<number>(currentBalance);
@@ -242,6 +247,7 @@ export function useTradingBot() {
   botActiveRef.current = botActive;
   currentBalanceRef.current = currentBalance;
   metricsRef.current = metrics;
+  binanceStatusRef.current = binanceStatus;
 
   const toggleSound = () => {
     const next = !soundEnabled;
@@ -317,15 +323,31 @@ export function useTradingBot() {
 
       // Evaluate on every candle (including the current live unclosed candle) with a full 30-period SMA window
       if (hasFullWindow) {
+        const candleTime = candleList[i].time;
+        const wasCandleArmedUpper = armedUpperCandlesRef.current.has(candleTime);
+        const wasCandleArmedLower = armedLowerCandlesRef.current.has(candleTime);
+        const wasCandleEntryShort = entryShortCandlesRef.current.has(candleTime);
+        const wasCandleEntryLong = entryLongCandlesRef.current.has(candleTime);
+
         // Upper Direction (Short / DOWN): First confirmation >= +2.0, Second confirmation <= +1.90
         if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'SHORT_ONLY') {
-          if (stats.zScore >= cfg.zScoreUpper) {
+          if (wasCandleEntryShort) {
+            hadArmedUpper = false;
+            signal = 'ENTRY_SHORT';
+            dir = 'SHORT';
+          } else if (stats.zScore >= cfg.zScoreUpper || wasCandleArmedUpper) {
             hadArmedUpper = true;
-            armedUpperCandleTimeRef.current = candleList[i].time;
+            armedUpperCandleTimeRef.current = candleTime;
+            if (!isInitialLoad && stats.zScore >= cfg.zScoreUpper) {
+              armedUpperCandlesRef.current.add(candleTime);
+            }
             signal = 'ARMED_UPPER';
             dir = 'SHORT';
           } else if (hadArmedUpper && stats.zScore <= cfg.zScoreEntry && stats.zScore > 0) {
-            hadArmedUpper = false;
+            // For historical closed candles, mark disarmed; for the live unclosed candle, keep armed until trade is actually dispatched
+            if (!isLatestLiveCandle) {
+              hadArmedUpper = false;
+            }
             signal = 'ENTRY_SHORT';
             dir = 'SHORT';
           } else if (stats.zScore <= 0) {
@@ -335,13 +357,23 @@ export function useTradingBot() {
 
         // Lower Direction (Long / UP): First confirmation <= -2.0, Second confirmation >= -1.90
         if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'LONG_ONLY') {
-          if (stats.zScore <= lowerThresh) {
+          if (wasCandleEntryLong) {
+            hadArmedLower = false;
+            signal = 'ENTRY_LONG';
+            dir = 'LONG';
+          } else if (stats.zScore <= lowerThresh || wasCandleArmedLower) {
             hadArmedLower = true;
-            armedLowerCandleTimeRef.current = candleList[i].time;
+            armedLowerCandleTimeRef.current = candleTime;
+            if (!isInitialLoad && stats.zScore <= lowerThresh) {
+              armedLowerCandlesRef.current.add(candleTime);
+            }
             signal = 'ARMED_LOWER';
             dir = 'LONG';
           } else if (hadArmedLower && stats.zScore >= lowerEntryThresh && stats.zScore < 0) {
-            hadArmedLower = false;
+            // For historical closed candles, mark disarmed; for the live unclosed candle, keep armed until trade is actually dispatched
+            if (!isLatestLiveCandle) {
+              hadArmedLower = false;
+            }
             signal = 'ENTRY_LONG';
             dir = 'LONG';
           } else if (stats.zScore >= 0) {
@@ -423,11 +455,17 @@ export function useTradingBot() {
           } else if (!isExecutingRef.current) {
             lastEvaluatedEntrySignalTimeRef.current = now;
             if (liveMetric.signal === 'ENTRY_SHORT') {
+              crossedUpperThresholdRef.current = false;
+              setCrossedUpperThreshold(false);
+              entryShortCandlesRef.current.add(liveMetric.time);
               const trigMsg = `🎯 [تحقق التأكيد الثاني اللحظي ≤ +${cfg.zScoreEntry.toFixed(2)}σ · بث حي 1m] ارتد Z-Score اللحظي من فوق +${cfg.zScoreUpper.toFixed(2)}σ إلى +${liveMetric.zScore.toFixed(2)}σ! جاري إرسال أمر GTC فوري لشراء عقد DOWN بسعر أقصى $0.05 (5¢) وحجم 4% من الرصيد.`;
               console.log(trigMsg);
               limitlessService.logDirect('SYSTEM', trigMsg);
               executeLiveTradeRef.current(liveMetric.zScore, 'SHORT', liveMetric.time, false);
             } else if (liveMetric.signal === 'ENTRY_LONG') {
+              crossedLowerThresholdRef.current = false;
+              setCrossedLowerThreshold(false);
+              entryLongCandlesRef.current.add(liveMetric.time);
               const trigMsg = `🎯 [تحقق التأكيد الثاني اللحظي ≥ ${lowerEntryThresh.toFixed(2)}σ · بث حي 1m] ارتد Z-Score اللحظي من تحت ${lowerThresh.toFixed(2)}σ إلى ${liveMetric.zScore.toFixed(2)}σ! جاري إرسال أمر GTC فوري لشراء عقد UP بسعر أقصى $0.05 (5¢) وحجم 4% من الرصيد.`;
               console.log(trigMsg);
               limitlessService.logDirect('SYSTEM', trigMsg);
@@ -509,6 +547,17 @@ export function useTradingBot() {
     // Strict Anti-Duplicate Guard (1 trade per 15m contract)
     const lock = checkTradeLock(resolvedMarketSlug, candleTime);
     if (lock.locked) {
+      if (!isManual) {
+        // Already executed on this 15m market (e.g. by server engine): silently disarm without showing a warning banner
+        if (direction === 'SHORT') {
+          crossedUpperThresholdRef.current = false;
+          setCrossedUpperThreshold(false);
+        } else {
+          crossedLowerThresholdRef.current = false;
+          setCrossedLowerThreshold(false);
+        }
+        return;
+      }
       console.warn(`[SAFETY GUARD BLOCKED] Trade rejected: ${lock.reason}`);
       setExecutionNotice({
         type: 'WARNING',
@@ -717,6 +766,18 @@ export function useTradingBot() {
       });
       lastExecutedTimestampRef.current = 0;
       lastExecutedCandleTimeRef.current = 0;
+      // Restore First Confirmation arming state if automated order failed due to a transient error
+      if (!isManual) {
+        if (direction === 'SHORT') {
+          crossedUpperThresholdRef.current = true;
+          setCrossedUpperThreshold(true);
+          if (candleTime) entryShortCandlesRef.current.delete(candleTime);
+        } else {
+          crossedLowerThresholdRef.current = true;
+          setCrossedLowerThreshold(true);
+          if (candleTime) entryLongCandlesRef.current.delete(candleTime);
+        }
+      }
     } finally {
       isExecutingRef.current = false;
       setIsExecuting(false);
@@ -807,6 +868,14 @@ export function useTradingBot() {
         lastExecutedMarketSlugRef.current = serverGuard.marketSlug;
         lastExecutedTimestampRef.current = Number(serverGuard.timestamp) || 0;
         lastExecutedCandleTimeRef.current = Number(serverGuard.candleTime) || 0;
+        // Disarm active confirmation in browser since server already executed for this 15m contract
+        if (serverGuard.direction === 'SHORT') {
+          crossedUpperThresholdRef.current = false;
+          setCrossedUpperThreshold(false);
+        } else if (serverGuard.direction === 'LONG') {
+          crossedLowerThresholdRef.current = false;
+          setCrossedLowerThreshold(false);
+        }
         setContractLockInfo({
           isLocked: true,
           reason: `تم تنفيذ صفقة 4% على عقد ${serverGuard.marketSlug}`,
@@ -920,18 +989,23 @@ export function useTradingBot() {
         },
         (status) => setBinanceStatus(status),
         (recentOfficialCandles) => {
-          // Reconcile official closed candles from Binance REST API every 4s and on minute boundaries
-          // Ensures background tabs or missed WS frames always have 100% accurate closed OHLC & trigger signals
+          // Reconcile official closed candles from Binance REST API every 4s
+          // Never overwrite the currently forming live unclosed candle when WebSocket is connected
           const prev = candlesRef.current;
           if (prev.length === 0) return;
+          const wsConnected = binanceStatusRef.current === 'CONNECTED';
+          const latestLiveCandleTime = prev[prev.length - 1]?.time || 0;
           const maxBufferSize = Math.max(configRef.current.periods * 2 + 10, 100);
           const candleMap = new Map<number, CandleData>();
           for (const c of prev) {
             candleMap.set(c.time, c);
           }
           for (const rc of recentOfficialCandles) {
+            if (wsConnected && rc.time >= latestLiveCandleTime && rc.isClosed === false) {
+              // Preserve the live WebSocket unclosed candle price; do not overwrite with lagging REST snapshot
+              continue;
+            }
             const existing = candleMap.get(rc.time);
-            // Always overwrite closed candles with official REST closed OHLC, or insert any missed candles
             if (!existing || rc.isClosed !== false) {
               candleMap.set(rc.time, rc);
             }
@@ -949,7 +1023,8 @@ export function useTradingBot() {
             if (closedCloses.length >= configRef.current.periods) {
               closePricesRef.current = closedCloses.slice(-configRef.current.periods);
             }
-            rebuildMetricsRef.current(merged, configRef.current, false);
+            // If WebSocket is actively connected, only refresh chart metrics (isInitialLoad = true) so REST sync never interferes with live WS tick evaluation
+            rebuildMetricsRef.current(merged, configRef.current, wsConnected);
           }
         }
       );
