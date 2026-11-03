@@ -37,9 +37,25 @@ export interface ThreeFiltersStatus {
 export function computeEmaSeries(prices: number[], period = 60): number[] {
   if (!prices.length) return [];
   const k = 2 / (period + 1);
-  const ema: number[] = [prices[0]];
-  for (let i = 1; i < prices.length; i++) {
-    ema.push(prices[i] * k + ema[i - 1] * (1 - k));
+  if (prices.length < period) {
+    const ema: number[] = [prices[0]];
+    for (let i = 1; i < prices.length; i++) {
+      ema.push(prices[i] * k + ema[i - 1] * (1 - k));
+    }
+    return ema;
+  }
+  // Standard TradingView / Binance EMA: seed with Simple Moving Average (SMA) of first `period` candles
+  const ema: number[] = new Array(prices.length);
+  let sum = 0;
+  for (let i = 0; i < period; i++) {
+    sum += prices[i];
+    ema[i] = sum / (i + 1);
+  }
+  let prevEma = sum / period;
+  ema[period - 1] = prevEma;
+  for (let i = period; i < prices.length; i++) {
+    prevEma = prices[i] * k + prevEma * (1 - k);
+    ema[i] = prevEma;
   }
   return ema;
 }

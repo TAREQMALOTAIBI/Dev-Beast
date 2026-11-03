@@ -27,7 +27,7 @@ export class BinanceService {
   public async fetchHistoricalCandles(
     symbol: string = 'BTCUSDT',
     interval: string = '1m',
-    limit: number = 100,
+    limit: number = 200,
     restUrl: string = 'https://api.binance.com/api/v3/klines'
   ): Promise<CandleData[]> {
     const endpoints = [

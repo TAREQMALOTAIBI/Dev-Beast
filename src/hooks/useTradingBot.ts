@@ -968,7 +968,7 @@ export function useTradingBot() {
     let isCancelled = false;
 
     async function initMarketData() {
-      const lookbackBufferSize = Math.max(config.periods * 2 + 10, 100);
+      const lookbackBufferSize = Math.max(config.periods * 2 + 10, 200);
       const realCandles = await binanceService.fetchHistoricalCandles(
         config.symbol,
         config.timeframe,
@@ -992,7 +992,7 @@ export function useTradingBot() {
         config.timeframe,
         (tickCandle, _isClosed) => {
           const prev = candlesRef.current;
-          const maxBufferSize = Math.max(configRef.current.periods * 2 + 10, 100);
+          const maxBufferSize = Math.max(configRef.current.periods * 2 + 10, 200);
           const last = prev[prev.length - 1];
           let updatedCandles: CandleData[] = [];
 
@@ -1027,7 +1027,7 @@ export function useTradingBot() {
           if (prev.length === 0) return;
           const wsConnected = binanceStatusRef.current === 'CONNECTED';
           const latestLiveCandleTime = prev[prev.length - 1]?.time || 0;
-          const maxBufferSize = Math.max(configRef.current.periods * 2 + 10, 100);
+          const maxBufferSize = Math.max(configRef.current.periods * 2 + 10, 200);
           const candleMap = new Map<number, CandleData>();
           for (const c of prev) {
             candleMap.set(c.time, c);

@@ -1209,9 +1209,24 @@ function computeServerRollingStats(windowPrices) {
 function computeServerEmaSeries(prices, period = 60) {
   if (!Array.isArray(prices) || prices.length === 0) return [];
   const k = 2 / (period + 1);
-  const ema = [prices[0]];
-  for (let i = 1; i < prices.length; i++) {
-    ema.push(prices[i] * k + ema[i - 1] * (1 - k));
+  if (prices.length < period) {
+    const ema = [prices[0]];
+    for (let i = 1; i < prices.length; i++) {
+      ema.push(prices[i] * k + ema[i - 1] * (1 - k));
+    }
+    return ema;
+  }
+  const ema = new Array(prices.length);
+  let sum = 0;
+  for (let i = 0; i < period; i++) {
+    sum += prices[i];
+    ema[i] = sum / (i + 1);
+  }
+  let prevEma = sum / period;
+  ema[period - 1] = prevEma;
+  for (let i = period; i < prices.length; i++) {
+    prevEma = prices[i] * k + prevEma * (1 - k);
+    ema[i] = prevEma;
   }
   return ema;
 }
@@ -1382,7 +1397,7 @@ async function syncServerBinanceCandles(isInitial = false) {
       return;
     }
 
-    const rawKlines = await fetchServerBinanceKlines('BTCUSDT', '1m', 100);
+    const rawKlines = await fetchServerBinanceKlines('BTCUSDT', '1m', 200);
     if (!Array.isArray(rawKlines) || rawKlines.length < 30) return;
 
     const now = Date.now();
@@ -1431,7 +1446,7 @@ async function initServerBinanceLiveWs() {
                 } else if (kTime > last.time) {
                   last.isClosed = true;
                   serverKlinesBuffer.push({ time: kTime, close: kClose, isClosed: kClosed });
-                  if (serverKlinesBuffer.length > 120) serverKlinesBuffer.shift();
+                  if (serverKlinesBuffer.length > 220) serverKlinesBuffer.shift();
                 }
                 const closes = serverKlinesBuffer.map((c) => c.close);
                 evaluateServerLiveWindow(closes, kTime, false);
