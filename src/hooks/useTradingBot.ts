@@ -126,14 +126,21 @@ export function useTradingBot() {
   const [positions, setPositions] = useState<import('../types/bot').PositionItem[]>([]);
   const [botActive, setBotActive] = useState<boolean>(() => {
     try {
-      const saved = localStorage.getItem('limitless_bot_active_state');
+      // Remove legacy auto-true key so neither AI Studio preview nor existing tabs silently auto-trade
+      localStorage.removeItem('limitless_bot_active_state');
+      // Never auto-enable trading inside AI Studio preview iframe (*.run.app)
+      if (typeof window !== 'undefined' && window.location.hostname.includes('.run.app')) {
+        localStorage.setItem('limitless_bot_active_v2', 'false');
+        return false;
+      }
+      const saved = localStorage.getItem('limitless_bot_active_v2');
       if (saved !== null) {
         return saved === 'true';
       }
     } catch {
       // Safe fallback
     }
-    return true;
+    return false; // Default to STOPPED until user explicitly turns it ON
   });
   const [binanceStatus, setBinanceStatus] = useState<'CONNECTING' | 'CONNECTED' | 'DISCONNECTED'>('CONNECTING');
   const [limitlessStatus, setLimitlessStatus] = useState<LimitlessStatus>('DISCONNECTED');
@@ -176,9 +183,9 @@ export function useTradingBot() {
   const lastExecutedTimestampRef = useRef<number>(0);
   const activeLimitlessMarketRef = useRef<LimitlessMarketDetails | null>(null);
   const metricsRef = useRef<ZScoreMetric[]>([]);
-  const executeLiveTradeRef = useRef<(triggerZ: number, direction?: 'SHORT' | 'LONG', candleTime?: number) => Promise<void>>(
-    async () => {}
-  );
+  const executeLiveTradeRef = useRef<
+    (triggerZ: number, direction?: 'SHORT' | 'LONG', candleTime?: number, isManual?: boolean) => Promise<void>
+  >(async () => {});
 
   // Persistent trade lock status (1 bet per 15m contract)
   const [contractLockInfo, setContractLockInfo] = useState<{
@@ -462,12 +469,18 @@ export function useTradingBot() {
     return { locked: false };
   }, []);
 
-  // Execute LIVE Trade strictly across Limitless (15m Contract, Fixed 4% Bankroll, GTC without Max Entry Price)
+  // Execute LIVE Trade strictly across Limitless (15m Contract, Fixed 4% Bankroll, GTC at 20¢ limit)
   const executeLiveTrade = useCallback(async (
     triggerZ: number,
     direction: 'SHORT' | 'LONG' = 'SHORT',
-    candleTime?: number
+    candleTime?: number,
+    isManual: boolean = false
   ) => {
+    if (!isManual && !botActiveRef.current) {
+      console.warn('[BOT STOPPED] Automated order blocked because botActive is false.');
+      return;
+    }
+
     if (isExecutingRef.current) {
       console.warn('[CONCURRENCY BLOCKED] An order is already in-flight.');
       return;
@@ -660,6 +673,7 @@ export function useTradingBot() {
           tokenId: cfg.limitlessTokenId,
           secret: cfg.limitlessTokenSecret,
           apiKey: cfg.limitlessApiKey,
+          isManual,
         }
       );
 
@@ -1074,6 +1088,29 @@ export function useTradingBot() {
       refreshLiveBalance();
     }, 12000);
 
+    // Synchronize bot active/stopped state with backend server (/api/bot-state)
+    const isPreviewHost = typeof window !== 'undefined' && window.location.hostname.includes('.run.app');
+    if (isPreviewHost) {
+      fetch('/api/bot-state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: false }),
+      }).catch(() => {});
+    } else {
+      fetch('/api/bot-state')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (d && typeof d.active === 'boolean') {
+            setBotActive(d.active);
+            botActiveRef.current = d.active;
+            try {
+              localStorage.setItem('limitless_bot_active_v2', String(d.active));
+            } catch {}
+          }
+        })
+        .catch(() => {});
+    }
+
     return () => {
       clearInterval(marketInterval);
       clearInterval(balanceInterval);
@@ -1085,10 +1122,17 @@ export function useTradingBot() {
       const next = !prev;
       botActiveRef.current = next;
       try {
-        localStorage.setItem('limitless_bot_active_state', String(next));
+        localStorage.setItem('limitless_bot_active_v2', String(next));
       } catch {
         // Safe localStorage
       }
+      // Immediately synchronize with backend server (stops/starts autonomous server loop & order gate)
+      fetch('/api/bot-state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: next }),
+      }).catch(() => {});
+
       if (next) {
         // Immediate balance update when bot is turned on
         refreshLiveBalance();
@@ -1100,7 +1144,7 @@ export function useTradingBot() {
   const triggerManualTrade = useCallback(
     (direction: 'SHORT' | 'LONG' = 'SHORT') => {
       const defaultZ = direction === 'SHORT' ? 2.3 : -2.3;
-      executeLiveTrade(currentZScore || defaultZ, direction);
+      executeLiveTrade(currentZScore || defaultZ, direction, undefined, true);
     },
     [executeLiveTrade, currentZScore]
   );

@@ -552,7 +552,7 @@ export class LimitlessService {
     onChunkUpdate: (chunk: ExecutedChunk) => void,
     direction: 'SHORT' | 'LONG' = 'SHORT',
     targetMarketSlug?: string,
-    credentials?: { privateKey?: string; tokenId?: string; secret?: string; apiKey?: string }
+    credentials?: { privateKey?: string; tokenId?: string; secret?: string; apiKey?: string; isManual?: boolean }
   ): Promise<ExecutedChunk[]> {
     if (this.status !== 'CONNECTED' && this.status !== 'AUTHENTICATED') {
       this.log('SYSTEM', `[ORDER DISPATCH] WebSocket status is ${this.status}. Transmitting order via Limitless HTTP REST order execution proxy...`);
@@ -581,6 +581,7 @@ export class LimitlessService {
       price: priceCents,
       size: contractsToBuy,
       chunkId: 1,
+      isManual: Boolean(credentials?.isManual),
       privateKey: credentials?.privateKey,
       tokenId: credentials?.tokenId,
       secret: credentials?.secret,

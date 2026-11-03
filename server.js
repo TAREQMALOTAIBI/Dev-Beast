@@ -44,8 +44,43 @@ let subscribedSlugs = new Set();
 // VM Persistent Trade Guard (RAM + Disk: trade-guard.json)
 // ============================================================================
 const TRADE_GUARD_FILE = path.join(process.cwd(), 'trade-guard.json');
+const BOT_STATE_FILE = path.join(process.cwd(), 'bot-state.json');
 let inMemoryTradeGuard = null;
 let isServerExecutingOrder = false;
+let serverBotActive = false; // Default to FALSE (stopped) until user explicitly activates bot
+
+function loadBotStateFromDisk() {
+  try {
+    if (fs.existsSync(BOT_STATE_FILE)) {
+      const raw = fs.readFileSync(BOT_STATE_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (typeof parsed?.active === 'boolean') {
+        serverBotActive = parsed.active;
+        return serverBotActive;
+      }
+    }
+  } catch (err) {
+    console.warn('[VM Bot State] Error reading bot-state.json:', err.message);
+  }
+  serverBotActive = false;
+  return false;
+}
+
+function persistBotStateToDisk(active) {
+  serverBotActive = Boolean(active);
+  try {
+    fs.writeFileSync(
+      BOT_STATE_FILE,
+      JSON.stringify({ active: serverBotActive, updatedAt: Date.now() }, null, 2),
+      'utf8'
+    );
+    console.log(`[VM Bot State] Bot active state updated to: ${serverBotActive ? 'RUNNING' : 'STOPPED'}`);
+  } catch (err) {
+    console.warn('[VM Bot State] Error writing bot-state.json:', err.message);
+  }
+}
+
+loadBotStateFromDisk();
 
 function loadTradeGuardFromDisk() {
   try {
@@ -764,6 +799,18 @@ app.get('/api/limitless/orderbook', async (req, res) => {
 
 // Core Server-Side Order Execution Helper (Used by REST API & Autonomous Server 1m Closed-Candle Engine)
 async function executeLimitlessOrderOnServer(params = {}) {
+  if (!serverBotActive && !params?.isManual) {
+    console.warn('[VM SHIELD BLOCKED] Automated order rejected because bot is STOPPED (serverBotActive = false).');
+    return {
+      httpStatus: 403,
+      body: {
+        success: false,
+        mode: 'BOT_STOPPED',
+        error: '⛔ الروبوت متوقف حالياً على السيرفر. تم حظر تنفيذ الصفقة التلقائية.',
+      },
+    };
+  }
+
   if (isServerExecutingOrder) {
     console.warn('[VM SHIELD BLOCKED] Concurrent order already in-flight.');
     return {
@@ -1042,6 +1089,18 @@ async function executeLimitlessOrderOnServer(params = {}) {
   }
 }
 
+// Dedicated Bot Active/Stopped State Endpoint (Controls both Browser & Server Autonomous Engine)
+app.get('/api/bot-state', (_req, res) => {
+  res.json({ success: true, active: serverBotActive });
+});
+
+app.post('/api/bot-state', (req, res) => {
+  const nextActive = Boolean(req.body?.active);
+  persistBotStateToDisk(nextActive);
+  broadcastSse('botStateUpdate', { active: serverBotActive });
+  res.json({ success: true, active: serverBotActive });
+});
+
 // Dedicated EIP-712 Order Execution Endpoint according to Limitless specification
 app.post('/api/limitless/order', async (req, res) => {
   const outcomeResult = await executeLimitlessOrderOnServer(req.body || {});
@@ -1050,7 +1109,7 @@ app.post('/api/limitless/order', async (req, res) => {
 
 // ============================================================================
 // Autonomous Server-Side 1m Closed-Candle Z-Score Engine (45 Candles, 2.5 -> 2.3)
-// Guarantees trades execute 24/7 on the VM even if the browser tab is throttled or closed
+// Guarantees trades execute 24/7 on the VM ONLY when serverBotActive === true
 // ============================================================================
 let serverLastEvaluatedClosedCandleTime = 0;
 let serverLastEvaluatedEntrySignalTime = 0;
@@ -1085,6 +1144,9 @@ async function fetchServerBinanceKlines(symbol = 'BTCUSDT', interval = '1m', lim
 
 async function pollServerClosedCandlesStrategy() {
   try {
+    // Strictly do NOT execute any autonomous background trades if the bot is stopped!
+    if (!serverBotActive) return;
+
     const pk = (process.env.PRIVATE_KEY || '').trim();
     const tokenId = (process.env.LMTS_TOKEN_ID || '').trim();
     const secret = (process.env.LMTS_TOKEN_SECRET || process.env['.MTS_TOKEN_SECRET'] || '').trim();
@@ -1155,6 +1217,8 @@ async function pollServerClosedCandlesStrategy() {
       latestEntryTime > serverLastEvaluatedEntrySignalTime
     ) {
       serverLastEvaluatedEntrySignalTime = latestEntryTime;
+      if (!serverBotActive) return;
+
       const direction = latestEntrySignal === 'ENTRY_LONG' ? 'LONG' : 'SHORT';
       const outcome = direction === 'LONG' ? 'UP' : 'DOWN';
       console.log(
@@ -1162,7 +1226,7 @@ async function pollServerClosedCandlesStrategy() {
       );
 
       setTimeout(async () => {
-        if (isServerExecutingOrder) return;
+        if (!serverBotActive || isServerExecutingOrder) return;
         const liveMkt = cachedActiveBtc || (await fetchLive15MinBtcMarket());
         const guard = inMemoryTradeGuard || loadTradeGuardFromDisk();
         if (guard && liveMkt?.slug && guard.marketSlug === liveMkt.slug) {

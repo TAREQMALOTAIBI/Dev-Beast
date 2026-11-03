@@ -191,8 +191,43 @@ const sseClients = new Set<any>();
 // VM Persistent Trade Guard (RAM + Disk: trade-guard.json)
 // ============================================================================
 const TRADE_GUARD_FILE = path.join(process.cwd(), 'trade-guard.json');
+const BOT_STATE_FILE = path.join(process.cwd(), 'bot-state.json');
 let inMemoryTradeGuard: any = null;
 let isServerExecutingOrder = false;
+let serverBotActive = false; // Default to FALSE (stopped) until user explicitly activates bot
+
+function loadBotStateFromDisk(): boolean {
+  try {
+    if (fs.existsSync(BOT_STATE_FILE)) {
+      const raw = fs.readFileSync(BOT_STATE_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (typeof parsed?.active === 'boolean') {
+        serverBotActive = parsed.active;
+        return serverBotActive;
+      }
+    }
+  } catch (err: any) {
+    console.warn('[VM Bot State Dev] Error reading bot-state.json:', err?.message);
+  }
+  serverBotActive = false;
+  return false;
+}
+
+function persistBotStateToDisk(active: boolean) {
+  serverBotActive = Boolean(active);
+  try {
+    fs.writeFileSync(
+      BOT_STATE_FILE,
+      JSON.stringify({ active: serverBotActive, updatedAt: Date.now() }, null, 2),
+      'utf8'
+    );
+    console.log(`[VM Bot State Dev] Bot active state updated to: ${serverBotActive ? 'RUNNING' : 'STOPPED'}`);
+  } catch (err: any) {
+    console.warn('[VM Bot State Dev] Error writing bot-state.json:', err?.message);
+  }
+}
+
+loadBotStateFromDisk();
 
 function loadTradeGuardFromDisk(): any {
   try {
@@ -568,6 +603,34 @@ function setupApiMiddlewares(middlewares: any) {
   });
 
   // ============================================================================
+  // Bot Active/Stopped State REST Endpoint
+  // ============================================================================
+  middlewares.use('/api/bot-state', (req: any, res: any) => {
+    res.setHeader('Content-Type', 'application/json');
+    if (req.method === 'GET') {
+      return res.end(JSON.stringify({ success: true, active: serverBotActive }));
+    }
+    if (req.method === 'POST') {
+      let raw = '';
+      req.on('data', (c: any) => { raw += c; });
+      req.on('end', () => {
+        try {
+          const body = raw ? JSON.parse(raw) : {};
+          persistBotStateToDisk(Boolean(body.active));
+          broadcastSse('botStateUpdate', { active: serverBotActive });
+          res.end(JSON.stringify({ success: true, active: serverBotActive }));
+        } catch (err: any) {
+          res.statusCode = 500;
+          res.end(JSON.stringify({ success: false, error: err.message }));
+        }
+      });
+      return;
+    }
+    res.statusCode = 405;
+    res.end(JSON.stringify({ error: 'Method not allowed' }));
+  });
+
+  // ============================================================================
   // VM Persistent Trade Guard REST Endpoints
   // ============================================================================
   middlewares.use('/api/trade-guard/clear', (req: any, res: any) => {
@@ -790,6 +853,17 @@ function setupApiMiddlewares(middlewares: any) {
     req.on('data', (chunk: any) => { rawBody += chunk; });
     req.on('end', async () => {
       const body = rawBody ? JSON.parse(rawBody) : {};
+
+      // 0. Reject automated orders if bot is stopped
+      if (!serverBotActive && !body.isManual) {
+        console.warn('[VM SHIELD BLOCKED] Automated order rejected because bot is STOPPED (serverBotActive = false).');
+        res.statusCode = 403;
+        return res.end(JSON.stringify({
+          success: false,
+          mode: 'BOT_STOPPED',
+          error: '⛔ الروبوت متوقف حالياً على السيرفر. تم حظر تنفيذ الصفقة التلقائية.',
+        }));
+      }
 
       // 1. Concurrency In-Flight Mutex (Immediate 0.1ms rejection of parallel calls)
       if (isServerExecutingOrder) {
