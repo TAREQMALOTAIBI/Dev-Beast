@@ -34,10 +34,10 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
       periods: 30,
       strategyDirection: 'BOTH',
       zScoreUpper: 2.0,
-      zScoreEntry: 1.90,
+      zScoreEntry: 1.0,
       zScoreLower: -2.0,
-      zScoreLowerEntry: -1.90,
-      maxPriceCents: 0.05,
+      zScoreLowerEntry: -1.0,
+      maxPriceCents: 0.20,
       maxRiskPercent: 0.04,
       orderType: 'GTC',
       fractionChunks: 1,
@@ -73,7 +73,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 {isAr ? 'إعدادات استراتيجية التداول (1m Live WS · عقود 15 دقيقة)' : 'Trading Strategy Configuration (1m Live WS · 15m Contracts)'}
               </h2>
               <div className="text-[11px] text-slate-400">
-                {isAr ? '30-SMA (1m) · تقييم لحظي مع كل تحديث WebSocket · تأكيد (2.0 ← 1.90) · 4% رأس المال · GTC ≤ $0.05 (5%)' : '30-SMA (1m) · Live WS Unclosed Candle Eval · Confirm (2.0 -> 1.90) · 4% Capital · GTC ≤ $0.05 (5%)'}
+                {isAr ? '30-SMA (1m) · تقييم لحظي مع كل تحديث WebSocket · تأكيد (2.0 ← 1.0) · 4% رأس المال · GTC ≤ 20% ($0.20)' : '30-SMA (1m) · Live WS Unclosed Candle Eval · Confirm (2.0 -> 1.0) · 4% Capital · GTC ≤ 20% ($0.20)'}
               </div>
             </div>
           </div>
@@ -282,10 +282,10 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
           <div className="border-t border-slate-800 pt-4 space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold text-slate-100 uppercase tracking-wider text-[11px] text-sky-400">
-                {isAr ? 'عتبات Z-Score: التأكيد الأول (2.0) والتأكيد الثاني (1.90)' : 'Z-Score Thresholds: 1st Confirmation (2.0) & 2nd Confirmation (1.90)'}
+                {isAr ? 'عتبات Z-Score: التأكيد الأول (2.0) والتأكيد الثاني (1.0)' : 'Z-Score Thresholds: 1st Confirmation (2.0) & 2nd Confirmation (1.0)'}
               </h3>
               <span className="text-[10px] text-emerald-400 font-bold bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/40">
-                {isAr ? '⚡ تأكيد مزدوج (2.0 → 1.90)' : '⚡ Dual Confirm (2.0 → 1.90)'}
+                {isAr ? '⚡ تأكيد مزدوج (2.0 → 1.0)' : '⚡ Dual Confirm (2.0 → 1.0)'}
               </span>
             </div>
 
@@ -321,18 +321,18 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                   timeframe: '1m',
                   periods: 30,
                   zScoreUpper: 2.0,
-                  zScoreEntry: 1.90,
+                  zScoreEntry: 1.0,
                   zScoreLower: -2.0,
-                  zScoreLowerEntry: -1.90,
+                  zScoreLowerEntry: -1.0,
                   maxRiskPercent: 0.04,
-                  maxPriceCents: 0.05,
+                  maxPriceCents: 0.20,
                   orderType: 'GTC',
                   singleTradePerContract: true,
                   cooldownMinutes: 15,
                 })}
                 className="px-2.5 py-1 rounded text-[11px] font-bold bg-emerald-950/80 hover:bg-emerald-900/90 text-emerald-300 border border-emerald-600/50 cursor-pointer"
               >
-                {isAr ? '🎯 الإعدادات المعتمدة (1m Live WS · 30-SMA · تأكيد 2.0 ← 1.90 · 4% · GTC ≤ $0.05 / 5%)' : '🎯 Approved Preset (1m Live WS · 30-SMA · 2.0 -> 1.90 · 4% · GTC ≤ $0.05 / 5%)'}
+                {isAr ? '🎯 الإعدادات المعتمدة (1m Live WS · 30-SMA · تأكيد 2.0 ← 1.0 · 4% · GTC ≤ 20% / $0.20)' : '🎯 Approved Preset (1m Live WS · 30-SMA · 2.0 -> 1.0 · 4% · GTC ≤ 20% / $0.20)'}
               </button>
             </div>
 
@@ -360,14 +360,14 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 </div>
                 <div>
                   <label className="block text-slate-400 mb-1 text-[11px]">
-                    {isAr ? 'التأكيد الثاني - الدخول (Second Confirmation +1.90):' : 'Second Confirmation - Entry (+1.90):'}
+                    {isAr ? 'التأكيد الثاني - الدخول (Second Confirmation +1.0):' : 'Second Confirmation - Entry (+1.0):'}
                   </label>
                   <input
                     type="number"
                     step="0.05"
                     value={draft.zScoreEntry}
                     onChange={(e) => {
-                      const val = parseFloat(e.target.value) || 1.90;
+                      const val = parseFloat(e.target.value) || 1.0;
                       setDraft({ ...draft, zScoreEntry: val, zScoreLowerEntry: -Math.abs(val) });
                     }}
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-100 font-mono"
@@ -397,14 +397,14 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 </div>
                 <div>
                   <label className="block text-slate-400 mb-1 text-[11px]">
-                    {isAr ? 'التأكيد الثاني - الدخول (Second Confirmation -1.90):' : 'Second Confirmation - Entry (-1.90):'}
+                    {isAr ? 'التأكيد الثاني - الدخول (Second Confirmation -1.0):' : 'Second Confirmation - Entry (-1.0):'}
                   </label>
                   <input
                     type="number"
                     step="0.05"
-                    value={draft.zScoreLowerEntry ?? -1.90}
+                    value={draft.zScoreLowerEntry ?? -1.0}
                     onChange={(e) => {
-                      const val = parseFloat(e.target.value) || -1.90;
+                      const val = parseFloat(e.target.value) || -1.0;
                       setDraft({ ...draft, zScoreLowerEntry: val });
                     }}
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-100 font-mono"
@@ -417,7 +417,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
           {/* Section 4: Risk Sizing & Direct Order Execution */}
           <div className="border-t border-slate-800 pt-4">
             <h3 className="font-semibold text-slate-100 uppercase tracking-wider text-[11px] mb-3 text-sky-400">
-              {isAr ? 'حجم الصفقة ونوع الأمر (4% كحد أقصى من رأس المال · GTC بسعر أقصى ≤ $0.05 أو 5%)' : 'Bet Size & Order Type (Max 4% Capital Ratio · GTC Max Share Price ≤ $0.05 or 5%)'}
+              {isAr ? 'حجم الصفقة ونوع الأمر (4% كحد أقصى من رأس المال · GTC بسقف دخول ≤ 20% أو $0.20)' : 'Bet Size & Order Type (Max 4% Capital Ratio · GTC Max Share Price ≤ 20% or $0.20)'}
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
@@ -435,15 +435,15 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
 
               <div>
                 <label className="block text-slate-400 mb-1">
-                  {isAr ? 'أقصى سعر للسهم (0.05 = $0.05 أو 5%)' : 'Max Share Price (0.05 = $0.05 or 5%)'}
+                  {isAr ? 'سقف الدخول (0.20 = $0.20 أو 20% وتحت)' : 'Max Share Price (0.20 = $0.20 or 20%)'}
                 </label>
                 <input
                   type="number"
                   step="0.01"
                   min="0.01"
-                  max="0.05"
+                  max="0.20"
                   value={draft.maxPriceCents}
-                  onChange={(e) => setDraft({ ...draft, maxPriceCents: Math.min(parseFloat(e.target.value) || 0.05, 0.05) })}
+                  onChange={(e) => setDraft({ ...draft, maxPriceCents: Math.min(parseFloat(e.target.value) || 0.20, 0.20) })}
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
                 />
               </div>
@@ -467,8 +467,8 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
             <div className="mt-2.5 p-2.5 rounded-lg bg-emerald-950/40 border border-emerald-700/50 text-[11px] text-emerald-300 space-y-1.5">
               <div className="font-semibold text-emerald-200">
                 {isAr
-                  ? '✓ أمر GTC بسعر أقصى $0.05 أو 5% (5 سنت): يتم إرسال الأمر بسعر $0.05 كحد أقصى عند تحقق التأكيد الثاني (1.90).'
-                  : '✓ GTC Order with ≤ $0.05 (5% / 5¢) Max Share Price: Places GTC limit order at $0.05 or below upon 2nd confirmation (1.90).'}
+                  ? '✓ أمر GTC بسقف دخول 20% وتحت ($0.20 / 20 سنت): يتم إرسال الأمر بسعر 20% كحد أقصى عند تحقق التأكيد الثاني (1.0).'
+                  : '✓ GTC Order with ≤ 20% ($0.20 / 20¢) Max Share Price: Places GTC limit order at $0.20 or below upon 2nd confirmation (1.0).'}
               </div>
               <div className="text-sky-300">
                 {isAr

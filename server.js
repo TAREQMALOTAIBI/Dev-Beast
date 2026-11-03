@@ -994,15 +994,15 @@ async function executeLimitlessOrderOnServer(params = {}) {
       };
     }
 
-    // Direct GTC Limit Price at 5 cents ($0.05 or 5%) — sent immediately upon 2nd confirmation
-    const MAX_ENTRY_PRICE_CAP = 0.05;
+    // Direct GTC Limit Price at 20 cents ($0.20 or 20%) and below — sent immediately upon 2nd confirmation
+    const MAX_ENTRY_PRICE_CAP = 0.20;
     const numericClientPrice = Number(price) > 1 ? Number(price) / 100 : Number(price);
     const desiredLimitPrice =
       numericClientPrice && numericClientPrice > 0 && numericClientPrice <= MAX_ENTRY_PRICE_CAP
         ? numericClientPrice
         : MAX_ENTRY_PRICE_CAP;
 
-    // Price must have max 3 decimal places for Limitless SDK tick alignment (0.001) and strictly <= 0.05
+    // Price must have max 3 decimal places for Limitless SDK tick alignment (0.001) and strictly <= 0.20
     const tickAlignedPrice = Math.max(0.001, Math.min(MAX_ENTRY_PRICE_CAP, parseFloat(Number(desiredLimitPrice).toFixed(3))));
 
     const { ethers } = await import('ethers');
@@ -1201,11 +1201,11 @@ function evaluateServerLiveWindow(closes, latestCandleTime, isHistoricalSeed = f
       const windowSlice = closes.slice(i - 29, i + 1);
       const z = computeServerRollingZScore(windowSlice);
       if (z >= 2.0) armedU = true;
-      else if (armedU && z <= 1.90 && z > 0) armedU = false;
+      else if (armedU && z <= 1.0 && z > 0) armedU = false;
       else if (z <= 0) armedU = false;
 
       if (z <= -2.0) armedL = true;
-      else if (armedL && z >= -1.90 && z < 0) armedL = false;
+      else if (armedL && z >= -1.0 && z < 0) armedL = false;
       else if (z >= 0) armedL = false;
     }
     serverArmedUpper = armedU;
@@ -1218,21 +1218,21 @@ function evaluateServerLiveWindow(closes, latestCandleTime, isHistoricalSeed = f
   const liveZ = computeServerRollingZScore(liveWindow);
   let triggeredSignal = null;
 
-  // Short (DOWN): First confirmation >= +2.0, Second confirmation <= +1.90
+  // Short (DOWN): First confirmation >= +2.0, Second confirmation <= +1.0
   // Note: Do NOT clear serverArmedUpper until order is actually executed (or Z crosses <= 0)
   if (liveZ >= 2.0) {
     serverArmedUpper = true;
-  } else if (serverArmedUpper && liveZ <= 1.90 && liveZ > 0) {
+  } else if (serverArmedUpper && liveZ <= 1.0 && liveZ > 0) {
     triggeredSignal = 'ENTRY_SHORT';
   } else if (liveZ <= 0) {
     serverArmedUpper = false;
   }
 
-  // Long (UP): First confirmation <= -2.0, Second confirmation >= -1.90
+  // Long (UP): First confirmation <= -2.0, Second confirmation >= -1.0
   // Note: Do NOT clear serverArmedLower until order is actually executed (or Z crosses >= 0)
   if (liveZ <= -2.0) {
     serverArmedLower = true;
-  } else if (serverArmedLower && liveZ >= -1.90 && liveZ < 0) {
+  } else if (serverArmedLower && liveZ >= -1.0 && liveZ < 0) {
     triggeredSignal = 'ENTRY_LONG';
   } else if (liveZ >= 0) {
     serverArmedLower = false;
@@ -1255,7 +1255,7 @@ function evaluateServerLiveWindow(closes, latestCandleTime, isHistoricalSeed = f
     const direction = triggeredSignal === 'ENTRY_LONG' ? 'LONG' : 'SHORT';
     const outcome = direction === 'LONG' ? 'UP' : 'DOWN';
     console.log(
-      `[VM LIVE WS 1m ENGINE] Live unclosed candle tick confirmed ${triggeredSignal} at Z=${liveZ.toFixed(2)}σ (30-SMA, 2.0->1.90)! Dispatching GTC order @ <= $0.05...`
+      `[VM LIVE WS 1m ENGINE] Live unclosed candle tick confirmed ${triggeredSignal} at Z=${liveZ.toFixed(2)}σ (30-SMA, 2.0->1.0)! Dispatching GTC order @ <= $0.20 (20%)...`
     );
 
     setTimeout(async () => {
@@ -1273,7 +1273,7 @@ function evaluateServerLiveWindow(closes, latestCandleTime, isHistoricalSeed = f
         direction,
         outcome,
         type: 'GTC',
-        price: 0.05,
+        price: 0.20,
         candleTime: latestCandleTime || now,
       });
       if (orderRes?.body?.success) {

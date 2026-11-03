@@ -20,10 +20,10 @@ const DEFAULT_CONFIG: BotConfig = {
   periods: 30, // 30-period SMA
   strategyDirection: 'BOTH', // 'BOTH' | 'LONG_ONLY' | 'SHORT_ONLY'
   zScoreUpper: 2.0, // First confirmation: +2.0
-  zScoreEntry: 1.90, // Second confirmation: +1.90
+  zScoreEntry: 1.0, // Second confirmation: +1.0
   zScoreLower: -2.0, // First confirmation: -2.0
-  zScoreLowerEntry: -1.90, // Second confirmation: -1.90
-  maxPriceCents: 0.05, // GTC Order Max Share Price: $0.05 or 5% (5¢)
+  zScoreLowerEntry: -1.0, // Second confirmation: -1.0
+  maxPriceCents: 0.20, // GTC Order Max Share Price: $0.20 or 20% (20¢)
   maxRiskPercent: 0.04, // Maximum capital ratio: 4% of bankroll per 15m contract
   orderType: 'GTC', // Good-Til-Cancelled
   fractionChunks: 1, // 1 unified single direct order
@@ -71,14 +71,14 @@ export function useTradingBot() {
         if (!parsed.strategyDirection) {
           parsed.strategyDirection = 'BOTH';
         }
-        // Enforce Z-Score First confirmation 2.0 and Second confirmation 1.90
+        // Enforce Z-Score First confirmation 2.0 and Second confirmation 1.0
         parsed.zScoreUpper = 2.0;
-        parsed.zScoreEntry = 1.90;
+        parsed.zScoreEntry = 1.0;
         parsed.zScoreLower = -2.0;
-        parsed.zScoreLowerEntry = -1.90;
-        // Enforce GTC Order with Max_Share_Price $0.05 (5¢ / 5%)
+        parsed.zScoreLowerEntry = -1.0;
+        // Enforce GTC Order with Max_Share_Price $0.20 (20¢ / 20%)
         parsed.orderType = 'GTC';
-        parsed.maxPriceCents = 0.05;
+        parsed.maxPriceCents = 0.20;
         parsed.fractionChunks = 1;
         parsed.chunkDelayMs = 0;
         // Enforce Maximum capital ratio: Fixed 4% of bankroll per 15m contract
@@ -458,7 +458,7 @@ export function useTradingBot() {
               crossedUpperThresholdRef.current = false;
               setCrossedUpperThreshold(false);
               entryShortCandlesRef.current.add(liveMetric.time);
-              const trigMsg = `🎯 [تحقق التأكيد الثاني اللحظي ≤ +${cfg.zScoreEntry.toFixed(2)}σ · بث حي 1m] ارتد Z-Score اللحظي من فوق +${cfg.zScoreUpper.toFixed(2)}σ إلى +${liveMetric.zScore.toFixed(2)}σ! جاري إرسال أمر GTC فوري لشراء عقد DOWN بسعر أقصى $0.05 (5¢) وحجم 4% من الرصيد.`;
+              const trigMsg = `🎯 [تحقق التأكيد الثاني اللحظي ≤ +${cfg.zScoreEntry.toFixed(2)}σ · بث حي 1m] ارتد Z-Score اللحظي من فوق +${cfg.zScoreUpper.toFixed(2)}σ إلى +${liveMetric.zScore.toFixed(2)}σ! جاري إرسال أمر GTC فوري لشراء عقد DOWN بسقف سعر ≤ $0.20 (20% / 20¢) وحجم 4% من الرصيد.`;
               console.log(trigMsg);
               limitlessService.logDirect('SYSTEM', trigMsg);
               executeLiveTradeRef.current(liveMetric.zScore, 'SHORT', liveMetric.time, false);
@@ -466,7 +466,7 @@ export function useTradingBot() {
               crossedLowerThresholdRef.current = false;
               setCrossedLowerThreshold(false);
               entryLongCandlesRef.current.add(liveMetric.time);
-              const trigMsg = `🎯 [تحقق التأكيد الثاني اللحظي ≥ ${lowerEntryThresh.toFixed(2)}σ · بث حي 1m] ارتد Z-Score اللحظي من تحت ${lowerThresh.toFixed(2)}σ إلى ${liveMetric.zScore.toFixed(2)}σ! جاري إرسال أمر GTC فوري لشراء عقد UP بسعر أقصى $0.05 (5¢) وحجم 4% من الرصيد.`;
+              const trigMsg = `🎯 [تحقق التأكيد الثاني اللحظي ≥ ${lowerEntryThresh.toFixed(2)}σ · بث حي 1m] ارتد Z-Score اللحظي من تحت ${lowerThresh.toFixed(2)}σ إلى ${liveMetric.zScore.toFixed(2)}σ! جاري إرسال أمر GTC فوري لشراء عقد UP بسقف سعر ≤ $0.20 (20% / 20¢) وحجم 4% من الرصيد.`;
               console.log(trigMsg);
               limitlessService.logDirect('SYSTEM', trigMsg);
               executeLiveTradeRef.current(liveMetric.zScore, 'LONG', liveMetric.time, false);
@@ -612,8 +612,8 @@ export function useTradingBot() {
     const isLong = direction === 'LONG';
     const outcome = isLong ? 'UP' : 'DOWN';
 
-    // Direct GTC Limit Price at 5 cents ($0.05 or 5%) — sent immediately upon 2nd confirmation
-    const maxEntryCap = Math.min(cfg.maxPriceCents && cfg.maxPriceCents > 0 ? cfg.maxPriceCents : 0.05, 0.05);
+    // Direct GTC Limit Price at 20 cents ($0.20 or 20%) and below — sent immediately upon 2nd confirmation
+    const maxEntryCap = Math.min(cfg.maxPriceCents && cfg.maxPriceCents > 0 ? cfg.maxPriceCents : 0.20, 0.20);
     const effectiveContractPrice = parseFloat(Math.max(0.001, maxEntryCap).toFixed(3));
 
     // Hard Risk Guard: Fixed 4% of bankroll per 15m contract
@@ -686,12 +686,12 @@ export function useTradingBot() {
 
     try {
       console.log(
-        `[LIVE DIRECT EXECUTION - ${direction}] Sending unified GTC order of ${effectiveContracts} contracts to Limitless (${resolvedMarketSlug} - ${outcome}) @ $${effectiveContractPrice} [Fixed 4% Bankroll - Max Share Price ≤ $0.05 (5¢)]...`
+        `[LIVE DIRECT EXECUTION - ${direction}] Sending unified GTC order of ${effectiveContracts} contracts to Limitless (${resolvedMarketSlug} - ${outcome}) @ $${effectiveContractPrice} [Fixed 4% Bankroll - Max Share Price ≤ $0.20 (20% / 20¢)]...`
       );
 
       limitlessService.logDirect(
         'OUTGOING',
-        `🚀 [تنفيذ صفقة GTC بسعر أقصى ≤ $0.05 (5¢)] إرسال أمر GTC لعدد ${effectiveContracts} عقود ${outcome} (${direction}) بسعر $${effectiveContractPrice} (≤ 5 سنت / 5%) إلى عقد 15m (${resolvedMarketSlug}) بحجم ثابت 4% من الرصيد...`
+        `🚀 [تنفيذ صفقة GTC بسقف دخول ≤ 20% ($0.20 / 20¢)] إرسال أمر GTC لعدد ${effectiveContracts} عقود ${outcome} (${direction}) بسعر $${effectiveContractPrice} (≤ 20 سنت / 20%) إلى عقد 15m (${resolvedMarketSlug}) بحجم ثابت 4% من الرصيد...`
       );
 
       const executed = await limitlessService.executeChunkedOrder(
@@ -747,7 +747,7 @@ export function useTradingBot() {
       setCurrentBalance((prev) => Math.max(0, prev - invested));
       currentBalanceRef.current = Math.max(0, currentBalanceRef.current - invested);
 
-      const successNotice = `✅ تم إرسال صفقة بنجاح: شراء ${outcome} (${direction}) لعدد ${effectiveContracts} عقد بسعر $${effectiveContractPrice} (≤ 5¢ / 5%) وبقيمة $${invested.toFixed(2)} (4% ثابتة من الرصيد) على عقد الـ 15 دقيقة ${resolvedMarketSlug}`;
+      const successNotice = `✅ تم إرسال صفقة بنجاح: شراء ${outcome} (${direction}) لعدد ${effectiveContracts} عقد بسعر $${effectiveContractPrice} (≤ 20% / 20¢) وبقيمة $${invested.toFixed(2)} (4% ثابتة من الرصيد) على عقد الـ 15 دقيقة ${resolvedMarketSlug}`;
       limitlessService.logDirect('SYSTEM', successNotice);
       setExecutionNotice({
         type: 'SUCCESS',
@@ -1209,7 +1209,7 @@ export function useTradingBot() {
 
   const triggerManualTrade = useCallback(
     (direction: 'SHORT' | 'LONG' = 'SHORT') => {
-      const defaultZ = direction === 'SHORT' ? 1.90 : -1.90;
+      const defaultZ = direction === 'SHORT' ? 1.0 : -1.0;
       executeLiveTrade(currentZScore || defaultZ, direction, undefined, true);
     },
     [executeLiveTrade, currentZScore]
