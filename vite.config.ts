@@ -993,14 +993,14 @@ function setupApiMiddlewares(middlewares: any) {
           }));
         }
 
-        // Direct GTC Limit Price at 20 cents ($0.20) — sent immediately upon 2nd confirmation to rest in orderbook at <= 20¢
-        const MAX_ENTRY_PRICE_CAP = 0.20;
+        // Direct GTC Limit Price at 5 cents ($0.05 or 5%) — sent immediately upon 2nd confirmation
+        const MAX_ENTRY_PRICE_CAP = 0.05;
         const numericClientPrice = Number(price) > 1 ? Number(price) / 100 : Number(price);
         const desiredLimitPrice =
           numericClientPrice && numericClientPrice > 0 && numericClientPrice <= MAX_ENTRY_PRICE_CAP
             ? numericClientPrice
             : MAX_ENTRY_PRICE_CAP;
-        // Price must have max 3 decimal places for Limitless SDK tick alignment (0.001) and strictly <= 0.20
+        // Price must have max 3 decimal places for Limitless SDK tick alignment (0.001) and strictly <= 0.05
         const tickAlignedPrice = Math.max(0.001, Math.min(MAX_ENTRY_PRICE_CAP, parseFloat(Number(desiredLimitPrice).toFixed(3))));
 
         const { ethers } = await import('ethers');

@@ -49,8 +49,8 @@ export const KellyLab: React.FC<KellyLabProps> = ({
           </div>
           <p className="text-[10px] text-slate-500 mt-1">
             {isAr
-              ? 'أمر GTC بحد دخول 20 سنت وتحت (≤ $0.20)'
-              : 'GTC Order with max entry limit ≤ $0.20 (20¢)'}
+              ? 'أمر GTC بحد أقصى لسعر السهم $0.05 (5¢ / 5%)'
+              : 'GTC Order with Max_Share_Price ≤ $0.05 (5¢ / 5%)'}
           </p>
         </div>
 
@@ -73,10 +73,10 @@ export const KellyLab: React.FC<KellyLabProps> = ({
             <Percent className="w-3.5 h-3.5 text-amber-400" />
           </div>
           <div className="text-lg font-mono font-bold text-amber-400">
-            GTC (≤ 20¢)
+            GTC (≤ $0.05 / 5%)
           </div>
           <p className="text-[10px] text-slate-500 mt-1 font-mono">
-            {isAr ? 'حد دخول عند 20 سنت وتحت ($0.20)' : 'Max entry price ≤ $0.20 (20¢)'}
+            {isAr ? 'الحد الأقصى لسعر السهم $0.05 أو 5% (5¢)' : 'Max_Share_Price: maximum $0.05 or 5%'}
           </p>
         </div>
 
@@ -124,7 +124,7 @@ export const KellyLab: React.FC<KellyLabProps> = ({
             <div className="text-xl font-mono font-bold text-sky-400">
               {kelly.numberOfContracts}{' '}
               <span className="text-xs text-slate-400 font-normal">
-                ({isAr ? 'بحد دخول ≤ 20¢' : '@ ≤ 20¢ Limit'})
+                ({isAr ? 'بسقف سعر ≤ $0.05 (5%)' : '@ ≤ $0.05 (5%)'})
               </span>
             </div>
           </div>
@@ -135,7 +135,7 @@ export const KellyLab: React.FC<KellyLabProps> = ({
               <span>{isAr ? 'نوع الأمر المعتمد' : 'Order Execution'}</span>
             </div>
             <div className="text-xs font-mono text-emerald-300 font-semibold mt-1">
-              {isAr ? 'GTC بحد دخول 20 سنت وتحت' : 'GTC Limit ≤ 20¢ ($0.20)'}
+              {isAr ? 'GTC بحد أقصى $0.05 أو 5%' : 'GTC Limit ≤ $0.05 (5%)'}
             </div>
           </div>
         </div>

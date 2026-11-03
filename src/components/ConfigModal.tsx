@@ -31,17 +31,17 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
     setDraft({
       symbol: 'BTCUSDT',
       timeframe: '1m',
-      periods: 45,
+      periods: 30,
       strategyDirection: 'BOTH',
-      zScoreUpper: 2.5,
-      zScoreEntry: 2.3,
-      zScoreLower: -2.5,
-      zScoreLowerEntry: -2.3,
-      maxPriceCents: 0.99,
+      zScoreUpper: 2.0,
+      zScoreEntry: 1.90,
+      zScoreLower: -2.0,
+      zScoreLowerEntry: -1.90,
+      maxPriceCents: 0.05,
       maxRiskPercent: 0.04,
       orderType: 'GTC',
       fractionChunks: 1,
-      chunkDelayMs: 500,
+      chunkDelayMs: 0,
       winProbability: 0.55,
       initialBalance: 1000,
       binanceRestUrl: 'https://api.binance.com/api/v3/klines',
@@ -70,10 +70,10 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
             <Radio className="w-5 h-5 text-emerald-400 animate-pulse" />
             <div>
               <h2 className="text-base font-bold text-slate-100">
-                {isAr ? 'إعدادات استراتيجية التداول (1m Binance · عقود 15 دقيقة)' : 'Trading Strategy Configuration (1m Binance · 15m Contracts)'}
+                {isAr ? 'إعدادات استراتيجية التداول (1m Live WS · عقود 15 دقيقة)' : 'Trading Strategy Configuration (1m Live WS · 15m Contracts)'}
               </h2>
               <div className="text-[11px] text-slate-400">
-                {isAr ? '45 شمعة (1m) · تأكيد مزدوج (2.5 ← 2.3) · حجم ثابت 4% لكل عقد 15m · GTC بدون سقف سعر' : '45 Candles (1m) · Dual Confirmation (2.5 -> 2.3) · Fixed 4% per 15m Contract · GTC No Price Cap'}
+                {isAr ? '30-SMA (1m) · تقييم لحظي مع كل تحديث WebSocket · تأكيد (2.0 ← 1.90) · 4% رأس المال · GTC ≤ $0.05 (5%)' : '30-SMA (1m) · Live WS Unclosed Candle Eval · Confirm (2.0 -> 1.90) · 4% Capital · GTC ≤ $0.05 (5%)'}
               </div>
             </div>
           </div>
@@ -237,7 +237,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
           {/* Section 2: Market & Timeframe */}
           <div>
             <h3 className="font-semibold text-slate-100 uppercase tracking-wider text-[11px] mb-3 text-sky-400">
-              {isAr ? 'السوق وفترة الشموع الحية (Binance 1m · 45 شمعة)' : 'Market & Rolling Window (Binance 1m · 45 Candles)'}
+              {isAr ? 'السوق ومتوسط الشموع الحية (Binance 1m Live WS · 30-Period SMA)' : 'Market & Rolling Window (Binance 1m Live WS · 30-Period SMA)'}
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
@@ -265,13 +265,13 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-400 mb-1">{isAr ? 'عدد الشمعات التاريخية (45 شمعة)' : 'Historical Candles (45)'}</label>
+                <label className="block text-slate-400 mb-1">{isAr ? 'عدد الشمعات التاريخية (30-Period SMA)' : 'Historical Candles (30-Period SMA)'}</label>
                 <input
                   type="number"
                   min="5"
                   max="200"
                   value={draft.periods}
-                  onChange={(e) => setDraft({ ...draft, periods: parseInt(e.target.value) || 45 })}
+                  onChange={(e) => setDraft({ ...draft, periods: parseInt(e.target.value) || 30 })}
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
                 />
               </div>
@@ -282,10 +282,10 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
           <div className="border-t border-slate-800 pt-4 space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold text-slate-100 uppercase tracking-wider text-[11px] text-sky-400">
-                {isAr ? 'عتبات Z-Score: التأكيد الأول (2.5) والتأكيد الثاني (2.3)' : 'Z-Score Thresholds: 1st Confirmation (2.5) & 2nd Confirmation (2.3)'}
+                {isAr ? 'عتبات Z-Score: التأكيد الأول (2.0) والتأكيد الثاني (1.90)' : 'Z-Score Thresholds: 1st Confirmation (2.0) & 2nd Confirmation (1.90)'}
               </h3>
               <span className="text-[10px] text-emerald-400 font-bold bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/40">
-                {isAr ? '⚡ تأكيد مزدوج (2.5 → 2.3)' : '⚡ Dual Confirm (2.5 → 2.3)'}
+                {isAr ? '⚡ تأكيد مزدوج (2.0 → 1.90)' : '⚡ Dual Confirm (2.0 → 1.90)'}
               </span>
             </div>
 
@@ -319,19 +319,20 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 onClick={() => setDraft({
                   ...draft,
                   timeframe: '1m',
-                  periods: 45,
-                  zScoreUpper: 2.5,
-                  zScoreEntry: 2.3,
-                  zScoreLower: -2.5,
-                  zScoreLowerEntry: -2.3,
+                  periods: 30,
+                  zScoreUpper: 2.0,
+                  zScoreEntry: 1.90,
+                  zScoreLower: -2.0,
+                  zScoreLowerEntry: -1.90,
                   maxRiskPercent: 0.04,
-                  maxPriceCents: 0.20,
+                  maxPriceCents: 0.05,
                   orderType: 'GTC',
+                  singleTradePerContract: true,
                   cooldownMinutes: 15,
                 })}
                 className="px-2.5 py-1 rounded text-[11px] font-bold bg-emerald-950/80 hover:bg-emerald-900/90 text-emerald-300 border border-emerald-600/50 cursor-pointer"
               >
-                {isAr ? '🎯 الإعدادات المعتمدة (1m · 45 شمعة · تأكيد أول 2.5 وتأكيد ثاني 2.3 · 4% · GTC ≤ 20¢)' : '🎯 Approved Preset (1m · 45 Candles · 2.5 -> 2.3 · 4% · GTC ≤ 20¢)'}
+                {isAr ? '🎯 الإعدادات المعتمدة (1m Live WS · 30-SMA · تأكيد 2.0 ← 1.90 · 4% · GTC ≤ $0.05 / 5%)' : '🎯 Approved Preset (1m Live WS · 30-SMA · 2.0 -> 1.90 · 4% · GTC ≤ $0.05 / 5%)'}
               </button>
             </div>
 
@@ -344,14 +345,14 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 </div>
                 <div>
                   <label className="block text-slate-400 mb-1 text-[11px]">
-                    {isAr ? 'التأكيد الأول (First Confirmation +2.5):' : 'First Confirmation (+2.5):'}
+                    {isAr ? 'التأكيد الأول (First Confirmation +2.0):' : 'First Confirmation (+2.0):'}
                   </label>
                   <input
                     type="number"
-                    step="0.1"
+                    step="0.05"
                     value={draft.zScoreUpper}
                     onChange={(e) => {
-                      const val = parseFloat(e.target.value) || 2.5;
+                      const val = parseFloat(e.target.value) || 2.0;
                       setDraft({ ...draft, zScoreUpper: val, zScoreLower: -Math.abs(val) });
                     }}
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-100 font-mono"
@@ -359,14 +360,14 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 </div>
                 <div>
                   <label className="block text-slate-400 mb-1 text-[11px]">
-                    {isAr ? 'التأكيد الثاني - الدخول (Second Confirmation +2.3):' : 'Second Confirmation - Entry (+2.3):'}
+                    {isAr ? 'التأكيد الثاني - الدخول (Second Confirmation +1.90):' : 'Second Confirmation - Entry (+1.90):'}
                   </label>
                   <input
                     type="number"
-                    step="0.1"
+                    step="0.05"
                     value={draft.zScoreEntry}
                     onChange={(e) => {
-                      const val = parseFloat(e.target.value) || 2.3;
+                      const val = parseFloat(e.target.value) || 1.90;
                       setDraft({ ...draft, zScoreEntry: val, zScoreLowerEntry: -Math.abs(val) });
                     }}
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-100 font-mono"
@@ -381,14 +382,14 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 </div>
                 <div>
                   <label className="block text-slate-400 mb-1 text-[11px]">
-                    {isAr ? 'التأكيد الأول (First Confirmation -2.5):' : 'First Confirmation (-2.5):'}
+                    {isAr ? 'التأكيد الأول (First Confirmation -2.0):' : 'First Confirmation (-2.0):'}
                   </label>
                   <input
                     type="number"
-                    step="0.1"
-                    value={draft.zScoreLower ?? -2.5}
+                    step="0.05"
+                    value={draft.zScoreLower ?? -2.0}
                     onChange={(e) => {
-                      const val = parseFloat(e.target.value) || -2.5;
+                      const val = parseFloat(e.target.value) || -2.0;
                       setDraft({ ...draft, zScoreLower: val });
                     }}
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-100 font-mono"
@@ -396,14 +397,14 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 </div>
                 <div>
                   <label className="block text-slate-400 mb-1 text-[11px]">
-                    {isAr ? 'التأكيد الثاني - الدخول (Second Confirmation -2.3):' : 'Second Confirmation - Entry (-2.3):'}
+                    {isAr ? 'التأكيد الثاني - الدخول (Second Confirmation -1.90):' : 'Second Confirmation - Entry (-1.90):'}
                   </label>
                   <input
                     type="number"
-                    step="0.1"
-                    value={draft.zScoreLowerEntry ?? -2.3}
+                    step="0.05"
+                    value={draft.zScoreLowerEntry ?? -1.90}
                     onChange={(e) => {
-                      const val = parseFloat(e.target.value) || -2.3;
+                      const val = parseFloat(e.target.value) || -1.90;
                       setDraft({ ...draft, zScoreLowerEntry: val });
                     }}
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-100 font-mono"
@@ -416,7 +417,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
           {/* Section 4: Risk Sizing & Direct Order Execution */}
           <div className="border-t border-slate-800 pt-4">
             <h3 className="font-semibold text-slate-100 uppercase tracking-wider text-[11px] mb-3 text-sky-400">
-              {isAr ? 'حجم الصفقة ونوع الأمر (4% ثابت من الرصيد لكل عقد 15m · GTC بحد دخول ≤ 20 سنت)' : 'Bet Size & Order Type (Fixed 4% Bankroll per 15m Contract · GTC Limit ≤ 20¢)'}
+              {isAr ? 'حجم الصفقة ونوع الأمر (4% كحد أقصى من رأس المال · GTC بسعر أقصى ≤ $0.05 أو 5%)' : 'Bet Size & Order Type (Max 4% Capital Ratio · GTC Max Share Price ≤ $0.05 or 5%)'}
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
@@ -434,22 +435,22 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
 
               <div>
                 <label className="block text-slate-400 mb-1">
-                  {isAr ? 'سقف سعر الدخول (0.20 = 20 سنت وتحت)' : 'Max Entry Price (0.20 = ≤ 20¢)'}
+                  {isAr ? 'أقصى سعر للسهم (0.05 = $0.05 أو 5%)' : 'Max Share Price (0.05 = $0.05 or 5%)'}
                 </label>
                 <input
                   type="number"
                   step="0.01"
                   min="0.01"
-                  max="0.20"
+                  max="0.05"
                   value={draft.maxPriceCents}
-                  onChange={(e) => setDraft({ ...draft, maxPriceCents: Math.min(parseFloat(e.target.value) || 0.20, 0.20) })}
+                  onChange={(e) => setDraft({ ...draft, maxPriceCents: Math.min(parseFloat(e.target.value) || 0.05, 0.05) })}
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
                 />
               </div>
 
               <div>
                 <label className="block text-slate-400 mb-1">
-                  {isAr ? 'حجم الصفقة الثابت (4% كحد أقصى)' : 'Fixed Bet Size (Max 4%)'}
+                  {isAr ? 'نسبة رأس المال القصوى (4% كحد أقصى)' : 'Maximum Capital Ratio (Max 4%)'}
                 </label>
                 <input
                   type="number"
@@ -466,13 +467,13 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
             <div className="mt-2.5 p-2.5 rounded-lg bg-emerald-950/40 border border-emerald-700/50 text-[11px] text-emerald-300 space-y-1.5">
               <div className="font-semibold text-emerald-200">
                 {isAr
-                  ? '✓ أمر GTC بحد دخول 20 سنت وتحت (≤ $0.20): يتم إرسال الأمر بسعر 20 سنت أو أقل بحيث لا يتم الشراء أبداً فوق 20 سنت.'
-                  : '✓ GTC Order with ≤ 20¢ ($0.20) Entry Limit: Places order at 20¢ or below so you never enter above 20 cents.'}
+                  ? '✓ أمر GTC بسعر أقصى $0.05 أو 5% (5 سنت): يتم إرسال الأمر بسعر $0.05 كحد أقصى عند تحقق التأكيد الثاني (1.90).'
+                  : '✓ GTC Order with ≤ $0.05 (5% / 5¢) Max Share Price: Places GTC limit order at $0.05 or below upon 2nd confirmation (1.90).'}
               </div>
               <div className="text-sky-300">
                 {isAr
-                  ? '🛡️ حجم الصفقة ثابت بنسبة 4% كحد أقصى من إجمالي رصيد المحفظة لكل عقد 15 دقيقة.'
-                  : '🛡️ Bet size is fixed at max 4% of bankroll per 15-minute contract.'}
+                  ? '🛡️ نسبة رأس المال القصوى 4% لكل عقد 15 دقيقة مع قفل الدخول لصفقة واحدة فقط لكل سوق 15 دقيقة (Single-Entry Lock).'
+                  : '🛡️ Maximum capital ratio is 4% per 15-minute market with Single-Entry Lock per 15m Market.'}
               </div>
             </div>
           </div>

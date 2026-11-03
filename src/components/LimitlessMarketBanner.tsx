@@ -178,7 +178,7 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
             </span>
             <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-300 bg-emerald-950/90 px-2 py-0.5 rounded-full border border-emerald-500/50">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-              <span>{isAr ? 'حجم ثابت 4% لكل عقد 15m · GTC بدون سقف سعر' : 'Fixed 4% per 15m Contract · GTC No Price Cap'}</span>
+              <span>{isAr ? '4% كحد أقصى · GTC ≤ $0.05 (5%) · قفل دخول واحد لكل عقد 15m' : 'Max 4% · GTC ≤ $0.05 (5%) · Single-Entry Lock / 15m'}</span>
             </span>
           </div>
 
@@ -440,11 +440,11 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
           <span>
             {isAr ? (
               <>
-                <strong className="text-slate-200">توضيح المعمارية:</strong> بث <strong className="text-sky-400">Binance 1m (45 شمعة)</strong> يحسب Z-Score بتأكيد أول <strong className="text-amber-300">2.5</strong> وتأكيد ثاني <strong className="text-emerald-400">2.3</strong>، ويتم تنفيذ أمر <strong className="text-emerald-400">GTC بدون سقف سعر</strong> بحجم ثابت <strong className="text-white">4%</strong> لكل عقد 15 دقيقة!
+                <strong className="text-slate-200">توضيح المعمارية:</strong> بث حي لحظي <strong className="text-sky-400">btcusdt@kline_1m (30-SMA، تقييم كل تحديث حي دون انتظار إغلاق الشمعة)</strong> بتأكيد أول <strong className="text-amber-300">2.0</strong> وتأكيد ثاني <strong className="text-emerald-400">1.90</strong>، وتنفيذ أمر <strong className="text-emerald-400">GTC بسقف سعر $0.05 (5%)</strong> وبنسبة رأس مال قصوى <strong className="text-white">4%</strong> مع قفل دخول واحد لكل عقد 15 دقيقة!
               </>
             ) : (
               <>
-                <strong className="text-slate-200">Architecture:</strong> <strong className="text-sky-400">Binance 1m (45 candles)</strong> computes Z-Score with 1st confirm <strong className="text-amber-300">2.5</strong> &amp; 2nd confirm <strong className="text-emerald-400">2.3</strong>, executing <strong className="text-emerald-400">GTC without max entry price</strong> at fixed <strong className="text-white">4%</strong> per 15m contract!
+                <strong className="text-slate-200">Architecture:</strong> Live <strong className="text-sky-400">btcusdt@kline_1m (30-period SMA, evaluated on every live WS tick)</strong> with 1st confirm <strong className="text-amber-300">2.0</strong> &amp; 2nd confirm <strong className="text-emerald-400">1.90</strong>, executing <strong className="text-emerald-400">GTC @ max $0.05 (5%)</strong> at <strong className="text-white">4%</strong> max capital ratio with Single-Entry Lock per 15m Market!
               </>
             )}
           </span>

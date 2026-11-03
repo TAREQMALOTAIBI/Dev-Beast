@@ -299,7 +299,7 @@ export default function App() {
             <div className="flex items-center gap-1">
               <span className="text-slate-400">{isAr ? 'نوع الأمر:' : 'Order:'}</span>
               <span className="text-emerald-300 font-bold bg-emerald-950/70 px-1.5 py-0.5 rounded border border-emerald-600/50">
-                {config.orderType} ({isAr ? 'بدون سقف سعر' : 'No Max Price'})
+                {config.orderType} (≤ $0.05 / 5%)
               </span>
             </div>
             {hasEnvCredentials && (
@@ -429,15 +429,15 @@ export default function App() {
                       </span>
                     </div>
                     <div className="flex justify-between text-slate-400">
-                      <span>{isAr ? 'نوع الأمر وحد الدخول:' : 'Order Type & Limit:'}</span>
+                      <span>{isAr ? 'نوع الأمر والحد الأقصى للسهم:' : 'Order Type & Max Share Price:'}</span>
                       <span className="text-sky-400 font-bold">
-                        {config.orderType} ({isAr ? '20 سنت وتحت ≤ $0.20' : '≤ 20¢ ($0.20)'})
+                        {config.orderType} (≤ $0.05 / 5%)
                       </span>
                     </div>
                     <div className="flex justify-between text-slate-400">
-                      <span>{isAr ? 'نمط التنفيذ المعتمد:' : 'Execution Mode:'}</span>
+                      <span>{isAr ? 'قفل الدخول لكل عقد 15m:' : '15m Market Entry Lock:'}</span>
                       <span className="text-emerald-400 font-bold">
-                        {isAr ? 'أمر GTC موحد مباشر (بحد دخول 20 سنت وتحت)' : 'Direct GTC Order (Entry Limit ≤ 20¢)'}
+                        {isAr ? 'صفقة واحدة فقط لكل عقد 15m (Single-Entry Lock)' : 'Single-Entry Lock per 15m Market'}
                       </span>
                     </div>
                     <div className="flex justify-between items-center text-slate-400 pt-1.5 border-t border-slate-800/80 text-[11px]">
@@ -491,16 +491,16 @@ export default function App() {
             <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 text-xs text-slate-300 space-y-3">
               <h3 className="font-bold text-slate-100 text-sm">
                 {isAr
-                  ? 'منهجية إدارة رأس المال وتنفيذ الأوامر (4% ثابت لكل عقد 15 دقيقة · أمر GTC بدون سقف سعر)'
-                  : 'Bankroll & Order Execution Methodology (Fixed 4% per 15m Contract · GTC Without Max Entry Price)'}
+                  ? 'منهجية إدارة رأس المال وتنفيذ الأوامر (4% كحد أقصى · GTC ≤ $0.05 أو 5% · قفل دخول واحد لكل عقد 15m)'
+                  : 'Bankroll & Order Execution Methodology (Max 4% Capital Ratio · GTC ≤ $0.05 or 5% · Single-Entry Lock per 15m)'}
               </h3>
               <p className="leading-relaxed">
                 {isAr
-                  ? 'يعتمد الروبوت على بث Binance لفريم الدقيقة الواحدة (1min) وحساب مؤشر Z-Score على آخر 45 شمعة تاريخية (1min). يتم تسليح الإشارة عند وصول التأكيد الأول (±2.5σ)، ويتم تنفيذ أمر شراء GTC فوري بدون سقف لسعر الدخول عند تحقق التأكيد الثاني (±2.3σ) بحجم ثابت قدره 4% من إجمالي رصيد المحفظة لكل عقد 15 دقيقة.'
-                  : 'The bot streams 1-minute Binance klines and computes Z-Score across 45 historical 1-minute candles. It arms on the First Confirmation (±2.5σ) and executes a live GTC order without a max entry price ceiling on the Second Confirmation (±2.3σ), allocating a fixed max 4% of bankroll per 15-minute contract.'}
+                  ? 'يعتمد الروبوت على البث الحي المباشر (btcusdt@kline_1m) مع التقييم الفوري عند كل تحديث سعري للشمعة الحية غير المغلقة (دون انتظار إغلاق شمعة الدقيقة)، وحساب مؤشر Z-Score على متوسط متحرك لـ 30 شمعة (30-period SMA - 1m). يتم تسليح الإشارة عند وصول التأكيد الأول (±2.0σ)، ويتم إرسال أمر شراء GTC عند تحقق التأكيد الثاني (±1.90σ) بسقف سعر أقصى للسهم قدره $0.05 (5¢ / 5%) وبنسبة رأس مال قصوى 4% مع قفل دخول واحد فقط لكل عقد 15 دقيقة.'
+                  : 'The bot streams live btcusdt@kline_1m updates and evaluates on every live WebSocket tick using the current unclosed candle price (without waiting for the 1m candle to close) across a 30-period SMA (1m). It arms on the First Confirmation (±2.0σ) and submits a GTC order on the Second Confirmation (±1.90σ) with Max_Share_Price ≤ $0.05 (5%), Maximum Capital Ratio 4%, and Single-Entry Lock per 15m Market.'}
               </p>
               <div className="p-3 bg-slate-950 font-mono text-emerald-400 rounded-lg border border-slate-800">
-                Timeframe: 1m (45 Candles) | Z-Threshold: 1st Confirm ±2.5σ → 2nd Confirm ±2.3σ | Bet Size: Fixed 4% per 15m Contract | Order: GTC (No Max Entry Price)
+                WS: btcusdt@kline_1m (Live Unclosed Tick Eval) | SMA: 30-Period (1m) | Z-Threshold: 2.0 → 1.90 | Order: GTC ≤ $0.05 (5%) | Max Capital: 4% | Single-Entry Lock / 15m
               </div>
             </div>
           </div>
@@ -518,9 +518,9 @@ export default function App() {
           <div className="flex items-center gap-2">
             <span>{isAr ? 'نظام التداول الحي المباشر' : 'Live Trading System'}</span>
             <span>·</span>
-            <span>Binance 1m (45 Candles) · Z-Score (2.5 → 2.3)</span>
+            <span>Binance 1m Live WS (30-SMA) · Z-Score (2.0 → 1.90)</span>
             <span>·</span>
-            <span>Limitless 15m Contract (Fixed 4% · GTC No Max Price)</span>
+            <span>Limitless 15m Contract (Max 4% · GTC ≤ $0.05 / 5% · Single-Entry Lock)</span>
           </div>
           <div className="font-mono text-[11px] text-slate-500">
             Node.js / TypeScript WebSocket Architecture

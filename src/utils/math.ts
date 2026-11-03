@@ -10,10 +10,10 @@ import { BotConfig, KellyMath, ZScoreMetric } from '../types/bot';
  */
 export function calculateZScore(
   closePrices: number[],
-  upperThreshold = 2.5,
-  entryThreshold = 2.3,
-  lowerThreshold = -2.5,
-  lowerEntryThreshold = -2.3
+  upperThreshold = 2.0,
+  entryThreshold = 1.90,
+  lowerThreshold = -2.0,
+  lowerEntryThreshold = -1.90
 ): {
   mean: number;
   variance: number;

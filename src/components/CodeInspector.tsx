@@ -31,15 +31,17 @@ import {
 // ==========================================
 const CONFIG = {
     SYMBOL: '${config.symbol}',
-    TIMEFRAME: '1m', // 1min Binance WebSocket & Historical Candles
-    PERIODS: 45, // 45 Historical Candles
+    TIMEFRAME: '1m', // btcusdt@kline_1m — evaluate on every live WS update using unclosed candle live price
+    PERIODS: 30, // 30-period SMA (1m historical candles)
     STRATEGY_DIRECTION: '${config.strategyDirection || 'BOTH'}', // 'BOTH' | 'LONG_ONLY' | 'SHORT_ONLY'
-    Z_SCORE_UPPER: 2.50, // First confirmation (+2.5)
-    Z_SCORE_ENTRY: 2.30, // Second confirmation (+2.3)
-    Z_SCORE_LOWER: -2.50, // First confirmation (-2.5)
-    Z_SCORE_LOWER_ENTRY: -2.30, // Second confirmation (-2.3)
-    MAX_RISK_PERCENT: 0.04, // Fixed 4% of bankroll per 15m contract
-    ORDER_TYPE: 'GTC', // GTC Order without max Entry price
+    Z_SCORE_UPPER: 2.0, // First confirmation (+2.0)
+    Z_SCORE_ENTRY: 1.90, // Second confirmation (+1.90)
+    Z_SCORE_LOWER: -2.0, // First confirmation (-2.0)
+    Z_SCORE_LOWER_ENTRY: -1.90, // Second confirmation (-1.90)
+    MAX_SHARE_PRICE: 0.05, // Maximum: $0.05 or 5% (5¢)
+    MAX_RISK_PERCENT: 0.04, // Maximum capital ratio: 4%
+    ORDER_TYPE: 'GTC', // GTC Limit Order at <= $0.05
+    SINGLE_ENTRY_PER_15M_MARKET: true, // Single-Entry Lock per 15m Market
     EXECUTION_MODE: 'DIRECT_UNIFIED',
     
     // عناوين البيانات الحية الرسمية
@@ -221,9 +223,9 @@ class LimitlessTradingBot {
     }
 
     // ==========================================
-    // 4. البث الحي (Binance 1m WebSocket — حساب عند إغلاق الشمعة فقط)
+    // 4. البث الحي (btcusdt@kline_1m — تقييم فوري مع كل تحديث حي دون انتظار إغلاق الشمعة)
     // ==========================================
-    private lastExecutedCandleTime: number = 0;
+    private lastExecutedMarketSlug: string = '';
     private isExecutingTrade: boolean = false;
 
     private startBinanceWS() {
@@ -234,27 +236,29 @@ class LimitlessTradingBot {
             const kline = message.k;
 
             if (kline) {
-                const currentPrice = parseFloat(kline.c);
+                const currentLivePrice = parseFloat(kline.c);
                 const isClosed = Boolean(kline.x);
                 const candleTime = Number(kline.t);
-                this.onTick(currentPrice, isClosed, candleTime);
+                this.onTick(currentLivePrice, isClosed, candleTime);
             }
         });
 
-        binanceWs.on('open', () => console.log('✅ Connected to Binance 1m Live Feed (Closed Candles Only)'));
+        binanceWs.on('open', () => console.log('✅ Connected to btcusdt@kline_1m (Live Tick Evaluation on Unclosed Candle)'));
         binanceWs.on('error', (err) => console.warn('Binance WS notice:', err.message));
     }
 
-    private onTick(newPrice: number, isClosed: boolean, candleTime: number) {
-        // حساب المؤشر وتأكيد الإشارات حصرياً بعد إغلاق الشمعة المؤكد (Closed Candles Only)
-        if (!isClosed) return;
+    private onTick(livePrice: number, isClosed: boolean, candleTime: number) {
+        // بناء نافذة 30 شمعة تشمل الشمعة الحية غير المغلقة وتقييمها فوراً عند كل تحديث WebSocket
+        const liveWindow = [...this.closePrices.slice(-(CONFIG.PERIODS - 1)), livePrice];
+        this.evaluateStrategy(liveWindow, candleTime);
 
-        this.closePrices = [...this.closePrices.slice(-(CONFIG.PERIODS - 1)), newPrice];
-        this.evaluateStrategy(this.closePrices, candleTime);
+        if (isClosed) {
+            this.closePrices = liveWindow;
+        }
     }
 
     // ==========================================
-    // 5. حساب Z-Score على 45 شمعة (1m)
+    // 5. حساب Z-Score (30-Period SMA - 1m)
     // ==========================================
     private calculateZScore(prices: number[]): number {
         const windowPrices = prices.slice(-CONFIG.PERIODS);
@@ -275,15 +279,14 @@ class LimitlessTradingBot {
 
         const currentZScore = this.calculateZScore(prices);
 
-        // 1. Short (DOWN): First confirmation >= +2.5, Second confirmation <= +2.3
+        // 1. Short (DOWN): First confirmation >= +2.0, Second confirmation <= +1.90
         if (CONFIG.STRATEGY_DIRECTION === 'BOTH' || CONFIG.STRATEGY_DIRECTION === 'SHORT_ONLY') {
             if (currentZScore >= CONFIG.Z_SCORE_UPPER) {
                 this.crossedUpperThreshold = true;
             } else if (this.crossedUpperThreshold && currentZScore <= CONFIG.Z_SCORE_ENTRY && currentZScore > 0) {
                 this.crossedUpperThreshold = false;
-                if (!this.isExecutingTrade && (!candleTime || this.lastExecutedCandleTime !== candleTime)) {
-                    console.log(\`🎯 Short Second Confirmation! z=\${currentZScore.toFixed(2)}σ (<= +\${CONFIG.Z_SCORE_ENTRY}). Executing GTC DOWN order!\`);
-                    if (candleTime) this.lastExecutedCandleTime = candleTime;
+                if (!this.isExecutingTrade) {
+                    console.log(\`🎯 Short Second Confirmation! z=\${currentZScore.toFixed(2)}σ (<= +\${CONFIG.Z_SCORE_ENTRY}). Executing GTC DOWN order @ <= $0.05!\`);
                     this.executeTrade('SHORT');
                 }
             } else if (currentZScore <= 0) {
@@ -291,15 +294,14 @@ class LimitlessTradingBot {
             }
         }
 
-        // 2. Long (UP): First confirmation <= -2.5, Second confirmation >= -2.3
+        // 2. Long (UP): First confirmation <= -2.0, Second confirmation >= -1.90
         if (CONFIG.STRATEGY_DIRECTION === 'BOTH' || CONFIG.STRATEGY_DIRECTION === 'LONG_ONLY') {
             if (currentZScore <= CONFIG.Z_SCORE_LOWER) {
                 this.crossedLowerThreshold = true;
             } else if (this.crossedLowerThreshold && currentZScore >= CONFIG.Z_SCORE_LOWER_ENTRY && currentZScore < 0) {
                 this.crossedLowerThreshold = false;
-                if (!this.isExecutingTrade && (!candleTime || this.lastExecutedCandleTime !== candleTime)) {
-                    console.log(\`🎯 Long Second Confirmation! z=\${currentZScore.toFixed(2)}σ (>= \${CONFIG.Z_SCORE_LOWER_ENTRY}). Executing GTC UP order!\`);
-                    if (candleTime) this.lastExecutedCandleTime = candleTime;
+                if (!this.isExecutingTrade) {
+                    console.log(\`🎯 Long Second Confirmation! z=\${currentZScore.toFixed(2)}σ (>= \${CONFIG.Z_SCORE_LOWER_ENTRY}). Executing GTC UP order @ <= $0.05!\`);
                     this.executeTrade('LONG');
                 }
             } else if (currentZScore >= 0) {
@@ -309,63 +311,61 @@ class LimitlessTradingBot {
     }
 
     // ==========================================
-    // 7. حجم الصفقة: Fixed 4% من الرصيد لكل عقد 15 دقيقة
+    // 7. حجم الصفقة: Maximum Capital Ratio 4%
     // ==========================================
     private calculatePositionSize(): number {
         const positionSizeUsd = this.currentBalance * CONFIG.MAX_RISK_PERCENT;
-        console.log(\`🛡️ Fixed 4% Bankroll Bet Size: $\${positionSizeUsd.toFixed(2)} per 15m contract\`);
+        console.log(\`🛡️ Max Capital Ratio 4%: $\${positionSizeUsd.toFixed(2)} per 15m contract\`);
         return positionSizeUsd;
     }
 
     // ==========================================
-    // 8. تنفيذ أمر GTC بدون سقف سعر دخول على عقد الـ 15 دقيقة
+    // 8. تنفيذ أمر GTC بسقف سعر $0.05 (5%) مع قفل دخول واحد لكل عقد 15 دقيقة
     // ==========================================
     private async executeTrade(direction: 'SHORT' | 'LONG' = 'SHORT') {
+        const currentSlotSec = Math.floor(Date.now() / 900000) * 900;
+        const resolvedSlug = CONFIG.LIMITLESS_MARKET_SLUG === 'btc-up-or-down-15-min'
+            ? \`btc-up-or-down-15-min-\${currentSlotSec}\`
+            : CONFIG.LIMITLESS_MARKET_SLUG;
+
+        if (CONFIG.SINGLE_ENTRY_PER_15M_MARKET && this.lastExecutedMarketSlug === resolvedSlug) {
+            console.log(\`🔒 Single-Entry Lock active for \${resolvedSlug}. Skipping duplicate entry.\`);
+            return;
+        }
+
         const totalInvestment = this.calculatePositionSize();
         const outcome = direction === 'LONG' ? 'UP' : 'DOWN';
 
         try {
+            this.isExecutingTrade = true;
             if (this.orderClient) {
                 const marketFetcher = new MarketFetcher(this.httpClient!);
-                const currentSlotSec = Math.floor(Date.now() / 900000) * 900;
-                const resolvedSlug = CONFIG.LIMITLESS_MARKET_SLUG === 'btc-up-or-down-15-min'
-                    ? \`btc-up-or-down-15-min-\${currentSlotSec}\`
-                    : CONFIG.LIMITLESS_MARKET_SLUG;
                 const market: any = await marketFetcher.getMarket(resolvedSlug);
                 const tokenId = direction === 'LONG' ? market.tokens?.yes : market.tokens?.no;
                 const livePrice = direction === 'LONG'
-                    ? (market.tradePrices?.buy?.market?.[0] ?? market.prices?.[0] ?? 0.52)
-                    : (market.tradePrices?.buy?.market?.[1] ?? market.prices?.[1] ?? 0.52);
-                const executionPrice = Math.min(0.999, Math.max(0.001, Number(livePrice.toFixed(3))));
-                // OrderBuilder.calculateGTCAmountsTickAligned supports fractional shares down to 0.001 (sharesStep = 1000)
+                    ? (market.tradePrices?.buy?.market?.[0] ?? market.prices?.[0] ?? 0.05)
+                    : (market.tradePrices?.buy?.market?.[1] ?? market.prices?.[1] ?? 0.05);
+                const executionPrice = Math.min(CONFIG.MAX_SHARE_PRICE, Math.max(0.001, Number(livePrice.toFixed(3))));
                 const numberOfContracts = Math.max(0.001, Math.floor((totalInvestment / executionPrice) * 1000) / 1000);
 
                 if (tokenId) {
-                    try {
-                        const signedOrder = await this.orderClient.createOrder({
-                            marketSlug: market.slug || resolvedSlug,
-                            tokenId: String(tokenId),
-                            side: Side.BUY,
-                            orderType: OrderType.GTC,
-                            price: executionPrice, // GTC Order without max Entry price cap
-                            size: numberOfContracts
-                        });
-                        console.log(\`✅ GTC Fractional Order Executed (\${outcome})! ID: \${signedOrder.id} | \${numberOfContracts} contracts @ $\${executionPrice}\`);
-                    } catch (gtcErr) {
-                        const fokOrder = await this.orderClient.createOrder({
-                            marketSlug: market.slug || resolvedSlug,
-                            tokenId: String(tokenId),
-                            side: Side.BUY,
-                            orderType: OrderType.FOK,
-                            makerAmount: Math.max(0.01, Number(totalInvestment.toFixed(2)))
-                        });
-                        console.log(\`✅ FOK Order Executed (\${outcome})! ID: \${fokOrder.id} | Budget: $\${totalInvestment.toFixed(2)}\`);
-                    }
+                    const signedOrder = await this.orderClient.createOrder({
+                        marketSlug: market.slug || resolvedSlug,
+                        tokenId: String(tokenId),
+                        side: Side.BUY,
+                        orderType: OrderType.GTC,
+                        price: executionPrice, // Max_Share_Price <= $0.05 (5%)
+                        size: numberOfContracts
+                    });
+                    this.lastExecutedMarketSlug = market.slug || resolvedSlug;
+                    console.log(\`✅ GTC Order Placed (\${outcome})! ID: \${signedOrder.id} | \${numberOfContracts} contracts @ $\${executionPrice} (<= $0.05)\`);
                     return;
                 }
             }
         } catch (err: any) {
             console.error('❌ Order execution failed:', err.message);
+        } finally {
+            this.isExecutingTrade = false;
         }
     }
 }

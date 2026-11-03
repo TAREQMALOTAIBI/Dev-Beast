@@ -951,15 +951,15 @@ async function executeLimitlessOrderOnServer(params = {}) {
       };
     }
 
-    // Direct GTC Limit Price at 20 cents ($0.20) — sent immediately upon 2nd confirmation to rest in orderbook at <= 20¢
-    const MAX_ENTRY_PRICE_CAP = 0.20;
+    // Direct GTC Limit Price at 5 cents ($0.05 or 5%) — sent immediately upon 2nd confirmation
+    const MAX_ENTRY_PRICE_CAP = 0.05;
     const numericClientPrice = Number(price) > 1 ? Number(price) / 100 : Number(price);
     const desiredLimitPrice =
       numericClientPrice && numericClientPrice > 0 && numericClientPrice <= MAX_ENTRY_PRICE_CAP
         ? numericClientPrice
         : MAX_ENTRY_PRICE_CAP;
 
-    // Price must have max 3 decimal places for Limitless SDK tick alignment (0.001) and strictly <= 0.20
+    // Price must have max 3 decimal places for Limitless SDK tick alignment (0.001) and strictly <= 0.05
     const tickAlignedPrice = Math.max(0.001, Math.min(MAX_ENTRY_PRICE_CAP, parseFloat(Number(desiredLimitPrice).toFixed(3))));
 
     const { ethers } = await import('ethers');
@@ -1108,11 +1108,16 @@ app.post('/api/limitless/order', async (req, res) => {
 });
 
 // ============================================================================
-// Autonomous Server-Side 1m Closed-Candle Z-Score Engine (45 Candles, 2.5 -> 2.3)
+// Autonomous Server-Side Live 1m WebSocket Z-Score Engine (30-Period SMA, 2.0 -> 1.90)
+// Evaluates on every live WebSocket update using the current unclosed candle's live price
 // Guarantees trades execute 24/7 on the VM ONLY when serverBotActive === true
 // ============================================================================
-let serverLastEvaluatedClosedCandleTime = 0;
+let serverArmedUpper = false;
+let serverArmedLower = false;
 let serverLastEvaluatedEntrySignalTime = 0;
+let serverKlinesBuffer = []; // [{ time, close, isClosed }]
+let serverBinanceWs = null;
+let serverBinanceWsEndpointIdx = 0;
 
 function computeServerRollingZScore(windowPrices) {
   const n = windowPrices.length;
@@ -1124,7 +1129,7 @@ function computeServerRollingZScore(windowPrices) {
   return stdDev > 0 ? (currentPrice - mean) / stdDev : 0;
 }
 
-async function fetchServerBinanceKlines(symbol = 'BTCUSDT', interval = '1m', limit = 100) {
+async function fetchServerBinanceKlines(symbol = 'BTCUSDT', interval = '1m', limit = 60) {
   const urls = [
     `https://data-api.binance.vision/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
     `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
@@ -1142,114 +1147,169 @@ async function fetchServerBinanceKlines(symbol = 'BTCUSDT', interval = '1m', lim
   return null;
 }
 
-async function pollServerClosedCandlesStrategy() {
+function evaluateServerLiveWindow(closes, latestCandleTime, isHistoricalSeed = false) {
+  if (!Array.isArray(closes) || closes.length < 30) return;
+
+  if (isHistoricalSeed) {
+    let armedU = false;
+    let armedL = false;
+    for (let i = 29; i < closes.length; i++) {
+      const windowSlice = closes.slice(i - 29, i + 1);
+      const z = computeServerRollingZScore(windowSlice);
+      if (z >= 2.0) armedU = true;
+      else if (armedU && z <= 1.90 && z > 0) armedU = false;
+      else if (z <= 0) armedU = false;
+
+      if (z <= -2.0) armedL = true;
+      else if (armedL && z >= -1.90 && z < 0) armedL = false;
+      else if (z >= 0) armedL = false;
+    }
+    serverArmedUpper = armedU;
+    serverArmedLower = armedL;
+    return;
+  }
+
+  // Evaluate live 30-period SMA window including the current unclosed 1m candle's live price
+  const liveWindow = closes.slice(-30);
+  const liveZ = computeServerRollingZScore(liveWindow);
+  let triggeredSignal = null;
+
+  // Short (DOWN): First confirmation >= +2.0, Second confirmation <= +1.90
+  if (liveZ >= 2.0) {
+    serverArmedUpper = true;
+  } else if (serverArmedUpper && liveZ <= 1.90 && liveZ > 0) {
+    serverArmedUpper = false;
+    triggeredSignal = 'ENTRY_SHORT';
+  } else if (liveZ <= 0) {
+    serverArmedUpper = false;
+  }
+
+  // Long (UP): First confirmation <= -2.0, Second confirmation >= -1.90
+  if (liveZ <= -2.0) {
+    serverArmedLower = true;
+  } else if (serverArmedLower && liveZ >= -1.90 && liveZ < 0) {
+    serverArmedLower = false;
+    triggeredSignal = 'ENTRY_LONG';
+  } else if (liveZ >= 0) {
+    serverArmedLower = false;
+  }
+
+  if (!serverBotActive) return;
+
+  const pk = (process.env.PRIVATE_KEY || '').trim();
+  const tokenId = (process.env.LMTS_TOKEN_ID || '').trim();
+  const secret = (process.env.LMTS_TOKEN_SECRET || process.env['.MTS_TOKEN_SECRET'] || '').trim();
+  if (!pk || !tokenId || !secret) return;
+
+  const now = Date.now();
+  if (
+    (triggeredSignal === 'ENTRY_SHORT' || triggeredSignal === 'ENTRY_LONG') &&
+    now - serverLastEvaluatedEntrySignalTime >= 5000
+  ) {
+    serverLastEvaluatedEntrySignalTime = now;
+    const direction = triggeredSignal === 'ENTRY_LONG' ? 'LONG' : 'SHORT';
+    const outcome = direction === 'LONG' ? 'UP' : 'DOWN';
+    console.log(
+      `[VM LIVE WS 1m ENGINE] Live unclosed candle tick confirmed ${triggeredSignal} at Z=${liveZ.toFixed(2)}σ (30-SMA, 2.0->1.90)! Dispatching GTC order @ <= $0.05...`
+    );
+
+    setTimeout(async () => {
+      if (!serverBotActive || isServerExecutingOrder) return;
+      const liveMkt = cachedActiveBtc || (await fetchLive15MinBtcMarket());
+      const guard = inMemoryTradeGuard || loadTradeGuardFromDisk();
+      if (guard && liveMkt?.slug && guard.marketSlug === liveMkt.slug) {
+        return; // Single-Entry Lock per 15m Market already active
+      }
+      await executeLimitlessOrderOnServer({
+        market: liveMkt?.slug || 'btc-up-or-down-15-min',
+        direction,
+        outcome,
+        type: 'GTC',
+        price: 0.05,
+        candleTime: latestCandleTime || now,
+      });
+    }, 300);
+  }
+}
+
+async function syncServerBinanceCandles(isInitial = false) {
   try {
-    // Strictly do NOT execute any autonomous background trades if the bot is stopped!
-    if (!serverBotActive) return;
-
-    const pk = (process.env.PRIVATE_KEY || '').trim();
-    const tokenId = (process.env.LMTS_TOKEN_ID || '').trim();
-    const secret = (process.env.LMTS_TOKEN_SECRET || process.env['.MTS_TOKEN_SECRET'] || '').trim();
-    if (!pk || !tokenId || !secret) return;
-
-    const rawKlines = await fetchServerBinanceKlines('BTCUSDT', '1m', 100);
-    if (!Array.isArray(rawKlines) || rawKlines.length < 46) return;
+    const rawKlines = await fetchServerBinanceKlines('BTCUSDT', '1m', 60);
+    if (!Array.isArray(rawKlines) || rawKlines.length < 30) return;
 
     const now = Date.now();
-    // Filter strictly to confirmed closed 1m candles (closeTime <= now)
-    const closedKlines = rawKlines.filter((k, idx) => {
-      const closeTime = Number(k[6]) || 0;
-      return closeTime > 0 ? closeTime <= now : idx < rawKlines.length - 1;
-    });
+    serverKlinesBuffer = rawKlines.map((k, idx) => ({
+      time: Number(k[0]),
+      close: parseFloat(k[4]),
+      isClosed: Number(k[6]) > 0 ? Number(k[6]) <= now : idx < rawKlines.length - 1,
+    }));
 
-    if (closedKlines.length < 45) return;
-
-    const closes = closedKlines.map((k) => parseFloat(k[4]));
-    const times = closedKlines.map((k) => Number(k[0]));
-
-    let hadArmedUpper = false;
-    let hadArmedLower = false;
-    let latestEntrySignal = null;
-    let latestEntryZ = 0;
-    let latestEntryTime = 0;
-    const latestClosedTime = times[times.length - 1];
-
-    for (let i = 44; i < closes.length; i++) {
-      const windowSlice = closes.slice(i - 44, i + 1);
-      const z = computeServerRollingZScore(windowSlice);
-      let sig = null;
-
-      // Short (DOWN): First confirmation >= +2.5, Second confirmation <= +2.3
-      if (z >= 2.5) {
-        hadArmedUpper = true;
-        sig = 'ARMED_UPPER';
-      } else if (hadArmedUpper && z <= 2.3 && z > 0) {
-        hadArmedUpper = false;
-        sig = 'ENTRY_SHORT';
-      } else if (z <= 0) {
-        hadArmedUpper = false;
-      }
-
-      // Long (UP): First confirmation <= -2.5, Second confirmation >= -2.3
-      if (z <= -2.5) {
-        hadArmedLower = true;
-        sig = 'ARMED_LOWER';
-      } else if (hadArmedLower && z >= -2.3 && z < 0) {
-        hadArmedLower = false;
-        sig = 'ENTRY_LONG';
-      } else if (z >= 0) {
-        hadArmedLower = false;
-      }
-
-      if ((sig === 'ENTRY_SHORT' || sig === 'ENTRY_LONG') && now - times[i] <= 15 * 60 * 1000) {
-        latestEntrySignal = sig;
-        latestEntryZ = z;
-        latestEntryTime = times[i];
-      }
-    }
-
-    if (latestClosedTime > serverLastEvaluatedClosedCandleTime) {
-      serverLastEvaluatedClosedCandleTime = latestClosedTime;
-    }
-
-    if (
-      (latestEntrySignal === 'ENTRY_SHORT' || latestEntrySignal === 'ENTRY_LONG') &&
-      latestEntryTime > serverLastEvaluatedEntrySignalTime
-    ) {
-      serverLastEvaluatedEntrySignalTime = latestEntryTime;
-      if (!serverBotActive) return;
-
-      const direction = latestEntrySignal === 'ENTRY_LONG' ? 'LONG' : 'SHORT';
-      const outcome = direction === 'LONG' ? 'UP' : 'DOWN';
-      console.log(
-        `[VM AUTONOMOUS 1m ENGINE] Closed candle (${new Date(latestEntryTime).toISOString()}) confirmed ${latestEntrySignal} at Z=${latestEntryZ.toFixed(2)}σ! Executing on-chain GTC order...`
-      );
-
-      setTimeout(async () => {
-        if (!serverBotActive || isServerExecutingOrder) return;
-        const liveMkt = cachedActiveBtc || (await fetchLive15MinBtcMarket());
-        const guard = inMemoryTradeGuard || loadTradeGuardFromDisk();
-        if (guard && liveMkt?.slug && guard.marketSlug === liveMkt.slug) {
-          return; // Already executed for this 15m contract
-        }
-        console.log(`[VM AUTONOMOUS 1m ENGINE] Executing ${direction} (${outcome}) GTC order directly from server...`);
-        await executeLimitlessOrderOnServer({
-          market: liveMkt?.slug || 'btc-up-or-down-15-min',
-          direction,
-          outcome,
-          type: 'GTC',
-          price: 0.20,
-          candleTime: latestEntryTime,
-        });
-      }, 1000);
-    }
+    const closes = serverKlinesBuffer.map((c) => c.close);
+    const latestTime = serverKlinesBuffer[serverKlinesBuffer.length - 1]?.time || now;
+    evaluateServerLiveWindow(closes, latestTime, isInitial);
   } catch {
     // safe continuation
   }
 }
 
-setInterval(pollServerClosedCandlesStrategy, 3000);
-pollServerClosedCandlesStrategy();
+async function initServerBinanceLiveWs() {
+  try {
+    await syncServerBinanceCandles(true);
+    const wsModule = await import('ws');
+    const WebSocketClient = wsModule.default || wsModule.WebSocket;
+    const endpoints = [
+      'wss://data-stream.binance.vision/ws/btcusdt@kline_1m',
+      'wss://stream.binance.com/ws/btcusdt@kline_1m',
+      'wss://stream.binance.com:9443/ws/btcusdt@kline_1m',
+    ];
+
+    const connectNext = () => {
+      const url = endpoints[serverBinanceWsEndpointIdx % endpoints.length];
+      try {
+        serverBinanceWs = new WebSocketClient(url);
+        serverBinanceWs.on('message', (raw) => {
+          try {
+            const msg = JSON.parse(String(raw));
+            if (msg?.e === 'kline' && msg?.k) {
+              const kTime = Number(msg.k.t);
+              const kClose = parseFloat(msg.k.c);
+              const kClosed = Boolean(msg.k.x);
+              if (serverKlinesBuffer.length > 0) {
+                const last = serverKlinesBuffer[serverKlinesBuffer.length - 1];
+                if (last.time === kTime) {
+                  last.close = kClose;
+                  last.isClosed = kClosed;
+                } else if (kTime > last.time) {
+                  last.isClosed = true;
+                  serverKlinesBuffer.push({ time: kTime, close: kClose, isClosed: kClosed });
+                  if (serverKlinesBuffer.length > 80) serverKlinesBuffer.shift();
+                }
+                const closes = serverKlinesBuffer.map((c) => c.close);
+                evaluateServerLiveWindow(closes, kTime, false);
+              }
+            }
+          } catch {}
+        });
+        serverBinanceWs.on('error', () => {
+          serverBinanceWsEndpointIdx++;
+        });
+        serverBinanceWs.on('close', () => {
+          setTimeout(connectNext, 3000);
+        });
+      } catch {
+        serverBinanceWsEndpointIdx++;
+        setTimeout(connectNext, 3000);
+      }
+    };
+
+    connectNext();
+  } catch {
+    // Fallback to periodic sync
+  }
+}
+
+initServerBinanceLiveWs();
+setInterval(() => syncServerBinanceCandles(false), 3000);
 
 // Binance Klines Proxy with global data-api.binance.vision failover for US Google Cloud VMs
 app.get('/api/binance/*', async (req, res) => {
