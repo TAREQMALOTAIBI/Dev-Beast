@@ -214,7 +214,19 @@ async function fetchLive15MinBtcMarket() {
       valid15mMkts.sort((a, b) => (Number(a.expirationTimestamp) || 0) - (Number(b.expirationTimestamp) || 0));
 
       if (valid15mMkts[0]) {
-        return valid15mMkts[0];
+        const bestMatch = valid15mMkts[0];
+        if (!bestMatch?.metadata?.openPrice || !bestMatch?.tokens?.yes) {
+          try {
+            const fullRes = await fetch(`https://api.limitless.exchange/markets/${encodeURIComponent(bestMatch.slug)}`);
+            if (fullRes.ok) {
+              const fullJson = await fullRes.json();
+              return { ...bestMatch, ...fullJson };
+            }
+          } catch {
+            // fallback to summary object
+          }
+        }
+        return bestMatch;
       }
     }
 
@@ -1350,6 +1362,19 @@ function evaluateServerLiveWindow(closes, latestCandleTime, isHistoricalSeed = f
     !isServerExecutingOrder &&
     now - serverLastEvaluatedEntrySignalTime >= 5000
   ) {
+    // Check if the current active 15m market is already locked before dispatching
+    const preGuard = inMemoryTradeGuard || loadTradeGuardFromDisk();
+    if (
+      preGuard &&
+      cachedActiveBtc?.slug &&
+      preGuard.marketSlug === cachedActiveBtc.slug &&
+      now - (Number(preGuard.timestamp) || 0) < 15 * 60 * 1000
+    ) {
+      if (triggeredSignal === 'ENTRY_SHORT') serverArmedUpper = false;
+      else serverArmedLower = false;
+      return;
+    }
+
     serverLastEvaluatedEntrySignalTime = now;
     const direction = triggeredSignal === 'ENTRY_LONG' ? 'LONG' : 'SHORT';
     const outcome = direction === 'LONG' ? 'UP' : 'DOWN';

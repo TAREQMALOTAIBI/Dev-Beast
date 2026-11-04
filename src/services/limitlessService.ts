@@ -628,6 +628,7 @@ export class LimitlessService {
       chunkState.status = 'SENT';
       chunkState.timestamp = Date.now();
       (chunkState as any).orderId = orderResult?.orderId;
+      (chunkState as any).marketSlug = orderResult?.marketSlug || resolvedSlug;
       (chunkState as any).details = orderResult?.details;
       onChunkUpdate({ ...chunkState });
       soundController.playChunkExecuted(0);

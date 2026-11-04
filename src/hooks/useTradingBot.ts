@@ -466,14 +466,29 @@ export function useTradingBot() {
       }
 
       // 2) Immediately evaluate Single Confirmation + 3 Filters Entry Signals (ENTRY_SHORT / ENTRY_LONG) on live WebSocket tick
-      if (!isInitialLoad && (liveMetric.signal === 'ENTRY_SHORT' || liveMetric.signal === 'ENTRY_LONG')) {
+      const isLiveShortNow =
+        (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'SHORT_ONLY') &&
+        liveMetric.zScore >= cfg.zScoreUpper &&
+        liveFilters.canEnterShort;
+      const isLiveLongNow =
+        (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'LONG_ONLY') &&
+        liveMetric.zScore <= lowerThresh &&
+        liveFilters.canEnterLong;
+
+      if (!isInitialLoad && (isLiveShortNow || isLiveLongNow)) {
         const now = Date.now();
+        const activeSlugNow = activeLimitlessMarketRef.current?.slug;
+        const alreadyLockedThisContract =
+          Boolean(activeSlugNow) &&
+          activeSlugNow !== 'btc-up-or-down-15-min' &&
+          lastExecutedMarketSlugRef.current === activeSlugNow &&
+          now - lastExecutedTimestampRef.current < 15 * 60 * 1000;
+
         // Enforce Single-Entry Lock per 15m Market + brief 5s anti-spam cooldown if a tick was just evaluated
-        if (now - lastEvaluatedEntrySignalTimeRef.current >= 5000) {
+        if (!alreadyLockedThisContract && now - lastEvaluatedEntrySignalTimeRef.current >= 5000) {
           if (!botActiveRef.current) {
             lastEvaluatedEntrySignalTimeRef.current = now;
-            const isShortSig = liveMetric.signal === 'ENTRY_SHORT';
-            const pauseWarn = isShortSig
+            const pauseWarn = isLiveShortNow
               ? `⚠️ تحقق التأكيد المباشر (+${liveMetric.zScore.toFixed(2)}σ ≥ +${cfg.zScoreUpper.toFixed(2)}σ) + الفلاتر الثلاثة، ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`
               : `⚠️ تحقق التأكيد المباشر (${liveMetric.zScore.toFixed(2)}σ ≤ ${lowerThresh.toFixed(2)}σ) + الفلاتر الثلاثة، ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
             console.warn(pauseWarn);
@@ -486,7 +501,7 @@ export function useTradingBot() {
             });
           } else if (!isExecutingRef.current) {
             lastEvaluatedEntrySignalTimeRef.current = now;
-            if (liveMetric.signal === 'ENTRY_SHORT') {
+            if (isLiveShortNow) {
               crossedUpperThresholdRef.current = false;
               setCrossedUpperThreshold(false);
               entryShortCandlesRef.current.add(liveMetric.time);
@@ -494,7 +509,7 @@ export function useTradingBot() {
               console.log(trigMsg);
               limitlessService.logDirect('SYSTEM', trigMsg);
               executeLiveTradeRef.current(liveMetric.zScore, 'SHORT', liveMetric.time, false);
-            } else if (liveMetric.signal === 'ENTRY_LONG') {
+            } else if (isLiveLongNow) {
               crossedLowerThresholdRef.current = false;
               setCrossedLowerThreshold(false);
               entryLongCandlesRef.current.add(liveMetric.time);
@@ -749,8 +764,10 @@ export function useTradingBot() {
         }
       );
 
+      const serverConfirmedSlug = (executed[0] as any)?.marketSlug || resolvedMarketSlug;
       const completedTrade: TradeOrder = {
         ...initialTrade,
+        market: serverConfirmedSlug,
         chunks: executed,
         status: 'ACTIVE_GTC',
       };
@@ -766,13 +783,13 @@ export function useTradingBot() {
 
       const now = Date.now();
       lastExecutedCandleTimeRef.current = candleTime || now;
-      lastExecutedMarketSlugRef.current = resolvedMarketSlug;
+      lastExecutedMarketSlugRef.current = serverConfirmedSlug;
       lastExecutedTimestampRef.current = now;
       setContractLockInfo({
         isLocked: true,
-        reason: `تم تنفيذ صفقة 4% على عقد ${resolvedMarketSlug}`,
+        reason: `تم تنفيذ صفقة 4% على عقد ${serverConfirmedSlug}`,
         cooldownRemainingMinutes: 15,
-        lastTradedSlug: resolvedMarketSlug,
+        lastTradedSlug: serverConfirmedSlug,
       });
 
       const invested = completedTrade.totalInvestmentUsd;
