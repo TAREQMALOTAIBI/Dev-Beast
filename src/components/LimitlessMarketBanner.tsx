@@ -182,7 +182,7 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
             </span>
             <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-300 bg-emerald-950/90 px-2 py-0.5 rounded-full border border-emerald-500/50">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-              <span>{isAr ? '4% كحد أقصى · GTC ≤ 20% ($0.20) · قفل دخول واحد لكل عقد 15m' : 'Max 4% · GTC ≤ 20% ($0.20) · Single-Entry Lock / 15m'}</span>
+              <span>{isAr ? '3-5% ربع-كيلي · أمر FAK ≤ 46¢ · قفل دخول واحد لكل عقد 15m' : '3-5% Quarter-Kelly · FAK ≤ 46¢ · Single-Entry Lock / 15m'}</span>
             </span>
           </div>
 
@@ -448,11 +448,11 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
           <span>
             {isAr ? (
               <>
-                <strong className="text-slate-200">توضيح المعمارية:</strong> بث حي لحظي <strong className="text-sky-400">btcusdt@kline_1m (30-SMA، تقييم فوري لكل تحديث)</strong> بتأكيد واحد مباشر عند <strong className="text-emerald-400">±2.20σ</strong> مع <strong className="text-amber-300">الفلاتر الثلاثة الذكية (Open Price + EMA 60 + ≥ 6m)</strong>، وتنفيذ أمر <strong className="text-emerald-400">GTC بسقف دخول 20% وتحت ($0.20)</strong> وبنسبة رأس مال <strong className="text-white">4%</strong>!
+                <strong className="text-slate-200">النموذج الكمي (Document 6):</strong> بث حي لحظي <strong className="text-sky-400">btcusdt@kline_1m (180-SMA، 3 ساعات)</strong> بعتبات غير متماثلة (<strong className="text-emerald-400">Short: +2.40σ / Long: -2.20σ</strong>)، مع فلاتر <strong className="text-sky-300">التقلب (10-60 bp)</strong> و<strong className="text-sky-300">الاتجاه (ADX &lt; 25)</strong>، وتنفيذ أمر <strong className="text-amber-400">FAK بسقف صلب 46¢</strong> وحجم <strong className="text-white">ربع-كيلي (3-5%)</strong>!
               </>
             ) : (
               <>
-                <strong className="text-slate-200">Architecture:</strong> Live <strong className="text-sky-400">btcusdt@kline_1m (30-period SMA, evaluated on every live WS tick)</strong> with Single Direct Confirmation at <strong className="text-emerald-400">±2.20σ</strong> + <strong className="text-amber-300">3 Smart Filters (Open Price + EMA 60 + ≥ 6m)</strong>, executing <strong className="text-emerald-400">GTC @ max 20% ($0.20)</strong> at <strong className="text-white">4%</strong> capital!
+                <strong className="text-slate-200">Quant Model (Document 6):</strong> Live <strong className="text-sky-400">btcusdt@kline_1m (180-SMA, 3 hours)</strong> with Asymmetric Z (<strong className="text-emerald-400">Short: +2.40σ / Long: -2.20σ</strong>), guarded by <strong className="text-sky-300">RV (10-60 bp)</strong> & <strong className="text-sky-300">ADX &lt; 25</strong>, executing <strong className="text-amber-400">FAK @ Hard Cap 46¢</strong> with <strong className="text-white">0.25×Kelly (3-5%)</strong>!
               </>
             )}
           </span>

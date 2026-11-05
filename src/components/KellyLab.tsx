@@ -29,11 +29,11 @@ export const KellyLab: React.FC<KellyLabProps> = ({
         <div className="flex items-center gap-2">
           <ShieldCheck className="w-5 h-5 text-emerald-400" />
           <h2 className="font-bold text-slate-100 text-sm tracking-wide">
-            {isAr ? 'إدارة المخاطر وحجم الصفقة (حجم ثابت 4% من الرصيد لكل عقد 15 دقيقة)' : 'Bankroll Sizing (Fixed Max 4% per 15m Contract)'}
+            {isAr ? 'إدارة المخاطر وحجم الصفقة (ربع-كيلي 0.25 × Kelly بحد أقصى 3-5% من البنك)' : 'Bankroll Sizing: Quarter-Kelly (0.25 × Kelly) capped at 3-5%'}
           </h2>
         </div>
         <div className="text-xs font-mono text-slate-400">
-          Fixed Bet Size: <span className="text-emerald-400 font-bold">4.0% / 15m Contract</span>
+          Sizing: <span className="text-emerald-400 font-bold">0.25 × Kelly (Edge) · Max 3-5%</span>
         </div>
       </div>
 
@@ -49,47 +49,47 @@ export const KellyLab: React.FC<KellyLabProps> = ({
           </div>
           <p className="text-[10px] text-slate-500 mt-1">
             {isAr
-              ? 'أمر GTC بسقف دخول 20% وتحت (≤ $0.20 / 20¢)'
-              : 'GTC Order with Max_Share_Price ≤ 20% ($0.20 / 20¢)'}
+              ? 'سقف صلب 46¢ (لا تدفع أكثر من 50¢ أبداً)'
+              : 'Hard Cap 46¢ (Never pay > 50¢, Target 46¢)'}
           </p>
         </div>
 
         <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800/80">
           <div className="text-slate-400 mb-1 flex items-center justify-between">
-            <span>{isAr ? 'نسبة النجاح المتوقعة (p)' : 'Win Probability (p)'}</span>
+            <span>{isAr ? 'الميزة التنافسية (Edge)' : 'Model Edge'}</span>
             <TrendingUp className="w-3.5 h-3.5 text-sky-400" />
           </div>
           <div className="text-lg font-mono font-bold text-sky-400">
-            {(kelly.p * 100).toFixed(0)}%
+            +{(Math.max(0, (config.winProbability || 0.55) - 0.525) * 100).toFixed(1)}%
           </div>
           <p className="text-[10px] text-slate-500 mt-1 font-mono">
-            q = 1 - p = {(kelly.q * 100).toFixed(0)}%
+            Edge = Prob - 0.525
           </p>
         </div>
 
         <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800/80">
           <div className="text-slate-400 mb-1 flex items-center justify-between">
-            <span>{isAr ? 'نوع الأمر وحد الدخول' : 'Order Type & Entry Limit'}</span>
+            <span>{isAr ? 'نوع الأمر والسقف' : 'Order Type & Cap'}</span>
             <Percent className="w-3.5 h-3.5 text-amber-400" />
           </div>
           <div className="text-lg font-mono font-bold text-amber-400">
-            GTC (≤ 20% / $0.20)
+            FAK (≤ 46¢)
           </div>
           <p className="text-[10px] text-slate-500 mt-1 font-mono">
-            {isAr ? 'سقف الدخول 20% وتحت ($0.20 / 20¢)' : 'Max_Share_Price: maximum $0.20 or 20%'}
+            {isAr ? 'Fill-And-Kill فوري' : 'Fill-And-Kill / IOC'}
           </p>
         </div>
 
         <div className="p-3 rounded-lg bg-emerald-950/20 border border-emerald-800/40">
           <div className="text-emerald-300 mb-1 flex items-center justify-between font-medium">
-            <span>{isAr ? 'حجم الصفقة الثابت المطبق' : 'Enforced Bet Size'}</span>
-            <span className="text-[10px] bg-emerald-900/60 text-emerald-300 px-1 rounded">Fixed 4%</span>
+            <span>{isAr ? 'حجم الصفقة المعتمد' : 'Applied Sizing'}</span>
+            <span className="text-[10px] bg-emerald-900/60 text-emerald-300 px-1 rounded">3-5% Max</span>
           </div>
           <div className="text-lg font-mono font-bold text-emerald-400">
             {(kelly.riskToTake * 100).toFixed(2)}%
           </div>
           <p className="text-[10px] text-emerald-500/80 mt-1">
-            {isAr ? 'حجم ثابت 4% كحد أقصى من الرصيد لكل عقد 15 دقيقة' : 'Max Fixed 4% of bankroll per 15m contract'}
+            {isAr ? 'ربع-كيلي 0.25×Kelly(Edge) بحد أقصى 3-5%' : '0.25 × Kelly(Edge), max 3-5% of bankroll'}
           </p>
         </div>
       </div>
@@ -98,7 +98,7 @@ export const KellyLab: React.FC<KellyLabProps> = ({
       <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="text-xs text-slate-400 uppercase tracking-wider font-semibold">
-            {isAr ? 'حجم الصفقة الإجمالي (4% من الرصيد لكل عقد 15m)' : 'Allocated Bet Size (4% Bankroll per 15m Contract)'}
+            {isAr ? 'حجم الصفقة المخصص (3-5% ربع-كيلي)' : 'Allocated Bet Size (Quarter-Kelly 3-5%)'}
           </div>
           <div className="text-2xl font-mono font-bold text-slate-100 mt-0.5">
             {formatUsd(kelly.positionSizeUsd)}
@@ -124,7 +124,7 @@ export const KellyLab: React.FC<KellyLabProps> = ({
             <div className="text-xl font-mono font-bold text-sky-400">
               {kelly.numberOfContracts}{' '}
               <span className="text-xs text-slate-400 font-normal">
-                ({isAr ? 'بسقف سعر ≤ 20% ($0.20)' : '@ ≤ 20% ($0.20)'})
+                ({isAr ? 'بسقف سعر ≤ 46¢' : '@ ≤ 46¢'})
               </span>
             </div>
           </div>
@@ -135,7 +135,7 @@ export const KellyLab: React.FC<KellyLabProps> = ({
               <span>{isAr ? 'نوع الأمر المعتمد' : 'Order Execution'}</span>
             </div>
             <div className="text-xs font-mono text-emerald-300 font-semibold mt-1">
-              {isAr ? 'GTC بسقف دخول 20% وتحت ($0.20)' : 'GTC Limit ≤ 20% ($0.20)'}
+              {isAr ? 'FAK بسقف دخول 46¢' : 'FAK Limit ≤ 46¢'}
             </div>
           </div>
         </div>
@@ -166,22 +166,23 @@ export const KellyLab: React.FC<KellyLabProps> = ({
 
         <div>
           <div className="flex justify-between text-slate-300 mb-1 font-medium">
-            <span>{isAr ? 'حجم الصفقة المعتمد (4% كحد أقصى لكل عقد 15m)' : 'Fixed Bet Size Cap (Max 4% per 15m Contract)'}</span>
-            <span className="font-mono text-emerald-400">{(Math.min(config.maxRiskPercent || 0.04, 0.04) * 100).toFixed(1)}%</span>
+            <span>{isAr ? 'سقف حجم الصفقة (3-5% ربع-كيلي)' : 'Bet Size Cap (3-5% Quarter-Kelly)'}</span>
+            <span className="font-mono text-emerald-400">{(Math.min(config.maxRiskPercent || 0.04, 0.05) * 100).toFixed(1)}%</span>
           </div>
           <input
             type="range"
-            min="0.005"
-            max="0.04"
+            min="0.01"
+            max="0.05"
             step="0.005"
-            value={Math.min(config.maxRiskPercent || 0.04, 0.04)}
-            onChange={(e) => onUpdateConfig({ maxRiskPercent: Math.min(parseFloat(e.target.value), 0.04) })}
+            value={Math.min(config.maxRiskPercent || 0.04, 0.05)}
+            onChange={(e) => onUpdateConfig({ maxRiskPercent: Math.min(parseFloat(e.target.value), 0.05) })}
             className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
           />
           <div className="flex justify-between text-[10px] text-slate-500 mt-1">
             <span>1%</span>
-            <span>2%</span>
-            <span className="text-emerald-400 font-bold">4% (Max Fixed per 15m Contract)</span>
+            <span>3%</span>
+            <span>4% (Default)</span>
+            <span className="text-emerald-400 font-bold">5% (Max)</span>
           </div>
         </div>
       </div>

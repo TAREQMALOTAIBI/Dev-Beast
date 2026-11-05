@@ -236,8 +236,8 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
                     <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
                     <span>
                       {isAr
-                        ? 'تنفيذ مباشر للأمر كاملاً دفعة واحدة بنوع GTC بسقف دخول ≤ 20% ($0.20) وتأكيد مباشر ±2.20σ + 3 فلاتر (4% لكل عقد 15 دقيقة)'
-                        : 'Direct full order via GTC with Max Share Price ≤ 20% ($0.20) & Single Confirm ±2.20σ + 3 Filters (4% per 15m contract)'}
+                        ? 'تنفيذ مباشر للأمر كاملاً دفعة واحدة بنوع FAK بسقف صلب ≤ 46¢ وتأكيد كمي (Short +2.4σ / Long -2.2σ · فلاتر RV و ADX)'
+                        : 'Direct full order via FAK with Hard Cap ≤ 46¢ & Asymmetric Z (Short +2.4σ / Long -2.2σ · RV & ADX Filters)'}
                     </span>
                   </div>
                   {activeTrade && (
@@ -275,7 +275,7 @@ export const ExecutionConsole: React.FC<ExecutionConsoleProps> = ({
                         <div className="flex items-center justify-between text-xs mb-2">
                           <div className="flex items-center gap-1.5">
                             <span className="font-bold text-slate-200">
-                              {isAr ? 'الأمر المباشر (GTC - بدون تجزئة)' : 'Direct Order (GTC - No Chunks)'}
+                              {isAr ? 'الأمر الفوري (FAK - سقف صلب 46¢)' : 'Instant Order (FAK - Hard Cap 46¢)'}
                             </span>
                             {chunk?.direction && (
                               <span

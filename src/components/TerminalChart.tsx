@@ -441,7 +441,7 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
           </div>
         </div>
         <div className="text-emerald-400 font-mono font-semibold">
-          ⚡ Z-Score Single Direct Confirmation (±{safeUpper.toFixed(2)}σ + 3 Smart Filters)
+          ⚡ Z-Score Single Direct Confirmation (±{safeUpper.toFixed(2)}σ)
         </div>
       </div>
     </div>

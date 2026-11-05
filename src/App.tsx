@@ -45,6 +45,7 @@ export default function App() {
     currentBalance,
     liveUsdcBalance,
     threeFiltersStatus,
+    advancedFiltersStatus,
     executionNotice,
     setExecutionNotice,
     isLiveBalance,
@@ -397,6 +398,7 @@ export default function App() {
                   lang={lang}
                   metric={latestMetric}
                   threeFiltersStatus={threeFiltersStatus}
+                  advancedFiltersStatus={advancedFiltersStatus}
                   executionNotice={executionNotice}
                   onClearNotice={() => setExecutionNotice(null)}
                   contractLockInfo={contractLockInfo}

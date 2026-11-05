@@ -74,8 +74,8 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
               </h2>
               <div className="text-[11px] text-slate-400">
                 {isAr
-                  ? '30-SMA (1m) · تأكيد واحد مباشر (±2.20σ) + الفلاتر الثلاثة · 4% رأس المال · GTC ≤ 20% ($0.20)'
-                  : '30-SMA (1m) · Direct Single Confirm (±2.20σ) + 3 Filters · 4% Capital · GTC ≤ 20% ($0.20)'}
+                  ? '180-SMA (1m) · عتبات غير متماثلة (Short +2.4σ / Long -2.2σ) · فلاتر RV و ADX · أمر FAK ≤ 46¢'
+                  : '180-SMA (1m) · Asymmetric Z (Short +2.4σ / Long -2.2σ) · RV & ADX Filters · FAK ≤ 46¢'}
               </div>
             </div>
           </div>
@@ -321,46 +321,44 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 onClick={() => setDraft({
                   ...draft,
                   timeframe: '1m',
-                  periods: 30,
-                  zScoreUpper: 2.2,
-                  zScoreEntry: 2.2,
+                  periods: 180,
+                  zScoreUpper: 2.4,
+                  zScoreEntry: 2.4,
                   zScoreLower: -2.2,
                   zScoreLowerEntry: -2.2,
                   maxRiskPercent: 0.04,
-                  maxPriceCents: 0.20,
-                  orderType: 'GTC',
+                  maxPriceCents: 0.46,
+                  orderType: 'FAK',
                   singleTradePerContract: true,
                   cooldownMinutes: 15,
                 })}
                 className="px-2.5 py-1 rounded text-[11px] font-bold bg-emerald-950/80 hover:bg-emerald-900/90 text-emerald-300 border border-emerald-600/50 cursor-pointer"
               >
-                {isAr ? '🎯 الإعدادات المعتمدة (1m Live WS · 30-SMA · تأكيد واحد ±2.20σ + 3 فلاتر · 4% · GTC ≤ 20%)' : '🎯 Approved Preset (1m Live WS · 30-SMA · Single ±2.20σ + 3 Filters · 4% · GTC ≤ 20%)'}
+                {isAr ? '🎯 إعدادات Document 6 (180 شمعة 1m · Short +2.4σ / Long -2.2σ · فلاتر RV و ADX · أمر FAK ≤ 46¢)' : '🎯 Document 6 Preset (180-SMA 1m · Short +2.4σ / Long -2.2σ · RV & ADX · FAK ≤ 46¢)'}
               </button>
             </div>
 
-            {/* Thresholds Grid: Upper & Lower (Single Direct Confirmation) */}
+            {/* Thresholds Grid: Upper & Lower (Asymmetric Document 6) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
               {/* Upper Threshold (Short / DOWN) */}
               <div className="p-2.5 rounded-lg bg-slate-950/60 border border-rose-900/40 space-y-2">
                 <div className="text-rose-300 font-bold text-[11px]">
-                  {isAr ? 'شرط الهبوط المباشر (Short / DOWN):' : 'Short / DOWN Direct Confirmation:'}
+                  {isAr ? 'عتبة الهبوط (Short / DOWN):' : 'Short / DOWN Threshold:'}
                 </div>
                 <div>
                   <label className="block text-slate-400 mb-1 text-[11px]">
-                    {isAr ? 'التأكيد المباشر للدخول (≥ +2.20σ):' : 'Direct Entry Confirmation (≥ +2.20σ):'}
+                    {isAr ? 'عتبة الدخول (≥ +2.40σ انحياز الصعود):' : 'Entry Threshold (≥ +2.40σ):'}
                   </label>
                   <input
                     type="number"
                     step="0.05"
                     value={draft.zScoreUpper}
                     onChange={(e) => {
-                      const val = parseFloat(e.target.value) || 2.2;
+                      const val = parseFloat(e.target.value) || 2.4;
                       setDraft({
                         ...draft,
                         zScoreUpper: val,
                         zScoreEntry: val,
-                        zScoreLower: -Math.abs(val),
-                        zScoreLowerEntry: -Math.abs(val),
                       });
                     }}
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-100 font-mono"
@@ -371,11 +369,11 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
               {/* Lower Threshold (Long / UP) */}
               <div className="p-2.5 rounded-lg bg-slate-950/60 border border-emerald-900/40 space-y-2">
                 <div className="text-emerald-300 font-bold text-[11px]">
-                  {isAr ? 'شرط الصعود المباشر (Long / UP):' : 'Long / UP Direct Confirmation:'}
+                  {isAr ? 'عتبة الصعود (Long / UP):' : 'Long / UP Threshold:'}
                 </div>
                 <div>
                   <label className="block text-slate-400 mb-1 text-[11px]">
-                    {isAr ? 'التأكيد المباشر للدخول (≤ -2.20σ):' : 'Direct Entry Confirmation (≤ -2.20σ):'}
+                    {isAr ? 'عتبة الدخول (≤ -2.20σ):' : 'Entry Threshold (≤ -2.20σ):'}
                   </label>
                   <input
                     type="number"
@@ -399,48 +397,49 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
           {/* Section 4: Risk Sizing & Direct Order Execution */}
           <div className="border-t border-slate-800 pt-4">
             <h3 className="font-semibold text-slate-100 uppercase tracking-wider text-[11px] mb-3 text-sky-400">
-              {isAr ? 'حجم الصفقة ونوع الأمر (4% كحد أقصى من رأس المال · GTC بسقف دخول ≤ 20% أو $0.20)' : 'Bet Size & Order Type (Max 4% Capital Ratio · GTC Max Share Price ≤ 20% or $0.20)'}
+              {isAr ? 'حجم الصفقة ونوع الأمر (3-5% ربع-كيلي · أمر FAK بسقف صلب ≤ 46¢)' : 'Bet Size & Order Type (Quarter-Kelly 3-5% · FAK Hard Cap ≤ 46¢)'}
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block text-slate-400 mb-1">
-                  {isAr ? 'نوع الأمر المعتمد (GTC فقط)' : 'Order Type (GTC Only)'}
+                  {isAr ? 'نوع الأمر المعتمد' : 'Order Type'}
                 </label>
                 <select
-                  value="GTC"
-                  onChange={() => setDraft({ ...draft, orderType: 'GTC' })}
+                  value={draft.orderType || 'FAK'}
+                  onChange={(e) => setDraft({ ...draft, orderType: e.target.value as any })}
                   className="w-full bg-slate-950 border border-emerald-600/60 rounded-lg px-3 py-2 text-emerald-300 font-mono font-bold"
                 >
-                  <option value="GTC">GTC (Good-Til-Cancelled Only)</option>
+                  <option value="FAK">FAK (Fill-And-Kill / IOC)</option>
+                  <option value="GTC">GTC (Good-Til-Cancelled)</option>
                 </select>
               </div>
 
               <div>
                 <label className="block text-slate-400 mb-1">
-                  {isAr ? 'سقف الدخول (0.20 = $0.20 أو 20% وتحت)' : 'Max Share Price (0.20 = $0.20 or 20%)'}
+                  {isAr ? 'سقف الدخول الصلب (0.46 = 46¢)' : 'Hard Cap Price (0.46 = 46¢)'}
                 </label>
                 <input
                   type="number"
                   step="0.01"
                   min="0.01"
-                  max="0.20"
+                  max="0.50"
                   value={draft.maxPriceCents}
-                  onChange={(e) => setDraft({ ...draft, maxPriceCents: Math.min(parseFloat(e.target.value) || 0.20, 0.20) })}
+                  onChange={(e) => setDraft({ ...draft, maxPriceCents: Math.min(parseFloat(e.target.value) || 0.46, 0.50) })}
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
                 />
               </div>
 
               <div>
                 <label className="block text-slate-400 mb-1">
-                  {isAr ? 'نسبة رأس المال القصوى (4% كحد أقصى)' : 'Maximum Capital Ratio (Max 4%)'}
+                  {isAr ? 'نسبة رأس المال (3-5% كحد أقصى)' : 'Capital Ratio (3-5% Max)'}
                 </label>
                 <input
                   type="number"
-                  step="0.01"
-                  min="0.001"
-                  max="0.04"
-                  value={Math.min(draft.maxRiskPercent || 0.04, 0.04)}
-                  onChange={(e) => setDraft({ ...draft, maxRiskPercent: Math.min(parseFloat(e.target.value) || 0.04, 0.04) })}
+                  step="0.005"
+                  min="0.01"
+                  max="0.05"
+                  value={Math.min(draft.maxRiskPercent || 0.04, 0.05)}
+                  onChange={(e) => setDraft({ ...draft, maxRiskPercent: Math.min(parseFloat(e.target.value) || 0.04, 0.05) })}
                   className="w-full bg-slate-950 border border-emerald-500/60 rounded-lg px-3 py-2 text-emerald-300 font-mono font-bold"
                 />
               </div>

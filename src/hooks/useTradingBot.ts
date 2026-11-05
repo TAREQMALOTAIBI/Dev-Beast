@@ -11,22 +11,27 @@ import {
 } from '../types/bot';
 import { binanceService } from '../services/binanceService';
 import { limitlessService, LimitlessStatus } from '../services/limitlessService';
-import { calculateZScore, calculateKellySizing, evaluateThreeFilters, ThreeFiltersStatus } from '../utils/math';
+import {
+  calculateZScore,
+  calculateKellySizing,
+  evaluateDocumentFilters,
+  AdvancedFiltersStatus,
+} from '../utils/math';
 import { soundController } from '../utils/audio';
 
 const DEFAULT_CONFIG: BotConfig = {
   symbol: 'BTCUSDT',
   timeframe: '1m',
-  periods: 30, // 30-period SMA
-  strategyDirection: 'BOTH', // 'BOTH' | 'LONG_ONLY' | 'SHORT_ONLY'
-  zScoreUpper: 2.2, // Single Direct Confirmation: +2.20σ
-  zScoreEntry: 2.2, // Single Direct Confirmation: +2.20σ
-  zScoreLower: -2.2, // Single Direct Confirmation: -2.20σ
-  zScoreLowerEntry: -2.2, // Single Direct Confirmation: -2.20σ
-  maxPriceCents: 0.20, // GTC Order Max Share Price: $0.20 or 20% (20¢)
-  maxRiskPercent: 0.04, // Maximum capital ratio: 4% of bankroll per 15m contract
-  orderType: 'GTC', // Good-Til-Cancelled
-  fractionChunks: 1, // 1 unified single direct order
+  periods: 180, // 180 Historical Candles (3 Hours)
+  strategyDirection: 'BOTH', // Asymmetric: Long (-2.2σ) / Short (+2.4σ)
+  zScoreUpper: 2.4, // Asymmetric Short Entry Threshold: +2.4σ
+  zScoreEntry: 2.4, // Asymmetric Short Entry Threshold: +2.4σ
+  zScoreLower: -2.2, // Asymmetric Long Entry Threshold: -2.2σ
+  zScoreLowerEntry: -2.2, // Asymmetric Long Entry Threshold: -2.2σ
+  maxPriceCents: 0.46, // Max Entry Price (Hard Cap): 46¢ ($0.46)
+  maxRiskPercent: 0.04, // 0.25 * Kelly(Edge) capped at 3-5% (default 4%)
+  orderType: 'FAK', // Order Type: FAK (Fill-And-Kill)
+  fractionChunks: 1, // 1 unified direct order
   chunkDelayMs: 0,
   winProbability: 0.55,
   initialBalance: 1000,
@@ -71,17 +76,16 @@ export function useTradingBot() {
         if (!parsed.strategyDirection) {
           parsed.strategyDirection = 'BOTH';
         }
-        // Enforce Single Direct Confirmation at ±2.20σ + 3 Filters
-        parsed.zScoreUpper = 2.2;
-        parsed.zScoreEntry = 2.2;
+        // Migrate to document specification parameters
+        parsed.periods = 180;
+        parsed.zScoreUpper = 2.4;
+        parsed.zScoreEntry = 2.4;
         parsed.zScoreLower = -2.2;
         parsed.zScoreLowerEntry = -2.2;
-        // Enforce GTC Order with Max_Share_Price $0.20 (20¢ / 20%)
-        parsed.orderType = 'GTC';
-        parsed.maxPriceCents = 0.20;
+        parsed.orderType = 'FAK';
+        parsed.maxPriceCents = 0.46;
         parsed.fractionChunks = 1;
         parsed.chunkDelayMs = 0;
-        // Enforce Maximum capital ratio: Fixed 4% of bankroll per 15m contract
         parsed.maxRiskPercent = 0.04;
         parsed.singleTradePerContract = true;
         parsed.cooldownMinutes = 15;
@@ -114,7 +118,7 @@ export function useTradingBot() {
   const [isEntrySignal, setIsEntrySignal] = useState<boolean>(false);
   const [currentBalance, setCurrentBalance] = useState<number>(0);
   const [liveUsdcBalance, setLiveUsdcBalance] = useState<number>(0);
-  const [threeFiltersStatus, setThreeFiltersStatus] = useState<ThreeFiltersStatus | null>(null);
+  const [advancedFiltersStatus, setAdvancedFiltersStatus] = useState<AdvancedFiltersStatus | null>(null);
   const [executionNotice, setExecutionNotice] = useState<{
     type: 'SUCCESS' | 'WARNING' | 'ERROR';
     message: string;
@@ -340,64 +344,31 @@ export function useTradingBot() {
         const wasCandleEntryShort = entryShortCandlesRef.current.has(candleTime);
         const wasCandleEntryLong = entryLongCandlesRef.current.has(candleTime);
 
-        const sliceUpToI = closes.slice(0, i + 1);
-        const candleFilters = isLatestLiveCandle
-          ? evaluateThreeFilters({
-              closes: sliceUpToI,
-              mean: stats.mean,
-              stdDev: stats.stdDev,
-              openPriceRaw: activeLimitlessMarketRef.current?.openPrice,
-              expirationTimestamp: activeLimitlessMarketRef.current?.expirationTimestamp,
-              minRemainingMinutes: 6,
-            })
-          : evaluateThreeFilters({
-              closes: sliceUpToI,
-              mean: stats.mean,
-              stdDev: stats.stdDev,
-              openPriceRaw: null,
-              expirationTimestamp: null,
-              minRemainingMinutes: 6,
-            });
-
-        // Upper Direction (Short / DOWN): Single Direct Confirmation >= +2.20σ + 3 Filters
+        // Upper Direction (Short / DOWN): Single Direct Confirmation >= +2.20σ
         if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'SHORT_ONLY') {
           if (wasCandleEntryShort) {
             hadArmedUpper = false;
             signal = 'ENTRY_SHORT';
             dir = 'SHORT';
           } else if (stats.zScore >= cfg.zScoreUpper) {
-            if (candleFilters.canEnterShort) {
-              hadArmedUpper = true;
-              signal = 'ENTRY_SHORT';
-              dir = 'SHORT';
-            } else {
-              hadArmedUpper = true;
-              armedUpperCandleTimeRef.current = candleTime;
-              signal = 'ARMED_UPPER';
-              dir = 'SHORT';
-            }
+            hadArmedUpper = true;
+            signal = 'ENTRY_SHORT';
+            dir = 'SHORT';
           } else if (stats.zScore <= 0) {
             hadArmedUpper = false;
           }
         }
 
-        // Lower Direction (Long / UP): Single Direct Confirmation <= -2.20σ + 3 Filters
+        // Lower Direction (Long / UP): Single Direct Confirmation <= -2.20σ
         if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'LONG_ONLY') {
           if (wasCandleEntryLong) {
             hadArmedLower = false;
             signal = 'ENTRY_LONG';
             dir = 'LONG';
           } else if (stats.zScore <= lowerThresh) {
-            if (candleFilters.canEnterLong) {
-              hadArmedLower = true;
-              signal = 'ENTRY_LONG';
-              dir = 'LONG';
-            } else {
-              hadArmedLower = true;
-              armedLowerCandleTimeRef.current = candleTime;
-              signal = 'ARMED_LOWER';
-              dir = 'LONG';
-            }
+            hadArmedLower = true;
+            signal = 'ENTRY_LONG';
+            dir = 'LONG';
           } else if (stats.zScore >= 0) {
             hadArmedLower = false;
           }
@@ -432,15 +403,11 @@ export function useTradingBot() {
       const liveMetric = result[result.length - 1];
       setCurrentZScore(liveMetric.zScore);
 
-      const liveFilters = evaluateThreeFilters({
-        closes,
-        mean: liveMetric.mean,
-        stdDev: liveMetric.stdDev,
-        openPriceRaw: activeLimitlessMarketRef.current?.openPrice,
-        expirationTimestamp: activeLimitlessMarketRef.current?.expirationTimestamp,
-        minRemainingMinutes: 6,
+      const docFilters = evaluateDocumentFilters({
+        closePrices: closes,
+        candles: candleList,
       });
-      setThreeFiltersStatus(liveFilters);
+      setAdvancedFiltersStatus(docFilters);
 
       crossedUpperThresholdRef.current = hadArmedUpper;
       setCrossedUpperThreshold(hadArmedUpper);
@@ -449,31 +416,34 @@ export function useTradingBot() {
 
       setRecentChartSignal(null);
 
-      // 1) Log if ±2.20σ was reached but one of the 3 filters blocked entry
-      if (!isInitialLoad) {
+      // Log if RV or ADX filter blocked an extreme Z-Score
+      if (!isInitialLoad && !docFilters.canEnterShort && liveMetric.zScore >= cfg.zScoreUpper) {
         const now = Date.now();
-        if (liveMetric.signal === 'ARMED_UPPER' && now - lastFilterBlockLogTimeRef.current > 15000) {
+        if (now - lastFilterBlockLogTimeRef.current > 15000) {
           lastFilterBlockLogTimeRef.current = now;
-          const blockMsg = `🛡️ [فلتر الحماية الثلاثي] وصل Z-Score إلى +${liveMetric.zScore.toFixed(2)}σ (≥ +${cfg.zScoreUpper.toFixed(2)}σ) ولكن تم حظر دخول SHORT مؤقتاً لأن: ${liveFilters.blockReasonShort || 'أحد الفلاتر الثلاثة غير متحقق'}.`;
-          console.log(blockMsg);
-          limitlessService.logDirect('SYSTEM', blockMsg);
-        } else if (liveMetric.signal === 'ARMED_LOWER' && now - lastFilterBlockLogTimeRef.current > 15000) {
+          const msg = `🛡️ [فلتر التقلبات والاتجاه] تم منع إشارة Short عند Z=+${liveMetric.zScore.toFixed(2)}σ: ${docFilters.blockReasonShort}`;
+          console.log(msg);
+          limitlessService.logDirect('SYSTEM', msg);
+        }
+      } else if (!isInitialLoad && !docFilters.canEnterLong && liveMetric.zScore <= lowerThresh) {
+        const now = Date.now();
+        if (now - lastFilterBlockLogTimeRef.current > 15000) {
           lastFilterBlockLogTimeRef.current = now;
-          const blockMsg = `🛡️ [فلتر الحماية الثلاثي] وصل Z-Score إلى ${liveMetric.zScore.toFixed(2)}σ (≤ ${lowerThresh.toFixed(2)}σ) ولكن تم حظر دخول LONG مؤقتاً لأن: ${liveFilters.blockReasonLong || 'أحد الفلاتر الثلاثة غير متحقق'}.`;
-          console.log(blockMsg);
-          limitlessService.logDirect('SYSTEM', blockMsg);
+          const msg = `🛡️ [فلتر التقلبات والاتجاه] تم منع إشارة Long عند Z=${liveMetric.zScore.toFixed(2)}σ: ${docFilters.blockReasonLong}`;
+          console.log(msg);
+          limitlessService.logDirect('SYSTEM', msg);
         }
       }
 
-      // 2) Immediately evaluate Single Confirmation + 3 Filters Entry Signals (ENTRY_SHORT / ENTRY_LONG) on live WebSocket tick
+      // 2) Immediately evaluate Asymmetric Z-Score Entry Signals with Volatility & Trend Filters
       const isLiveShortNow =
         (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'SHORT_ONLY') &&
         liveMetric.zScore >= cfg.zScoreUpper &&
-        liveFilters.canEnterShort;
+        docFilters.canEnterShort;
       const isLiveLongNow =
         (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'LONG_ONLY') &&
         liveMetric.zScore <= lowerThresh &&
-        liveFilters.canEnterLong;
+        docFilters.canEnterLong;
 
       if (!isInitialLoad && (isLiveShortNow || isLiveLongNow)) {
         const now = Date.now();
@@ -489,8 +459,8 @@ export function useTradingBot() {
           if (!botActiveRef.current) {
             lastEvaluatedEntrySignalTimeRef.current = now;
             const pauseWarn = isLiveShortNow
-              ? `⚠️ تحقق التأكيد المباشر (+${liveMetric.zScore.toFixed(2)}σ ≥ +${cfg.zScoreUpper.toFixed(2)}σ) + الفلاتر الثلاثة، ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`
-              : `⚠️ تحقق التأكيد المباشر (${liveMetric.zScore.toFixed(2)}σ ≤ ${lowerThresh.toFixed(2)}σ) + الفلاتر الثلاثة، ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
+              ? `⚠️ تحقق شرط دخول Short (+${liveMetric.zScore.toFixed(2)}σ ≥ +${cfg.zScoreUpper.toFixed(2)}σ) مع فلاتر RV و ADX، ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`
+              : `⚠️ تحقق شرط دخول Long (${liveMetric.zScore.toFixed(2)}σ ≤ ${lowerThresh.toFixed(2)}σ) مع فلاتر RV و ADX، ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
             console.warn(pauseWarn);
             limitlessService.logDirect('SYSTEM', pauseWarn);
             setExecutionNotice({
@@ -505,7 +475,7 @@ export function useTradingBot() {
               crossedUpperThresholdRef.current = false;
               setCrossedUpperThreshold(false);
               entryShortCandlesRef.current.add(liveMetric.time);
-              const trigMsg = `🎯 [تحقق التأكيد المباشر ≥ +${cfg.zScoreUpper.toFixed(2)}σ + الفلاتر الثلاثة · بث حي 1m] وصل Z-Score إلى +${liveMetric.zScore.toFixed(2)}σ مع تطابق الفلاتر الثلاثة! جاري إرسال أمر GTC فوري لشراء عقد DOWN بسقف سعر ≤ $0.20 (20% / 20¢) وحجم 4% من الرصيد.`;
+              const trigMsg = `🎯 [تحقق شرط Short غير المتماثل ≥ +${cfg.zScoreUpper.toFixed(2)}σ · RV=${docFilters.rv3m.valueBp.toFixed(1)}bp · ADX=${docFilters.adx14.value.toFixed(1)}] جاري إرسال أمر FAK فوري لشراء DOWN بسعر ≤ 46¢ وحجم ربع-كيلي (3-5%).`;
               console.log(trigMsg);
               limitlessService.logDirect('SYSTEM', trigMsg);
               executeLiveTradeRef.current(liveMetric.zScore, 'SHORT', liveMetric.time, false);
@@ -513,7 +483,7 @@ export function useTradingBot() {
               crossedLowerThresholdRef.current = false;
               setCrossedLowerThreshold(false);
               entryLongCandlesRef.current.add(liveMetric.time);
-              const trigMsg = `🎯 [تحقق التأكيد المباشر ≤ ${lowerThresh.toFixed(2)}σ + الفلاتر الثلاثة · بث حي 1m] وصل Z-Score إلى ${liveMetric.zScore.toFixed(2)}σ مع تطابق الفلاتر الثلاثة! جاري إرسال أمر GTC فوري لشراء عقد UP بسقف سعر ≤ $0.20 (20% / 20¢) وحجم 4% من الرصيد.`;
+              const trigMsg = `🎯 [تحقق شرط Long غير المتماثل ≤ ${lowerThresh.toFixed(2)}σ · RV=${docFilters.rv3m.valueBp.toFixed(1)}bp · ADX=${docFilters.adx14.value.toFixed(1)}] جاري إرسال أمر FAK فوري لشراء UP بسعر ≤ 46¢ وحجم ربع-كيلي (3-5%).`;
               console.log(trigMsg);
               limitlessService.logDirect('SYSTEM', trigMsg);
               executeLiveTradeRef.current(liveMetric.zScore, 'LONG', liveMetric.time, false);
@@ -659,12 +629,12 @@ export function useTradingBot() {
     const isLong = direction === 'LONG';
     const outcome = isLong ? 'UP' : 'DOWN';
 
-    // Direct GTC Limit Price at 20 cents ($0.20 or 20%) and below — sent immediately upon 2nd confirmation
-    const maxEntryCap = Math.min(cfg.maxPriceCents && cfg.maxPriceCents > 0 ? cfg.maxPriceCents : 0.20, 0.20);
+    // Direct FAK Limit Price at 46 cents ($0.46 or 46%) Hard Cap as per Document 6
+    const maxEntryCap = Math.min(cfg.maxPriceCents && cfg.maxPriceCents > 0 ? cfg.maxPriceCents : 0.46, 0.46);
     const effectiveContractPrice = parseFloat(Math.max(0.001, maxEntryCap).toFixed(3));
 
-    // Hard Risk Guard: Fixed 4% of bankroll per 15m contract
-    const maxRiskCap = Math.min(cfg.maxRiskPercent || 0.04, 0.04);
+    // Document 6 Sizing: 0.25 * Kelly(Edge), capped at 3-5% of bankroll per 15m contract
+    const maxRiskCap = Math.min(cfg.maxRiskPercent || 0.04, 0.05);
     const maxBudgetUsd = balance * maxRiskCap;
 
     const kelly = calculateKellySizing(balance, {
@@ -680,7 +650,7 @@ export function useTradingBot() {
       effectiveContracts = 0.01;
     }
 
-    // Ensure dollar cost strictly never exceeds Fixed 4% of bankroll
+    // Ensure dollar cost strictly never exceeds 3-5% of bankroll
     if (effectiveContracts * effectiveContractPrice > maxBudgetUsd) {
       effectiveContracts = Math.floor((maxBudgetUsd / effectiveContractPrice) * 100) / 100;
     }
@@ -693,7 +663,7 @@ export function useTradingBot() {
       if (maxBudgetUsd >= (0.01 * effectiveContractPrice)) {
         effectiveContracts = 0.01;
       } else {
-        const minWarning = `⚠️ رصيد المحفظة الحالي ($${balance.toFixed(2)} USDC) ونسبة 4% ($${maxBudgetUsd.toFixed(2)}) لا يكفي لشراء عقد بسعر $${effectiveContractPrice}.`;
+        const minWarning = `⚠️ رصيد المحفظة الحالي ($${balance.toFixed(2)} USDC) والميزانية المخصصة ($${maxBudgetUsd.toFixed(2)}) لا تكفي لشراء عقد بسعر $${effectiveContractPrice}.`;
         console.warn(minWarning);
         limitlessService.logDirect('SYSTEM', minWarning);
         setExecutionNotice({
@@ -733,19 +703,19 @@ export function useTradingBot() {
 
     try {
       console.log(
-        `[LIVE DIRECT EXECUTION - ${direction}] Sending unified GTC order of ${effectiveContracts} contracts to Limitless (${resolvedMarketSlug} - ${outcome}) @ $${effectiveContractPrice} [Fixed 4% Bankroll - Max Share Price ≤ $0.20 (20% / 20¢)]...`
+        `[LIVE DIRECT EXECUTION - ${direction}] Sending unified FAK order of ${effectiveContracts} contracts to Limitless (${resolvedMarketSlug} - ${outcome}) @ $${effectiveContractPrice} [Quarter-Kelly 3-5% Bankroll - Max Share Price ≤ $0.46 (46¢)]...`
       );
 
       limitlessService.logDirect(
         'OUTGOING',
-        `🚀 [تنفيذ صفقة GTC بسقف دخول ≤ 20% ($0.20 / 20¢)] إرسال أمر GTC لعدد ${effectiveContracts} عقود ${outcome} (${direction}) بسعر $${effectiveContractPrice} (≤ 20 سنت / 20%) إلى عقد 15m (${resolvedMarketSlug}) بحجم ثابت 4% من الرصيد...`
+        `🚀 [تنفيذ صفقة FAK بسقف دخول ≤ 46¢] إرسال أمر FAK لعدد ${effectiveContracts} عقود ${outcome} (${direction}) بسعر $${effectiveContractPrice} (≤ 46 سنت) إلى عقد 15m (${resolvedMarketSlug}) بحجم ربع-كيلي (3-5% من الرصيد)...`
       );
 
       const executed = await limitlessService.executeChunkedOrder(
         effectiveContracts,
         effectiveContractPrice,
         1,
-        'GTC',
+        cfg.orderType || 'FAK',
         0,
         (updatedChunk) => {
           setCurrentChunks((prev) => {
@@ -769,7 +739,7 @@ export function useTradingBot() {
         ...initialTrade,
         market: serverConfirmedSlug,
         chunks: executed,
-        status: 'ACTIVE_GTC',
+        status: (cfg.orderType === 'FAK' ? 'EXECUTED' : 'ACTIVE_GTC') as any,
       };
 
       setActiveTrade(completedTrade);
@@ -787,7 +757,7 @@ export function useTradingBot() {
       lastExecutedTimestampRef.current = now;
       setContractLockInfo({
         isLocked: true,
-        reason: `تم تنفيذ صفقة 4% على عقد ${serverConfirmedSlug}`,
+        reason: `تم تنفيذ صفقة ربع-كيلي (3-5%) على عقد ${serverConfirmedSlug}`,
         cooldownRemainingMinutes: 15,
         lastTradedSlug: serverConfirmedSlug,
       });
@@ -796,7 +766,7 @@ export function useTradingBot() {
       setCurrentBalance((prev) => Math.max(0, prev - invested));
       currentBalanceRef.current = Math.max(0, currentBalanceRef.current - invested);
 
-      const successNotice = `✅ تم إرسال صفقة بنجاح: شراء ${outcome} (${direction}) لعدد ${effectiveContracts} عقد بسعر $${effectiveContractPrice} (≤ 20% / 20¢) وبقيمة $${invested.toFixed(2)} (4% ثابتة من الرصيد) على عقد الـ 15 دقيقة ${resolvedMarketSlug}`;
+      const successNotice = `✅ تم إرسال صفقة بنجاح: أمر FAK لشراء ${outcome} (${direction}) لعدد ${effectiveContracts} عقد بسعر $${effectiveContractPrice} (≤ 46¢) وبقيمة $${invested.toFixed(2)} (ربع-كيلي 3-5% من الرصيد) على عقد الـ 15 دقيقة ${resolvedMarketSlug}`;
       limitlessService.logDirect('SYSTEM', successNotice);
       setExecutionNotice({
         type: 'SUCCESS',
@@ -1295,7 +1265,8 @@ export function useTradingBot() {
     isEntrySignal,
     currentBalance,
     liveUsdcBalance,
-    threeFiltersStatus,
+    threeFiltersStatus: advancedFiltersStatus,
+    advancedFiltersStatus,
     executionNotice,
     setExecutionNotice,
     isLiveBalance,

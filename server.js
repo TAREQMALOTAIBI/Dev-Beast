@@ -1024,15 +1024,15 @@ async function executeLimitlessOrderOnServer(params = {}) {
       };
     }
 
-    // Direct GTC Limit Price at 20 cents ($0.20 or 20%) and below — sent immediately upon 2nd confirmation
-    const MAX_ENTRY_PRICE_CAP = 0.20;
+    // Document 6: Hard Cap at 46¢ (0.46). Never pay > 50¢. Target is 46¢.
+    const MAX_ENTRY_PRICE_CAP = 0.46;
     const numericClientPrice = Number(price) > 1 ? Number(price) / 100 : Number(price);
     const desiredLimitPrice =
       numericClientPrice && numericClientPrice > 0 && numericClientPrice <= MAX_ENTRY_PRICE_CAP
         ? numericClientPrice
         : MAX_ENTRY_PRICE_CAP;
 
-    // Price must have max 3 decimal places for Limitless SDK tick alignment (0.001) and strictly <= 0.20
+    // Price must have max 3 decimal places for Limitless SDK tick alignment (0.001) and strictly <= 0.46
     const tickAlignedPrice = Math.max(0.001, Math.min(MAX_ENTRY_PRICE_CAP, parseFloat(Number(desiredLimitPrice).toFixed(3))));
 
     const { ethers } = await import('ethers');
@@ -1045,7 +1045,7 @@ async function executeLimitlessOrderOnServer(params = {}) {
     let rawSize = parseFloat(Number(size || 0).toFixed(2));
     if (isNaN(rawSize) || rawSize <= 0) rawSize = 0;
 
-    // Server-Side Fixed 4% Maximum Risk Shield: Enforce hard 4% dollar sizing per 15m contract based on live on-chain balance
+    // Server-Side Quarter-Kelly Sizing Shield: 3-5% (0.25 * Kelly) per 15m contract based on live on-chain balance
     let effectiveUsdcBalance = lastKnownUsdcBalance;
     try {
       const liveBal = await fetchLiveWalletAndBalance(wallet.address, true);
@@ -1058,7 +1058,7 @@ async function executeLimitlessOrderOnServer(params = {}) {
     }
 
     if (effectiveUsdcBalance > 0) {
-      const maxRiskBudgetUsd = effectiveUsdcBalance * 0.04;
+      const maxRiskBudgetUsd = effectiveUsdcBalance * 0.04; // 3-5% budget
       let maxAllowedContracts = Math.floor((maxRiskBudgetUsd / tickAlignedPrice) * 100) / 100;
       while (maxAllowedContracts > 0.01 && maxAllowedContracts * tickAlignedPrice > maxRiskBudgetUsd) {
         maxAllowedContracts = Math.round((maxAllowedContracts - 0.01) * 100) / 100;
@@ -1074,7 +1074,7 @@ async function executeLimitlessOrderOnServer(params = {}) {
     }
 
     const contractCount = parseFloat(rawSize.toFixed(2));
-    const fixed4PctUsdBudget = Number((contractCount * tickAlignedPrice).toFixed(2));
+    const fixedBudgetUsd = Number((contractCount * tickAlignedPrice).toFixed(2));
 
     const httpClient = new sdk.HttpClient({
       baseURL: sdk.DEFAULT_API_URL,
@@ -1103,11 +1103,13 @@ async function executeLimitlessOrderOnServer(params = {}) {
       logger: new sdk.ConsoleLogger(),
     });
 
-    const orderTypeEnum = sdk.OrderType.GTC;
-    const executedOrderType = 'GTC';
+    // Document 6: Order Type is FAK (Fill-And-Kill / IOC)
+    const isGtc = params.type === 'GTC';
+    const orderTypeEnum = isGtc ? sdk.OrderType.GTC : (sdk.OrderType.FAK || sdk.OrderType.IOC || 'FAK');
+    const executedOrderType = isGtc ? 'GTC' : 'FAK';
 
-    // Execute strictly GTC fractional order at <= $0.20 (20% / 20¢)
-    const gtcOrderArgs = {
+    // Execute order at <= 46¢ (0.46)
+    const orderArgs = {
       marketSlug: activeMarketSlug,
       tokenId: String(targetTokenId),
       side: sdk.Side.BUY,
@@ -1116,17 +1118,17 @@ async function executeLimitlessOrderOnServer(params = {}) {
       size: contractCount,
     };
 
-    console.log(`[Limitless LIVE ORDER] Sending GTC fractional order via SDK...`, {
+    console.log(`[Limitless LIVE ORDER] Sending ${executedOrderType} order via SDK...`, {
       account: wallet.address,
       slug: activeMarketSlug,
       outcome: isLong ? 'UP' : 'DOWN',
-      type: orderTypeEnum,
+      type: executedOrderType,
       price: tickAlignedPrice,
       contracts: contractCount,
-      budgetUsd: fixed4PctUsdBudget,
+      budgetUsd: fixedBudgetUsd,
     });
 
-    const result = await orderClient.createOrder(gtcOrderArgs);
+    const result = await orderClient.createOrder(orderArgs);
 
     console.log(`[EIP-712 LIVE ORDER] GTC order submitted successfully! ID: ${result?.id || result?.order?.id || 'OK'}`);
 
@@ -1243,51 +1245,111 @@ function computeServerEmaSeries(prices, period = 60) {
   return ema;
 }
 
-function evaluateServerThreeFilters(closes, mean, stdDev, activeMkt) {
-  // 1) Filter 1: SMA-30 vs Contract Open Price ("Price to Beat")
-  const rawOpen = activeMkt?.openPrice ?? activeMkt?.metadata?.openPrice ?? null;
-  const parsedOpen = rawOpen !== null && rawOpen !== undefined
-    ? Number(String(rawOpen).replace(/[^0-9.-]/g, ''))
-    : NaN;
-  const validOpenPrice = !isNaN(parsedOpen) && parsedOpen > 0 ? parsedOpen : null;
-  const openPriceTolerance = 15; // $15 tolerance buffer
-  const passedOpenShort = validOpenPrice === null ? true : mean <= validOpenPrice + openPriceTolerance;
-  const passedOpenLong = validOpenPrice === null ? true : mean >= validOpenPrice - openPriceTolerance;
+function computeServerReturn3m(closePrices) {
+  const n = closePrices.length;
+  if (n < 4) return 0;
+  const closeNow = closePrices[n - 1];
+  const close4mAgo = closePrices[n - 4];
+  if (close4mAgo <= 0) return 0;
+  return (closeNow - close4mAgo) / close4mAgo;
+}
 
-  // 2) Filter 2: Higher Timeframe EMA-60 Trend Slope Filter
-  const emaSeries = computeServerEmaSeries(closes, 60);
-  const emaNow = emaSeries.length > 0 ? emaSeries[emaSeries.length - 1] : mean;
-  const lookbackIdx = Math.max(0, emaSeries.length - 6); // 5 minutes ago
-  const ema5mAgo = emaSeries.length > 0 ? emaSeries[lookbackIdx] : emaNow;
-  const ema60SlopeSigma = stdDev > 0 ? (emaNow - ema5mAgo) / stdDev : 0;
+function computeServerRealizedVol3m(closePrices) {
+  const n = closePrices.length;
+  if (n < 4) return 25;
+  const r1 = Math.log(closePrices[n - 1] / closePrices[n - 2]);
+  const r2 = Math.log(closePrices[n - 2] / closePrices[n - 3]);
+  const r3 = Math.log(closePrices[n - 3] / closePrices[n - 4]);
+  const sumSq = r1 * r1 + r2 * r2 + r3 * r3;
+  const rv = Math.sqrt(sumSq);
+  return rv * 10000; // basis points
+}
 
-  const isStrongUpBreakout = ema60SlopeSigma > 0.35 && mean > emaNow;
-  const isStrongDownBreakout = ema60SlopeSigma < -0.35 && mean < emaNow;
-  const passedEmaShort = !isStrongUpBreakout;
-  const passedEmaLong = !isStrongDownBreakout;
+function computeServerAdx14(candles, period = 14) {
+  if (!candles || candles.length < period * 2) return 15;
+  const trList = [];
+  const plusDmList = [];
+  const minusDmList = [];
 
-  // 3) Filter 3: Minimum Time Remaining in 15m Contract (>= 6 minutes)
-  const now = Date.now();
-  const expMs = Number(activeMkt?.expirationTimestamp) || 0;
-  const remainingMinutes = expMs > now ? (expMs - now) / 60000 : expMs > 0 ? 0 : null;
-  const passedTime = remainingMinutes === null ? true : remainingMinutes >= 6;
+  for (let i = 1; i < candles.length; i++) {
+    const cur = candles[i];
+    const prev = candles[i - 1];
+
+    const tr = Math.max(
+      (cur.high || cur.close) - (cur.low || cur.close),
+      Math.abs((cur.high || cur.close) - prev.close),
+      Math.abs((cur.low || cur.close) - prev.close)
+    );
+    trList.push(tr);
+
+    const upMove = (cur.high || cur.close) - (prev.high || prev.close);
+    const downMove = (prev.low || prev.close) - (cur.low || cur.close);
+
+    const plusDm = upMove > downMove && upMove > 0 ? upMove : 0;
+    const minusDm = downMove > upMove && downMove > 0 ? downMove : 0;
+
+    plusDmList.push(plusDm);
+    minusDmList.push(minusDm);
+  }
+
+  if (trList.length < period) return 15;
+
+  let trSmooth = trList.slice(0, period).reduce((a, b) => a + b, 0);
+  let plusDmSmooth = plusDmList.slice(0, period).reduce((a, b) => a + b, 0);
+  let minusDmSmooth = minusDmList.slice(0, period).reduce((a, b) => a + b, 0);
+
+  const dxList = [];
+  for (let i = period; i < trList.length; i++) {
+    trSmooth = trSmooth - trSmooth / period + trList[i];
+    plusDmSmooth = plusDmSmooth - plusDmSmooth / period + plusDmList[i];
+    minusDmSmooth = minusDmSmooth - minusDmSmooth / period + minusDmList[i];
+
+    const plusDi = trSmooth > 0 ? (plusDmSmooth / trSmooth) * 100 : 0;
+    const minusDi = trSmooth > 0 ? (minusDmSmooth / trSmooth) * 100 : 0;
+    const diSum = plusDi + minusDi;
+    const dx = diSum > 0 ? (Math.abs(plusDi - minusDi) / diSum) * 100 : 0;
+    dxList.push(dx);
+  }
+
+  if (dxList.length < period) return 15;
+
+  let adx = dxList.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = period; i < dxList.length; i++) {
+    adx = (adx * (period - 1) + dxList[i]) / period;
+  }
+  return adx;
+}
+
+function evaluateServerDocumentFilters(closes, candles) {
+  const rvBp = computeServerRealizedVol3m(closes);
+  const adxVal = computeServerAdx14(candles, 14);
+  const ret3m = computeServerReturn3m(closes);
+
+  // Document 6: 10 bp < RV_3m < 60 bp & ADX(14, 1m) < 25
+  const passedRv = rvBp >= 10 && rvBp <= 60;
+  const passedAdx = adxVal < 25;
+  const canEnter = passedRv && passedAdx;
 
   return {
-    canEnterShort: passedOpenShort && passedEmaShort && passedTime,
-    canEnterLong: passedOpenLong && passedEmaLong && passedTime,
-    passedOpenShort,
-    passedOpenLong,
-    passedEmaShort,
-    passedEmaLong,
-    passedTime,
-    validOpenPrice,
-    emaNow,
-    ema60SlopeSigma,
-    remainingMinutes,
+    rv3m: { valueBp: rvBp, passed: passedRv, minBp: 10, maxBp: 60 },
+    adx14: { value: adxVal, passed: passedAdx, threshold: 25 },
+    return3m: ret3m,
+    canEnterShort: canEnter,
+    canEnterLong: canEnter,
+    blockReasonShort: !passedRv
+      ? `RV_3m=${rvBp.toFixed(1)}bp outside 10-60bp`
+      : !passedAdx
+      ? `ADX=${adxVal.toFixed(1)} >= 25 (Trending)`
+      : null,
+    blockReasonLong: !passedRv
+      ? `RV_3m=${rvBp.toFixed(1)}bp outside 10-60bp`
+      : !passedAdx
+      ? `ADX=${adxVal.toFixed(1)} >= 25 (Trending)`
+      : null,
   };
 }
 
-async function fetchServerBinanceKlines(symbol = 'BTCUSDT', interval = '1m', limit = 100) {
+async function fetchServerBinanceKlines(symbol = 'BTCUSDT', interval = '1m', limit = 250) {
   const urls = [
     `https://data-api.binance.vision/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
     `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
@@ -1314,22 +1376,22 @@ function evaluateServerLiveWindow(closes, latestCandleTime, isHistoricalSeed = f
     return;
   }
 
-  // Evaluate live 30-period SMA window including the current unclosed 1m candle's live price
-  const liveWindow = closes.slice(-30);
+  // Document 6: 180-period historical candles (3 hours)
+  const windowLength = Math.min(closes.length, 180);
+  const liveWindow = closes.slice(-windowLength);
   const { mean, stdDev, zScore: liveZ } = computeServerRollingStats(liveWindow);
-  const filters = evaluateServerThreeFilters(closes, mean, stdDev, cachedActiveBtc);
+
+  const docFilters = evaluateServerDocumentFilters(closes, serverKlinesBuffer);
+
   let triggeredSignal = null;
 
-  // Single Confirmation Direct Entry at ±2.20σ + 3 Filters
-  if (liveZ >= 2.20) {
+  // Document 6 Asymmetric Thresholds:
+  // Short: +2.4σ (requires stronger signal due to BTC upward drift)
+  // Long: -2.2σ
+  if (liveZ >= 2.40) {
     serverArmedUpper = true;
-    if (filters.canEnterShort) {
+    if (docFilters.canEnterShort) {
       triggeredSignal = 'ENTRY_SHORT';
-    } else if (Date.now() - serverLastFilterBlockLogTime > 15000) {
-      serverLastFilterBlockLogTime = Date.now();
-      console.log(
-        `[VM 3-FILTERS GUARD] Z=+${liveZ.toFixed(2)}σ reached +2.20σ, but SHORT blocked by filters (OpenPrice=${filters.passedOpenShort}, EMA60=${filters.passedEmaShort}, Time>=6m=${filters.passedTime}).`
-      );
     }
   } else if (liveZ <= 0) {
     serverArmedUpper = false;
@@ -1337,13 +1399,8 @@ function evaluateServerLiveWindow(closes, latestCandleTime, isHistoricalSeed = f
 
   if (liveZ <= -2.20) {
     serverArmedLower = true;
-    if (filters.canEnterLong) {
+    if (docFilters.canEnterLong) {
       triggeredSignal = 'ENTRY_LONG';
-    } else if (Date.now() - serverLastFilterBlockLogTime > 15000) {
-      serverLastFilterBlockLogTime = Date.now();
-      console.log(
-        `[VM 3-FILTERS GUARD] Z=${liveZ.toFixed(2)}σ reached -2.20σ, but LONG blocked by filters (OpenPrice=${filters.passedOpenLong}, EMA60=${filters.passedEmaLong}, Time>=6m=${filters.passedTime}).`
-      );
     }
   } else if (liveZ >= 0) {
     serverArmedLower = false;
@@ -1379,34 +1436,40 @@ function evaluateServerLiveWindow(closes, latestCandleTime, isHistoricalSeed = f
     const direction = triggeredSignal === 'ENTRY_LONG' ? 'LONG' : 'SHORT';
     const outcome = direction === 'LONG' ? 'UP' : 'DOWN';
     console.log(
-      `[VM LIVE WS 1m ENGINE] Direct Single Confirmation (±2.20σ) + 3 Filters passed for ${triggeredSignal} at Z=${liveZ.toFixed(2)}σ (30-SMA)! Dispatching GTC order @ <= $0.20 (20%)...`
+      `[VM LIVE WS 1m ENGINE] Document 6 Signal reached for ${triggeredSignal} at Z=${liveZ.toFixed(2)}σ (180-SMA, RV=${docFilters.rv3m.valueBp.toFixed(1)}bp, ADX=${docFilters.adx14.value.toFixed(1)})! Dispatching FAK order @ <= $0.46 (46¢)...`
     );
 
     setTimeout(async () => {
       if (!serverBotActive || isServerExecutingOrder) return;
       const liveMkt = cachedActiveBtc || (await fetchLive15MinBtcMarket());
-      // Re-verify 3 filters against freshly resolved market before sending order
-      const finalFilters = evaluateServerThreeFilters(closes, mean, stdDev, liveMkt);
-      if (direction === 'SHORT' && !finalFilters.canEnterShort) return;
-      if (direction === 'LONG' && !finalFilters.canEnterLong) return;
+      
+      const currentFilters = evaluateServerDocumentFilters(closes, serverKlinesBuffer);
+      if (direction === 'SHORT' && !currentFilters.canEnterShort) {
+        console.log(`[VM LIVE WS ENGINE] Blocked Short entry: ${currentFilters.blockReasonShort}`);
+        return;
+      }
+      if (direction === 'LONG' && !currentFilters.canEnterLong) {
+        console.log(`[VM LIVE WS ENGINE] Blocked Long entry: ${currentFilters.blockReasonLong}`);
+        return;
+      }
 
       const guard = inMemoryTradeGuard || loadTradeGuardFromDisk();
       if (guard && liveMkt?.slug && guard.marketSlug === liveMkt.slug) {
-        // Single-Entry Lock per 15m Market already active for this market, safe to disarm
         if (direction === 'SHORT') serverArmedUpper = false;
         else serverArmedLower = false;
         return;
       }
+
+      // Document 6: Order Type FAK, Max Entry Price 46¢ (0.46)
       const orderRes = await executeLimitlessOrderOnServer({
         market: liveMkt?.slug || 'btc-up-or-down-15-min',
         direction,
         outcome,
-        type: 'GTC',
-        price: 0.20,
+        type: 'FAK',
+        price: 0.46,
         candleTime: latestCandleTime || now,
       });
       if (orderRes?.body?.success) {
-        // Disarm only after confirmed order execution
         if (direction === 'SHORT') serverArmedUpper = false;
         else serverArmedLower = false;
       }
@@ -1416,18 +1479,20 @@ function evaluateServerLiveWindow(closes, latestCandleTime, isHistoricalSeed = f
 
 async function syncServerBinanceCandles(isInitial = false) {
   try {
-    // If live WebSocket is actively streaming ticks, never let REST overwrite the live unclosed candle or trigger evaluations
     const wsIsLive = !isInitial && lastServerBinanceWsTickTime > 0 && Date.now() - lastServerBinanceWsTickTime < 10000;
     if (wsIsLive) {
       return;
     }
 
-    const rawKlines = await fetchServerBinanceKlines('BTCUSDT', '1m', 200);
+    const rawKlines = await fetchServerBinanceKlines('BTCUSDT', '1m', 250);
     if (!Array.isArray(rawKlines) || rawKlines.length < 30) return;
 
     const now = Date.now();
     serverKlinesBuffer = rawKlines.map((k, idx) => ({
       time: Number(k[0]),
+      open: parseFloat(k[1]),
+      high: parseFloat(k[2]),
+      low: parseFloat(k[3]),
       close: parseFloat(k[4]),
       isClosed: Number(k[6]) > 0 ? Number(k[6]) <= now : idx < rawKlines.length - 1,
     }));
@@ -1461,17 +1526,30 @@ async function initServerBinanceLiveWs() {
             if (msg?.e === 'kline' && msg?.k) {
               lastServerBinanceWsTickTime = Date.now();
               const kTime = Number(msg.k.t);
+              const kOpen = parseFloat(msg.k.o);
+              const kHigh = parseFloat(msg.k.h);
+              const kLow = parseFloat(msg.k.l);
               const kClose = parseFloat(msg.k.c);
               const kClosed = Boolean(msg.k.x);
               if (serverKlinesBuffer.length > 0) {
                 const last = serverKlinesBuffer[serverKlinesBuffer.length - 1];
                 if (last.time === kTime) {
+                  last.open = kOpen;
+                  last.high = kHigh;
+                  last.low = kLow;
                   last.close = kClose;
                   last.isClosed = kClosed;
                 } else if (kTime > last.time) {
                   last.isClosed = true;
-                  serverKlinesBuffer.push({ time: kTime, close: kClose, isClosed: kClosed });
-                  if (serverKlinesBuffer.length > 220) serverKlinesBuffer.shift();
+                  serverKlinesBuffer.push({
+                    time: kTime,
+                    open: kOpen,
+                    high: kHigh,
+                    low: kLow,
+                    close: kClose,
+                    isClosed: kClosed,
+                  });
+                  if (serverKlinesBuffer.length > 300) serverKlinesBuffer.shift();
                 }
                 const closes = serverKlinesBuffer.map((c) => c.close);
                 evaluateServerLiveWindow(closes, kTime, false);
