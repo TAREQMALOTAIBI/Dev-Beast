@@ -44,6 +44,8 @@ const DEFAULT_CONFIG: BotConfig = {
   limitlessTokenSecret: (typeof process !== 'undefined' && process.env?.LMTS_TOKEN_SECRET) || '',
   singleTradePerContract: true, // Single-Entry Lock per 15m Market
   cooldownMinutes: 15, // 15-minute contract cycle guard
+  calculateOnCandleClose: true, // Calculate & execute strictly upon 1m candle close
+  signalHorizonMinutes: 3, // Signal Horizon (K): Lookback window in minutes (3m)
 };
 
 export function useTradingBot() {
@@ -54,7 +56,9 @@ export function useTradingBot() {
       if (saved) {
         const parsed = JSON.parse(saved);
         parsed.timeframe = '1m';
-        parsed.periods = 30;
+        parsed.periods = 180;
+        parsed.signalHorizonMinutes = Number(parsed.signalHorizonMinutes) || 3;
+        parsed.calculateOnCandleClose = parsed.calculateOnCandleClose !== undefined ? parsed.calculateOnCandleClose : true;
         parsed.binanceWsUrl = 'wss://stream.binance.com/ws/btcusdt@kline_1m';
         if (parsed.binanceRestUrl && parsed.binanceRestUrl.includes('binance.vision')) {
           parsed.binanceRestUrl = DEFAULT_CONFIG.binanceRestUrl;
@@ -294,8 +298,13 @@ export function useTradingBot() {
     });
   };
 
-  // Recompute metrics series on EVERY live WebSocket update using the current unclosed candle's live price (do NOT wait for 1m candle to close)
-  const rebuildMetrics = useCallback((candleList: CandleData[], cfg: BotConfig, isInitialLoad = false) => {
+  // Recompute metrics series: live UI ticker updates continuously, while signal evaluation & trade execution trigger strictly upon candle close when calculateOnCandleClose is true
+  const rebuildMetrics = useCallback((
+    candleList: CandleData[],
+    cfg: BotConfig,
+    isInitialLoad = false,
+    isCandleCloseEvent = false
+  ) => {
     const result: ZScoreMetric[] = [];
     const closes = candleList.map((c) => c.close);
     let hadArmedUpper = false;
@@ -338,13 +347,13 @@ export function useTradingBot() {
       let signal: 'ARMED_UPPER' | 'ARMED_LOWER' | 'ENTRY_SHORT' | 'ENTRY_LONG' | 'ARMED' | 'ENTRY' | null = null;
       let dir: 'SHORT' | 'LONG' | null = null;
 
-      // Evaluate on every candle (including the current live unclosed candle) with a full 30-period SMA window
+      // Evaluate on every candle with full SMA window
       if (hasFullWindow) {
         const candleTime = candleList[i].time;
         const wasCandleEntryShort = entryShortCandlesRef.current.has(candleTime);
         const wasCandleEntryLong = entryLongCandlesRef.current.has(candleTime);
 
-        // Upper Direction (Short / DOWN): Single Direct Confirmation >= +2.20σ
+        // Upper Direction (Short / DOWN): Asymmetric Entry >= +2.40σ
         if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'SHORT_ONLY') {
           if (wasCandleEntryShort) {
             hadArmedUpper = false;
@@ -359,7 +368,7 @@ export function useTradingBot() {
           }
         }
 
-        // Lower Direction (Long / UP): Single Direct Confirmation <= -2.20σ
+        // Lower Direction (Long / UP): Asymmetric Entry <= -2.20σ
         if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'LONG_ONLY') {
           if (wasCandleEntryLong) {
             hadArmedLower = false;
@@ -399,13 +408,42 @@ export function useTradingBot() {
 
     setMetrics(result);
     if (result.length > 0) {
-      // Evaluate directly on the latest live unclosed candle metric (every WebSocket update)
+      // 1) Continuous UI Heartbeat: update live ticker with the latest live candle metric
       const liveMetric = result[result.length - 1];
       setCurrentZScore(liveMetric.zScore);
 
+      // 2) Determine calculation target metric:
+      // When calculateOnCandleClose is enabled (default), evaluate signal strictly on the newly closed candle
+      const evalOnClose = cfg.calculateOnCandleClose !== false;
+
+      let evalMetric = liveMetric;
+      let evalCandles = candleList;
+      let evalCloses = closes;
+
+      if (evalOnClose) {
+        // Find the most recent confirmed closed candle in the list
+        let closedIdx = -1;
+        for (let j = candleList.length - 1; j >= 0; j--) {
+          if (candleList[j]?.isClosed) {
+            closedIdx = j;
+            break;
+          }
+        }
+        if (closedIdx === -1 && candleList.length >= 2) {
+          closedIdx = candleList.length - 2;
+        }
+
+        if (closedIdx >= 0 && closedIdx < result.length) {
+          evalMetric = result[closedIdx];
+          evalCandles = candleList.slice(0, closedIdx + 1);
+          evalCloses = closes.slice(0, closedIdx + 1);
+        }
+      }
+
       const docFilters = evaluateDocumentFilters({
-        closePrices: closes,
-        candles: candleList,
+        closePrices: evalCloses,
+        candles: evalCandles,
+        signalHorizonMinutes: cfg.signalHorizonMinutes || 3,
       });
       setAdvancedFiltersStatus(docFilters);
 
@@ -416,77 +454,88 @@ export function useTradingBot() {
 
       setRecentChartSignal(null);
 
-      // Log if RV or ADX filter blocked an extreme Z-Score
-      if (!isInitialLoad && !docFilters.canEnterShort && liveMetric.zScore >= cfg.zScoreUpper) {
-        const now = Date.now();
-        if (now - lastFilterBlockLogTimeRef.current > 15000) {
-          lastFilterBlockLogTimeRef.current = now;
-          const msg = `🛡️ [فلتر التقلبات والاتجاه] تم منع إشارة Short عند Z=+${liveMetric.zScore.toFixed(2)}σ: ${docFilters.blockReasonShort}`;
-          console.log(msg);
-          limitlessService.logDirect('SYSTEM', msg);
+      // 3) Only evaluate entry signals and execute orders upon candle close (or every tick if evalOnClose is false)
+      const shouldEvaluateSignals =
+        !isInitialLoad &&
+        (!evalOnClose || (isCandleCloseEvent && lastEvaluatedClosedCandleTimeRef.current !== evalMetric.time));
+
+      if (shouldEvaluateSignals) {
+        if (evalOnClose) {
+          lastEvaluatedClosedCandleTimeRef.current = evalMetric.time;
         }
-      } else if (!isInitialLoad && !docFilters.canEnterLong && liveMetric.zScore <= lowerThresh) {
-        const now = Date.now();
-        if (now - lastFilterBlockLogTimeRef.current > 15000) {
-          lastFilterBlockLogTimeRef.current = now;
-          const msg = `🛡️ [فلتر التقلبات والاتجاه] تم منع إشارة Long عند Z=${liveMetric.zScore.toFixed(2)}σ: ${docFilters.blockReasonLong}`;
-          console.log(msg);
-          limitlessService.logDirect('SYSTEM', msg);
+
+        // Log if RV or ADX filter blocked an extreme Z-Score
+        if (!docFilters.canEnterShort && evalMetric.zScore >= cfg.zScoreUpper) {
+          const now = Date.now();
+          if (now - lastFilterBlockLogTimeRef.current > 15000) {
+            lastFilterBlockLogTimeRef.current = now;
+            const msg = `🛡️ [فلتر التقلبات والاتجاه] تم منع إشارة Short عند إغلاق الشمعة (Z=+${evalMetric.zScore.toFixed(2)}σ): ${docFilters.blockReasonShort}`;
+            console.log(msg);
+            limitlessService.logDirect('SYSTEM', msg);
+          }
+        } else if (!docFilters.canEnterLong && evalMetric.zScore <= lowerThresh) {
+          const now = Date.now();
+          if (now - lastFilterBlockLogTimeRef.current > 15000) {
+            lastFilterBlockLogTimeRef.current = now;
+            const msg = `🛡️ [فلتر التقلبات والاتجاه] تم منع إشارة Long عند إغلاق الشمعة (Z=${evalMetric.zScore.toFixed(2)}σ): ${docFilters.blockReasonLong}`;
+            console.log(msg);
+            limitlessService.logDirect('SYSTEM', msg);
+          }
         }
-      }
 
-      // 2) Immediately evaluate Asymmetric Z-Score Entry Signals with Volatility & Trend Filters
-      const isLiveShortNow =
-        (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'SHORT_ONLY') &&
-        liveMetric.zScore >= cfg.zScoreUpper &&
-        docFilters.canEnterShort;
-      const isLiveLongNow =
-        (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'LONG_ONLY') &&
-        liveMetric.zScore <= lowerThresh &&
-        docFilters.canEnterLong;
+        // Evaluate Asymmetric Z-Score Entry Signals with Volatility & Trend Filters
+        const isLiveShortNow =
+          (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'SHORT_ONLY') &&
+          evalMetric.zScore >= cfg.zScoreUpper &&
+          docFilters.canEnterShort;
+        const isLiveLongNow =
+          (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'LONG_ONLY') &&
+          evalMetric.zScore <= lowerThresh &&
+          docFilters.canEnterLong;
 
-      if (!isInitialLoad && (isLiveShortNow || isLiveLongNow)) {
-        const now = Date.now();
-        const activeSlugNow = activeLimitlessMarketRef.current?.slug;
-        const alreadyLockedThisContract =
-          Boolean(activeSlugNow) &&
-          activeSlugNow !== 'btc-up-or-down-15-min' &&
-          lastExecutedMarketSlugRef.current === activeSlugNow &&
-          now - lastExecutedTimestampRef.current < 15 * 60 * 1000;
+        if (isLiveShortNow || isLiveLongNow) {
+          const now = Date.now();
+          const activeSlugNow = activeLimitlessMarketRef.current?.slug;
+          const alreadyLockedThisContract =
+            Boolean(activeSlugNow) &&
+            activeSlugNow !== 'btc-up-or-down-15-min' &&
+            lastExecutedMarketSlugRef.current === activeSlugNow &&
+            now - lastExecutedTimestampRef.current < 15 * 60 * 1000;
 
-        // Enforce Single-Entry Lock per 15m Market + brief 5s anti-spam cooldown if a tick was just evaluated
-        if (!alreadyLockedThisContract && now - lastEvaluatedEntrySignalTimeRef.current >= 5000) {
-          if (!botActiveRef.current) {
-            lastEvaluatedEntrySignalTimeRef.current = now;
-            const pauseWarn = isLiveShortNow
-              ? `⚠️ تحقق شرط دخول Short (+${liveMetric.zScore.toFixed(2)}σ ≥ +${cfg.zScoreUpper.toFixed(2)}σ) مع فلاتر RV و ADX، ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`
-              : `⚠️ تحقق شرط دخول Long (${liveMetric.zScore.toFixed(2)}σ ≤ ${lowerThresh.toFixed(2)}σ) مع فلاتر RV و ADX، ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
-            console.warn(pauseWarn);
-            limitlessService.logDirect('SYSTEM', pauseWarn);
-            setExecutionNotice({
-              type: 'WARNING',
-              message: pauseWarn,
-              timestamp: now,
-              action: 'START_BOT',
-            });
-          } else if (!isExecutingRef.current) {
-            lastEvaluatedEntrySignalTimeRef.current = now;
-            if (isLiveShortNow) {
-              crossedUpperThresholdRef.current = false;
-              setCrossedUpperThreshold(false);
-              entryShortCandlesRef.current.add(liveMetric.time);
-              const trigMsg = `🎯 [تحقق شرط Short غير المتماثل ≥ +${cfg.zScoreUpper.toFixed(2)}σ · RV=${docFilters.rv3m.valueBp.toFixed(1)}bp · ADX=${docFilters.adx14.value.toFixed(1)}] جاري إرسال أمر FAK فوري لشراء DOWN بسعر ≤ 46¢ وحجم ربع-كيلي (3-5%).`;
-              console.log(trigMsg);
-              limitlessService.logDirect('SYSTEM', trigMsg);
-              executeLiveTradeRef.current(liveMetric.zScore, 'SHORT', liveMetric.time, false);
-            } else if (isLiveLongNow) {
-              crossedLowerThresholdRef.current = false;
-              setCrossedLowerThreshold(false);
-              entryLongCandlesRef.current.add(liveMetric.time);
-              const trigMsg = `🎯 [تحقق شرط Long غير المتماثل ≤ ${lowerThresh.toFixed(2)}σ · RV=${docFilters.rv3m.valueBp.toFixed(1)}bp · ADX=${docFilters.adx14.value.toFixed(1)}] جاري إرسال أمر FAK فوري لشراء UP بسعر ≤ 46¢ وحجم ربع-كيلي (3-5%).`;
-              console.log(trigMsg);
-              limitlessService.logDirect('SYSTEM', trigMsg);
-              executeLiveTradeRef.current(liveMetric.zScore, 'LONG', liveMetric.time, false);
+          // Enforce Single-Entry Lock per 15m Market
+          if (!alreadyLockedThisContract && now - lastEvaluatedEntrySignalTimeRef.current >= 4000) {
+            if (!botActiveRef.current) {
+              lastEvaluatedEntrySignalTimeRef.current = now;
+              const pauseWarn = isLiveShortNow
+                ? `⚠️ تحقق شرط دخول Short عند إغلاق الشمعة (+${evalMetric.zScore.toFixed(2)}σ ≥ +${cfg.zScoreUpper.toFixed(2)}σ) مع فلاتر RV و ADX، ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`
+                : `⚠️ تحقق شرط دخول Long عند إغلاق الشمعة (${evalMetric.zScore.toFixed(2)}σ ≤ ${lowerThresh.toFixed(2)}σ) مع فلاتر RV و ADX، ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
+              console.warn(pauseWarn);
+              limitlessService.logDirect('SYSTEM', pauseWarn);
+              setExecutionNotice({
+                type: 'WARNING',
+                message: pauseWarn,
+                timestamp: now,
+                action: 'START_BOT',
+              });
+            } else if (!isExecutingRef.current) {
+              lastEvaluatedEntrySignalTimeRef.current = now;
+              if (isLiveShortNow) {
+                crossedUpperThresholdRef.current = false;
+                setCrossedUpperThreshold(false);
+                entryShortCandlesRef.current.add(evalMetric.time);
+                const trigMsg = `🎯 [تحقق شرط Short غير المتماثل عند إغلاق الشمعة Z=+${evalMetric.zScore.toFixed(2)}σ ≥ +${cfg.zScoreUpper.toFixed(2)}σ · RV=${docFilters.rv3m.valueBp.toFixed(1)}bp · ADX=${docFilters.adx14.value.toFixed(1)}] جاري إرسال أمر FAK فوري لشراء DOWN بسعر ≤ 46¢ وحجم ربع-كيلي (3-5%).`;
+                console.log(trigMsg);
+                limitlessService.logDirect('SYSTEM', trigMsg);
+                executeLiveTradeRef.current(evalMetric.zScore, 'SHORT', evalMetric.time, false);
+              } else if (isLiveLongNow) {
+                crossedLowerThresholdRef.current = false;
+                setCrossedLowerThreshold(false);
+                entryLongCandlesRef.current.add(evalMetric.time);
+                const trigMsg = `🎯 [تحقق شرط Long غير المتماثل عند إغلاق الشمعة Z=${evalMetric.zScore.toFixed(2)}σ ≤ ${lowerThresh.toFixed(2)}σ · RV=${docFilters.rv3m.valueBp.toFixed(1)}bp · ADX=${docFilters.adx14.value.toFixed(1)}] جاري إرسال أمر FAK فوري لشراء UP بسعر ≤ 46¢ وحجم ربع-كيلي (3-5%).`;
+                console.log(trigMsg);
+                limitlessService.logDirect('SYSTEM', trigMsg);
+                executeLiveTradeRef.current(evalMetric.zScore, 'LONG', evalMetric.time, false);
+              }
             }
           }
         }
@@ -977,20 +1026,22 @@ export function useTradingBot() {
       binanceService.connectWebSocket(
         config.symbol,
         config.timeframe,
-        (tickCandle, _isClosed) => {
+        (tickCandle, isTickClosed) => {
           const prev = candlesRef.current;
           const maxBufferSize = Math.max(configRef.current.periods * 2 + 10, 200);
           const last = prev[prev.length - 1];
           let updatedCandles: CandleData[] = [];
+          let isCandleCloseEvent = Boolean(isTickClosed);
 
           if (last && last.time === tickCandle.time) {
-            updatedCandles = [...prev.slice(0, -1), tickCandle];
+            updatedCandles = [...prev.slice(0, -1), { ...tickCandle, isClosed: isTickClosed }];
           } else {
-            // Mark previous candle as closed when a new candle begins, retain full lookback buffer so all 45 visible chart candles have complete 45-period bands
+            // Mark previous candle as closed when a new candle begins
+            isCandleCloseEvent = true;
             const prevWithClosed = prev.map((c, idx) =>
               idx === prev.length - 1 ? { ...c, isClosed: true } : c
             );
-            updatedCandles = [...prevWithClosed.slice(-maxBufferSize), tickCandle];
+            updatedCandles = [...prevWithClosed.slice(-maxBufferSize), { ...tickCandle, isClosed: false }];
           }
 
           candlesRef.current = updatedCandles;
@@ -1002,8 +1053,7 @@ export function useTradingBot() {
             if (closedCloses.length >= configRef.current.periods) {
               closePricesRef.current = closedCloses.slice(-configRef.current.periods);
             }
-            // rebuildMetrics unifies chart rendering AND live closed-candle 2.5 -> 2.3 confirmation execution
-            rebuildMetricsRef.current(updatedCandles, configRef.current, false);
+            rebuildMetricsRef.current(updatedCandles, configRef.current, false, isCandleCloseEvent);
           }
         },
         (status) => setBinanceStatus(status),

@@ -448,11 +448,11 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
           <span>
             {isAr ? (
               <>
-                <strong className="text-slate-200">النموذج الكمي (Document 6):</strong> بث حي لحظي <strong className="text-sky-400">btcusdt@kline_1m (180-SMA، 3 ساعات)</strong> بعتبات غير متماثلة (<strong className="text-emerald-400">Short: +2.40σ / Long: -2.20σ</strong>)، مع فلاتر <strong className="text-sky-300">التقلب (10-60 bp)</strong> و<strong className="text-sky-300">الاتجاه (ADX &lt; 25)</strong>، وتنفيذ أمر <strong className="text-amber-400">FAK بسقف صلب 46¢</strong> وحجم <strong className="text-white">ربع-كيلي (3-5%)</strong>!
+                <strong className="text-slate-200">النموذج الكمي (Document 6):</strong> حساب الإشارات <strong className="text-sky-400">عند إغلاق شمعة 1m (180-SMA، 3 ساعات)</strong> بعتبات غير متماثلة (<strong className="text-emerald-400">Short: +2.40σ / Long: -2.20σ</strong>)، مع فلاتر <strong className="text-sky-300">التقلب (10-60 bp)</strong> و<strong className="text-sky-300">الاتجاه (ADX &lt; 25)</strong>، وتنفيذ أمر <strong className="text-amber-400">FAK بسقف صلب 46¢</strong> وحجم <strong className="text-white">ربع-كيلي (3-5%)</strong>!
               </>
             ) : (
               <>
-                <strong className="text-slate-200">Quant Model (Document 6):</strong> Live <strong className="text-sky-400">btcusdt@kline_1m (180-SMA, 3 hours)</strong> with Asymmetric Z (<strong className="text-emerald-400">Short: +2.40σ / Long: -2.20σ</strong>), guarded by <strong className="text-sky-300">RV (10-60 bp)</strong> & <strong className="text-sky-300">ADX &lt; 25</strong>, executing <strong className="text-amber-400">FAK @ Hard Cap 46¢</strong> with <strong className="text-white">0.25×Kelly (3-5%)</strong>!
+                <strong className="text-slate-200">Quant Model (Document 6):</strong> Signal calculated <strong className="text-sky-400">On 1m Candle Close (180-SMA, 3 hours)</strong> with Asymmetric Z (<strong className="text-emerald-400">Short: +2.40σ / Long: -2.20σ</strong>), guarded by <strong className="text-sky-300">RV (10-60 bp)</strong> & <strong className="text-sky-300">ADX &lt; 25</strong>, executing <strong className="text-amber-400">FAK @ Hard Cap 46¢</strong> with <strong className="text-white">0.25×Kelly (3-5%)</strong>!
               </>
             )}
           </span>

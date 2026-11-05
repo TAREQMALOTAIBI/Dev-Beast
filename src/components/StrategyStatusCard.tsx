@@ -305,10 +305,10 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             <span>
               {isAr
                 ? (botActive
-                    ? `⚡ محرك البث الحي نشط (ربع-كيلي 3-5% · قفل 15m): عتبات غير متماثلة (Short: +2.40σ / Long: -2.20σ) وفلاتر RV و ADX`
+                    ? `⚡ محرك البث نشط (${config.calculateOnCandleClose !== false ? 'حساب عند إغلاق الشمعة 1m' : 'لحظي'} · ربع-كيلي 3-5% · قفل 15m): Short: +2.40σ / Long: -2.20σ مع فلاتر RV و ADX`
                     : 'التنفيذ التلقائي متوقف حالياً. اضغط الزر أعلاه لتشغيل الروبوت.')
                 : (botActive
-                    ? `⚡ Live WS engine active (Quarter-Kelly 3-5% · 15m Lock): Asymmetric (Short: +2.40σ / Long: -2.20σ) + RV & ADX filters.`
+                    ? `⚡ Engine active (${config.calculateOnCandleClose !== false ? 'On 1m Candle Close' : 'Live Tick'} · Quarter-Kelly 3-5% · 15m Lock): Short: +2.40σ / Long: -2.20σ + RV & ADX filters.`
                     : 'Automated execution is paused. Click above to start.')}
             </span>
           </div>
@@ -362,8 +362,8 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] font-mono">
           <div className="p-2 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col">
-            <span className="text-slate-400 text-[10px]">{isAr ? 'البث والشموع:' : 'Stream & Candles:'}</span>
-            <span className="text-sky-300 font-bold">1m Live · 180 (3h)</span>
+            <span className="text-slate-400 text-[10px]">{isAr ? 'توقيت الحساب والشموع:' : 'Timing & Lookback:'}</span>
+            <span className="text-sky-300 font-bold">{config.calculateOnCandleClose !== false ? (isAr ? 'إغلاق 1m · 180 (3h)' : '1m Close · 180 (3h)') : (isAr ? 'لحظي Live · 180 (3h)' : 'Live Tick · 180 (3h)')}</span>
           </div>
           <div className="p-2 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col">
             <span className="text-slate-400 text-[10px]">{isAr ? 'عتبات الدخول:' : 'Z-Thresholds:'}</span>
@@ -379,8 +379,17 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
           </div>
         </div>
 
-        {/* Live Document 6 Filters Status (RV_3m & ADX_14) */}
-        <div className="pt-2 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] font-mono">
+        {/* Live Document 6 Filters Status (RV_3m & ADX_14) & Signal Horizon K */}
+        <div className="pt-2 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] font-mono">
+          <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900/60 border border-slate-800/80">
+            <span className="text-slate-400">
+              {isAr ? 'أفق الإشارة (Horizon K):' : 'Signal Horizon (K):'}
+            </span>
+            <span className="font-bold text-sky-400">
+              {config.signalHorizonMinutes || 3}m (Return & RV)
+            </span>
+          </div>
+
           <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900/60 border border-slate-800/80">
             <span className="text-slate-400">
               {isAr ? 'فلتر التقلب (10-60 bp):' : 'RV_3m Filter (10-60 bp):'}
@@ -393,11 +402,11 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
 
           <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900/60 border border-slate-800/80">
             <span className="text-slate-400">
-              {isAr ? 'فلتر الاتجاه ADX(14) < 25:' : 'Trend Filter ADX(14) < 25:'}
+              {isAr ? 'فلتر الاتجاه ADX < 25:' : 'ADX(14) < 25:'}
             </span>
             <span className={`font-bold flex items-center gap-1 ${docFilters?.adx14?.passed ? 'text-emerald-400' : 'text-rose-400'}`}>
               <span>{docFilters?.adx14 ? `${docFilters.adx14.value.toFixed(1)}` : '16.2'}</span>
-              <span>{docFilters?.adx14?.passed ? '✓ غير اتجاهي' : '✗ اتجاهي'}</span>
+              <span>{docFilters?.adx14?.passed ? '✓ هادئ' : '✗ اتجاهي'}</span>
             </span>
           </div>
         </div>

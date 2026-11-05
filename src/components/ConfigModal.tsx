@@ -53,6 +53,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
       limitlessTokenSecret: '',
       singleTradePerContract: true,
       cooldownMinutes: 15,
+      calculateOnCandleClose: true,
     });
   };
 
@@ -239,11 +240,11 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
           {/* Section 2: Market & Timeframe */}
           <div>
             <h3 className="font-semibold text-slate-100 uppercase tracking-wider text-[11px] mb-3 text-sky-400">
-              {isAr ? 'السوق ومتوسط الشموع الحية (Binance 1m Live WS · 30-Period SMA)' : 'Market & Rolling Window (Binance 1m Live WS · 30-Period SMA)'}
+              {isAr ? 'السوق ومتوسط الشموع وأفق الإشارة (Binance 1m · 180-SMA · K=3m)' : 'Market, Lookback & Horizon (Binance 1m · 180-SMA · K=3m)'}
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
               <div>
-                <label className="block text-slate-400 mb-1">Trading Pair (SYMBOL)</label>
+                <label className="block text-slate-400 mb-1">Trading Pair</label>
                 <input
                   type="text"
                   value={draft.symbol}
@@ -253,30 +254,46 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-400 mb-1">Interval (TIMEFRAME)</label>
+                <label className="block text-slate-400 mb-1">Interval (Timeframe)</label>
                 <select
                   value={draft.timeframe}
                   onChange={(e) => setDraft({ ...draft, timeframe: e.target.value })}
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
                 >
-                  <option value="1m">1m (Default - 1min)</option>
+                  <option value="1m">1m (1 min)</option>
                   <option value="5m">5m</option>
                   <option value="15m">15m</option>
-                  <option value="1h">1h</option>
                 </select>
               </div>
 
               <div>
-                <label className="block text-slate-400 mb-1">{isAr ? 'عدد الشمعات التاريخية (30-Period SMA)' : 'Historical Candles (30-Period SMA)'}</label>
+                <label className="block text-slate-400 mb-1">{isAr ? 'الشموع (180-SMA)' : 'Lookback (180-SMA)'}</label>
                 <input
                   type="number"
                   min="5"
-                  max="200"
+                  max="300"
                   value={draft.periods}
-                  onChange={(e) => setDraft({ ...draft, periods: parseInt(e.target.value) || 30 })}
+                  onChange={(e) => setDraft({ ...draft, periods: parseInt(e.target.value) || 180 })}
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
                 />
               </div>
+
+              <div>
+                <label className="block text-slate-400 mb-1" title="Signal Horizon K (دقائق)">
+                  {isAr ? 'أفق الإشارة (K دقائق)' : 'Signal Horizon (K)'}
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="15"
+                  value={draft.signalHorizonMinutes || 3}
+                  onChange={(e) => setDraft({ ...draft, signalHorizonMinutes: Math.max(1, parseInt(e.target.value) || 3) })}
+                  className="w-full bg-slate-950 border border-sky-600/60 rounded-lg px-3 py-2 text-sky-300 font-mono font-bold"
+                />
+              </div>
+            </div>
+            <div className="mt-1.5 text-[10px] text-slate-500 font-mono">
+              {isAr ? '💡 أفق الإشارة (K=3m): يقيس العائد Return_3m وفلتر التقلب RV_3m على مدى 3 دقائق لاقتناص الارتداد السريع.' : '💡 Signal Horizon (K=3m): Measures Return_3m and Volatility RV_3m over a 3-minute lookback for mean reversion.'}
             </div>
           </div>
 
@@ -292,25 +309,45 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
             </div>
 
             {/* Strategy Direction Mode Selector */}
-            <div>
-              <label className="block text-slate-300 mb-1 font-semibold">
-                {isAr ? 'نمط التداول والاتجاهات المسموحة:' : 'Strategy Trading Direction Mode:'}
-              </label>
-              <select
-                value={draft.strategyDirection || 'BOTH'}
-                onChange={(e) => setDraft({ ...draft, strategyDirection: e.target.value as any })}
-                className="w-full bg-slate-950 border border-emerald-600/70 rounded-lg px-3 py-2 text-emerald-300 font-semibold"
-              >
-                <option value="BOTH">
-                  {isAr ? '⚡ كلا الاتجاهين: صعود وهبوط (موصى به للربح المزدوج)' : '⚡ Both Directions (Long & Short - Recommended)'}
-                </option>
-                <option value="SHORT_ONLY">
-                  {isAr ? '▼ هبوط فقط: ارتداد من القمة (Short / Buy DOWN)' : '▼ Short Only (Bearish Pullback from Peak)'}
-                </option>
-                <option value="LONG_ONLY">
-                  {isAr ? '▲ صعود فقط: ارتداد من القاع (Long / Buy UP)' : '▲ Long Only (Bullish Rebound from Trough)'}
-                </option>
-              </select>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-slate-300 mb-1 font-semibold">
+                  {isAr ? 'نمط التداول والاتجاهات المسموحة:' : 'Strategy Trading Direction Mode:'}
+                </label>
+                <select
+                  value={draft.strategyDirection || 'BOTH'}
+                  onChange={(e) => setDraft({ ...draft, strategyDirection: e.target.value as any })}
+                  className="w-full bg-slate-950 border border-emerald-600/70 rounded-lg px-3 py-2 text-emerald-300 font-semibold"
+                >
+                  <option value="BOTH">
+                    {isAr ? '⚡ كلا الاتجاهين: صعود وهبوط' : '⚡ Both Directions (Long & Short)'}
+                  </option>
+                  <option value="SHORT_ONLY">
+                    {isAr ? '▼ هبوط فقط: ارتداد من القمة (Short)' : '▼ Short Only'}
+                  </option>
+                  <option value="LONG_ONLY">
+                    {isAr ? '▲ صعود فقط: ارتداد من القاع (Long)' : '▲ Long Only'}
+                  </option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 mb-1 font-semibold">
+                  {isAr ? 'توقيت حساب الإشارة والتنفيذ:' : 'Calculation & Trigger Timing:'}
+                </label>
+                <select
+                  value={draft.calculateOnCandleClose !== false ? 'CLOSE' : 'TICK'}
+                  onChange={(e) => setDraft({ ...draft, calculateOnCandleClose: e.target.value === 'CLOSE' })}
+                  className="w-full bg-slate-950 border border-sky-600/70 rounded-lg px-3 py-2 text-sky-300 font-semibold"
+                >
+                  <option value="CLOSE">
+                    {isAr ? '🎯 بعد إغلاق الشمعة (1m Candle Close)' : '🎯 On Candle Close (1m) — Recommended'}
+                  </option>
+                  <option value="TICK">
+                    {isAr ? '⚡ لحظي مع كل نبضة (Live Intra-Candle Ticks)' : '⚡ Live Intra-Candle Ticks'}
+                  </option>
+                </select>
+              </div>
             </div>
 
             {/* Quick Sensitivity Presets */}
@@ -322,6 +359,8 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                   ...draft,
                   timeframe: '1m',
                   periods: 180,
+                  signalHorizonMinutes: 3,
+                  calculateOnCandleClose: true,
                   zScoreUpper: 2.4,
                   zScoreEntry: 2.4,
                   zScoreLower: -2.2,

@@ -223,7 +223,7 @@ class LimitlessTradingBot {
     }
 
     // ==========================================
-    // 4. البث الحي (btcusdt@kline_1m — تقييم فوري مع كل تحديث حي دون انتظار إغلاق الشمعة)
+    // 4. البث الحي (btcusdt@kline_1m — حساب الإشارات عند إغلاق الشمعة 1m)
     // ==========================================
     private lastExecutedMarketSlug: string = '';
     private isExecutingTrade: boolean = false;
@@ -236,29 +236,28 @@ class LimitlessTradingBot {
             const kline = message.k;
 
             if (kline) {
-                const currentLivePrice = parseFloat(kline.c);
+                const currentPrice = parseFloat(kline.c);
                 const isClosed = Boolean(kline.x);
                 const candleTime = Number(kline.t);
-                this.onTick(currentLivePrice, isClosed, candleTime);
+                this.onTick(currentPrice, isClosed, candleTime);
             }
         });
 
-        binanceWs.on('open', () => console.log('✅ Connected to btcusdt@kline_1m (Live Tick Evaluation on Unclosed Candle)'));
+        binanceWs.on('open', () => console.log('✅ Connected to btcusdt@kline_1m (Evaluation on 1m Candle Close)'));
         binanceWs.on('error', (err) => console.warn('Binance WS notice:', err.message));
     }
 
-    private onTick(livePrice: number, isClosed: boolean, candleTime: number) {
-        // بناء نافذة 180 شمعة (3 ساعات) تشمل الشمعة الحية غير المغلقة وتقييمها فوراً عند كل تحديث WebSocket
-        const liveWindow = [...this.closePrices.slice(-(CONFIG.PERIODS - 1)), livePrice];
-        this.evaluateStrategy(liveWindow, candleTime);
-
+    private onTick(price: number, isClosed: boolean, candleTime: number) {
+        // تقييم الاستراتيجية وتنفيذ الأوامر حصراً عند إغلاق الشمعة (isClosed === true)
         if (isClosed) {
-            this.closePrices = liveWindow;
+            const closedWindow = [...this.closePrices.slice(-(CONFIG.PERIODS - 1)), price];
+            this.closePrices = closedWindow;
+            this.evaluateStrategy(closedWindow, candleTime);
         }
     }
 
     // ==========================================
-    // 5. حساب Z-Score (30-Period SMA - 1m)
+    // 5. حساب Z-Score (180-Period SMA - 3 Hours)
     // ==========================================
     private calculateZScore(prices: number[]): number {
         const windowPrices = prices.slice(-CONFIG.PERIODS);

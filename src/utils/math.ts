@@ -30,31 +30,37 @@ export interface AdvancedFiltersStatus {
 }
 
 /**
- * Calculates 3-minute return:
- * Return_3m = (Close[-1] - Close[-4]) / Close[-4]
+ * Calculates Return over Signal Horizon K (default K = 3 minutes per Document 6):
+ * Return_3m = (Close[-1] - Close[-1 - K]) / Close[-1 - K]
  */
-export function calculateReturn3m(closePrices: number[]): number {
+export function calculateReturn3m(closePrices: number[], horizon = 3): number {
   const n = closePrices.length;
-  if (n < 4) return 0;
+  const h = Math.max(1, horizon);
+  if (n < h + 1) return 0;
   const closeNow = closePrices[n - 1];
-  const close4mAgo = closePrices[n - 4];
-  if (close4mAgo <= 0) return 0;
-  return (closeNow - close4mAgo) / close4mAgo;
+  const closePrev = closePrices[n - 1 - h];
+  if (closePrev <= 0) return 0;
+  return (closeNow - closePrev) / closePrev;
 }
 
 /**
- * Volatility Filter (RV_3m):
- * Realized Volatility over last 3 minutes expressed in basis points (bp)
+ * Volatility Filter (RV_3m over Signal Horizon K):
+ * Realized Volatility over last K minutes (default K = 3) expressed in basis points (bp)
  * 10 bp < RV < 60 bp (1 bp = 0.01% = 0.0001)
  */
-export function calculateRealizedVol3m(closePrices: number[]): number {
+export function calculateRealizedVol3m(closePrices: number[], horizon = 3): number {
   const n = closePrices.length;
-  if (n < 4) return 25; // default neutral 25 bp if not enough candles
-  // 1-minute log returns for last 3 intervals
-  const r1 = Math.log(closePrices[n - 1] / closePrices[n - 2]);
-  const r2 = Math.log(closePrices[n - 2] / closePrices[n - 3]);
-  const r3 = Math.log(closePrices[n - 3] / closePrices[n - 4]);
-  const sumSq = r1 * r1 + r2 * r2 + r3 * r3;
+  const h = Math.max(1, horizon);
+  if (n < h + 1) return 25; // default neutral 25 bp if not enough candles
+  let sumSq = 0;
+  for (let i = 0; i < h; i++) {
+    const p1 = closePrices[n - 1 - i];
+    const p0 = closePrices[n - 2 - i];
+    if (p0 > 0 && p1 > 0) {
+      const r = Math.log(p1 / p0);
+      sumSq += r * r;
+    }
+  }
   const rv = Math.sqrt(sumSq);
   // Convert to basis points (e.g. 0.0025 = 25 bp)
   return rv * 10000;
@@ -125,16 +131,17 @@ export function calculateAdx14(candles: import('../types/bot').CandleData[], per
 
 /**
  * Evaluates the new document filters:
- * 1) Volatility Filter: 10 bp < RV_3m < 60 bp
+ * 1) Volatility Filter: 10 bp < RV_3m < 60 bp (measured across Signal Horizon K)
  * 2) Trend Filter: ADX(14, 1m) < 25
  */
 export function evaluateDocumentFilters(params: {
   closePrices: number[];
   candles?: import('../types/bot').CandleData[];
+  signalHorizonMinutes?: number;
 }): AdvancedFiltersStatus {
-  const { closePrices, candles = [] } = params;
-  const return3m = calculateReturn3m(closePrices);
-  const rvBp = calculateRealizedVol3m(closePrices);
+  const { closePrices, candles = [], signalHorizonMinutes = 3 } = params;
+  const return3m = calculateReturn3m(closePrices, signalHorizonMinutes);
+  const rvBp = calculateRealizedVol3m(closePrices, signalHorizonMinutes);
   const adx = calculateAdx14(candles, 14);
 
   const passedRv = rvBp > 10 && rvBp < 60;

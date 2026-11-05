@@ -501,11 +501,11 @@ export default function App() {
               </h3>
               <p className="leading-relaxed">
                 {isAr
-                  ? 'يعتمد الروبوت على البث الحي المباشر (btcusdt@kline_1m) مع التقييم الفوري عند كل تحديث سعري للشمعة الحية غير المغلقة، وحساب مؤشر Z-Score على متوسط متحرك لـ 180 شمعة (180-period SMA - 3h). يتم الدخول بعتبات غير متماثلة (Long: -2.20σ / Short: +2.40σ) بشرط تحقق فلتر التقلب المحقق (10 bp < RV_3m < 60 bp) وفلتر الاتجاه (ADX(14, 1m) < 25)، مع إرسال أمر FAK فوري بسقف صلب 46¢ ($0.46) وبحجم ربع-كيلي (3-5% كحد أقصى) وقفل دخول واحد لكل عقد 15 دقيقة.'
-                  : 'The bot streams live btcusdt@kline_1m updates and evaluates on every live WebSocket tick across a 180-period SMA (3h). It executes via Asymmetric Z-Thresholds (Long: -2.20σ / Short: +2.40σ) guarded by RV_3m (10-60 bp) and ADX(14) < 25, submitting a FAK order with Hard Cap ≤ 46¢ ($0.46), Quarter-Kelly sizing (3-5% Max), and Single-Entry Lock per 15m Market.'}
+                  ? 'يعتمد الروبوت على حساب الإشارات والتقييم الدقيق فور إغلاق شمعة الدقيقة (1m Candle Close) عبر بث btcusdt@kline_1m، مع بناء مؤشر Z-Score على متوسط متحرك لـ 180 شمعة (180-period SMA - 3h). يتم الدخول بعتبات غير متماثلة (Long: -2.20σ / Short: +2.40σ) بشرط تحقق فلتر التقلب المحقق (10 bp < RV_3m < 60 bp) وفلتر الاتجاه (ADX(14, 1m) < 25)، مع إرسال أمر FAK فوري بسقف صلب 46¢ ($0.46) وبحجم ربع-كيلي (3-5% كحد أقصى) وقفل دخول واحد لكل عقد 15 دقيقة.'
+                  : 'The bot evaluates entry signals strictly upon 1m Candle Close via btcusdt@kline_1m across a 180-period SMA (3h). It executes via Asymmetric Z-Thresholds (Long: -2.20σ / Short: +2.40σ) guarded by RV_3m (10-60 bp) and ADX(14) < 25, submitting a FAK order with Hard Cap ≤ 46¢ ($0.46), Quarter-Kelly sizing (3-5% Max), and Single-Entry Lock per 15m Market.'}
               </p>
               <div className="p-3 bg-slate-950 font-mono text-emerald-400 rounded-lg border border-slate-800">
-                WS: btcusdt@kline_1m (Live Tick) | SMA: 180-Period (3h) | Z: L -2.2σ / S +2.4σ | Filters: RV (10-60bp) + ADX&lt;25 | Order: FAK ≤ 46¢ | Size: 0.25×Kelly (3-5%) | Lock: 15m
+                WS: btcusdt@kline_1m (1m Close) | SMA: 180-Period (3h) | Z: L -2.2σ / S +2.4σ | Filters: RV (10-60bp) + ADX&lt;25 | Order: FAK ≤ 46¢ | Size: 0.25×Kelly (3-5%) | Lock: 15m
               </div>
             </div>
           </div>
