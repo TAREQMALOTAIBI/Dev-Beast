@@ -846,7 +846,7 @@ async function executeLimitlessOrderOnServer(params = {}) {
             success: true,
             mode: 'ALREADY_EXECUTED_BY_SERVER',
             orderId: completedGuard.orderId,
-            orderType: completedGuard.orderType || 'GTC',
+            orderType: completedGuard.orderType || 'FAK',
             marketSlug: completedGuard.marketSlug,
             direction: completedGuard.direction,
             outcome: completedGuard.outcome,
@@ -962,7 +962,7 @@ async function executeLimitlessOrderOnServer(params = {}) {
             success: true,
             mode: 'ALREADY_EXECUTED_BY_SERVER',
             orderId: existingGuard.orderId,
-            orderType: existingGuard.orderType || 'GTC',
+            orderType: existingGuard.orderType || 'FAK',
             marketSlug: existingGuard.marketSlug,
             direction: existingGuard.direction,
             outcome: existingGuard.outcome,
@@ -1130,7 +1130,7 @@ async function executeLimitlessOrderOnServer(params = {}) {
 
     const result = await orderClient.createOrder(orderArgs);
 
-    console.log(`[EIP-712 LIVE ORDER] GTC order submitted successfully! ID: ${result?.id || result?.order?.id || 'OK'}`);
+    console.log(`[EIP-712 LIVE ORDER] ${executedOrderType} order submitted successfully! ID: ${result?.id || result?.order?.id || 'OK'}`);
 
     const orderIdResolved = result?.id || result?.order?.id || `ord_${Date.now()}`;
     const guardRecord = {
@@ -1196,7 +1196,7 @@ app.post('/api/limitless/order', async (req, res) => {
 });
 
 // ============================================================================
-// Autonomous Server-Side Live 1m WebSocket Z-Score Engine (30-Period SMA, Single Confirm ±2.20σ + 3 Filters)
+// Autonomous Server-Side Live 1m WebSocket Z-Score Engine (180-Period SMA, Asymmetric Z: Short +2.4σ / Long -2.2σ, RV & ADX Filters)
 // Evaluates on every live WebSocket update using the current unclosed candle's live price
 // Guarantees trades execute 24/7 on the VM ONLY when serverBotActive === true
 // ============================================================================

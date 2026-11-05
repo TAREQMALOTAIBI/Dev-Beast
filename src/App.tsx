@@ -295,13 +295,14 @@ export default function App() {
             </div>
             <span className="text-slate-700">·</span>
             <div className="text-slate-300">
-              Fixed 4% / 15m: <span className="text-emerald-400 font-bold">{formatUsd(kelly.positionSizeUsd)}</span>
+              {isAr ? 'حجم ربع-كيلي (3-5%):' : '0.25×Kelly (3-5%):'}{' '}
+              <span className="text-emerald-400 font-bold">{formatUsd(kelly.positionSizeUsd)}</span>
             </div>
             <span className="text-slate-700">·</span>
             <div className="flex items-center gap-1">
-              <span className="text-slate-400">{isAr ? 'نوع الأمر:' : 'Order:'}</span>
+              <span className="text-slate-400">{isAr ? 'نوع الأمر والسقف:' : 'Order & Cap:'}</span>
               <span className="text-emerald-300 font-bold bg-emerald-950/70 px-1.5 py-0.5 rounded border border-emerald-600/50">
-                {config.orderType} (≤ 20% / $0.20)
+                {config.orderType} (≤ {(config.maxPriceCents * 100).toFixed(0)}¢ / {formatUsd(config.maxPriceCents)})
               </span>
             </div>
             {hasEnvCredentials && (
@@ -410,7 +411,7 @@ export default function App() {
                 <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/90 text-xs flex flex-col gap-3">
                   <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                     <span className="font-semibold text-slate-200">
-                      {isAr ? 'حجم الصفقة المحسوب (4% ثابت لكل عقد 15 دقيقة)' : 'Calculated Live Allocation (Fixed 4% per 15m)'}
+                      {isAr ? 'حجم الصفقة المحسوب (3-5% ربع-كيلي لكل عقد 15 دقيقة)' : 'Calculated Live Allocation (3-5% Quarter-Kelly per 15m)'}
                     </span>
                     <button
                       onClick={() => setActiveTab('kelly')}
@@ -421,9 +422,9 @@ export default function App() {
                   </div>
                   <div className="space-y-2 font-mono">
                     <div className="flex justify-between text-slate-400">
-                      <span>{isAr ? 'نسبة الدخول الثابتة:' : 'Fixed Bet Size:'}</span>
+                      <span>{isAr ? 'نسبة الدخول المعتمدة:' : 'Applied Bet Size:'}</span>
                       <span className="text-emerald-400 font-bold">
-                        {(Number(kelly.riskToTake || 0.04) * 100).toFixed(2)}% (Fixed 4% / 15m Contract)
+                        {(Number(kelly.riskToTake || 0.04) * 100).toFixed(2)}% ({isAr ? 'ربع-كيلي 3-5%' : '0.25×Kelly 3-5%'})
                       </span>
                     </div>
                     <div className="flex justify-between text-slate-400">
@@ -435,7 +436,7 @@ export default function App() {
                     <div className="flex justify-between text-slate-400">
                       <span>{isAr ? 'نوع الأمر وسقف الدخول:' : 'Order Type & Max Share Price:'}</span>
                       <span className="text-sky-400 font-bold">
-                        {config.orderType} (≤ 20% / $0.20)
+                        {config.orderType} (≤ {(config.maxPriceCents * 100).toFixed(0)}¢ / {formatUsd(config.maxPriceCents)})
                       </span>
                     </div>
                     <div className="flex justify-between text-slate-400">
@@ -495,16 +496,16 @@ export default function App() {
             <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 text-xs text-slate-300 space-y-3">
               <h3 className="font-bold text-slate-100 text-sm">
                 {isAr
-                  ? 'منهجية إدارة رأس المال وتنفيذ الأوامر (4% كحد أقصى · GTC ≤ 20% أو $0.20 · قفل دخول واحد لكل عقد 15m)'
-                  : 'Bankroll & Order Execution Methodology (Max 4% Capital Ratio · GTC ≤ 20% or $0.20 · Single-Entry Lock per 15m)'}
+                  ? 'منهجية إدارة رأس المال وتنفيذ الأوامر (ربع-كيلي 3-5% · أمر FAK بسقف صلب ≤ 46¢ · قفل دخول واحد لكل عقد 15m)'
+                  : 'Bankroll & Order Execution Methodology (Quarter-Kelly 3-5% · FAK ≤ 46¢ · Single-Entry Lock per 15m)'}
               </h3>
               <p className="leading-relaxed">
                 {isAr
-                  ? 'يعتمد الروبوت على البث الحي المباشر (btcusdt@kline_1m) مع التقييم الفوري عند كل تحديث سعري للشمعة الحية غير المغلقة، وحساب مؤشر Z-Score على متوسط متحرك لـ 30 شمعة (30-period SMA - 1m). يتم الدخول المباشر بتأكيد واحد عند وصول السعر إلى عتبة التطرف (±2.20σ) بشرط تحقق الفلاتر الثلاثة معاً (فلتر سعر الافتتاح Open Price، فلتر اتجاه EMA-60، وفلتر الوقت المتبقي ≥ 6 دقائق)، مع إرسال أمر GTC بسقف دخول 20% وتحت ($0.20 / 20¢) وبنسبة رأس مال قصوى 4% وقفل دخول واحد لكل عقد 15 دقيقة.'
-                  : 'The bot streams live btcusdt@kline_1m updates and evaluates on every live WebSocket tick across a 30-period SMA (1m). It executes via Single Direct Confirmation at ±2.20σ when all 3 Smart Filters pass (Open Price alignment, EMA-60 Trend Slope, and ≥ 6m Time Remaining), submitting a GTC order with Max_Share_Price ≤ 20% ($0.20), Maximum Capital Ratio 4%, and Single-Entry Lock per 15m Market.'}
+                  ? 'يعتمد الروبوت على البث الحي المباشر (btcusdt@kline_1m) مع التقييم الفوري عند كل تحديث سعري للشمعة الحية غير المغلقة، وحساب مؤشر Z-Score على متوسط متحرك لـ 180 شمعة (180-period SMA - 3h). يتم الدخول بعتبات غير متماثلة (Long: -2.20σ / Short: +2.40σ) بشرط تحقق فلتر التقلب المحقق (10 bp < RV_3m < 60 bp) وفلتر الاتجاه (ADX(14, 1m) < 25)، مع إرسال أمر FAK فوري بسقف صلب 46¢ ($0.46) وبحجم ربع-كيلي (3-5% كحد أقصى) وقفل دخول واحد لكل عقد 15 دقيقة.'
+                  : 'The bot streams live btcusdt@kline_1m updates and evaluates on every live WebSocket tick across a 180-period SMA (3h). It executes via Asymmetric Z-Thresholds (Long: -2.20σ / Short: +2.40σ) guarded by RV_3m (10-60 bp) and ADX(14) < 25, submitting a FAK order with Hard Cap ≤ 46¢ ($0.46), Quarter-Kelly sizing (3-5% Max), and Single-Entry Lock per 15m Market.'}
               </p>
               <div className="p-3 bg-slate-950 font-mono text-emerald-400 rounded-lg border border-slate-800">
-                WS: btcusdt@kline_1m (Live Tick Eval) | SMA: 30-Period (1m) | Z-Threshold: ±2.20σ Direct + 3 Filters | Order: GTC ≤ 20% ($0.20) | Max Capital: 4% | Single-Entry Lock / 15m
+                WS: btcusdt@kline_1m (Live Tick) | SMA: 180-Period (3h) | Z: L -2.2σ / S +2.4σ | Filters: RV (10-60bp) + ADX&lt;25 | Order: FAK ≤ 46¢ | Size: 0.25×Kelly (3-5%) | Lock: 15m
               </div>
             </div>
           </div>
@@ -520,11 +521,11 @@ export default function App() {
       <footer className="border-t border-slate-800/80 bg-slate-950/80 py-4 px-4 md:px-8 mt-auto text-xs text-slate-500">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-2">
-            <span>{isAr ? 'نظام التداول الحي المباشر' : 'Live Trading System'}</span>
+            <span>{isAr ? 'نظام التداول الكمي المباشر' : 'Live Quant Trading System'}</span>
             <span>·</span>
-            <span>Binance 1m Live WS (30-SMA) · Z-Score (±2.20σ Direct + 3 Filters)</span>
+            <span>Binance 1m Live WS (180-SMA) · Z-Score (Long -2.2σ / Short +2.4σ)</span>
             <span>·</span>
-            <span>Limitless 15m Contract (Max 4% · GTC ≤ 20% / $0.20 · Single-Entry Lock)</span>
+            <span>Limitless 15m Contract (Quarter-Kelly 3-5% · FAK ≤ 46¢ · Single-Entry Lock)</span>
           </div>
           <div className="font-mono text-[11px] text-slate-500">
             Node.js / TypeScript WebSocket Architecture

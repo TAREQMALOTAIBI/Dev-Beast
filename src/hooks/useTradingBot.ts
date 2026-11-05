@@ -166,7 +166,7 @@ export function useTradingBot() {
             direction: item?.direction === 'LONG' ? 'LONG' : 'SHORT',
             triggerZScore: Number.isFinite(Number(item?.triggerZScore)) ? Number(item.triggerZScore) : 0,
             totalContracts: Number.isFinite(Number(item?.totalContracts)) ? Number(item.totalContracts) : 0,
-            contractPrice: Number.isFinite(Number(item?.contractPrice)) ? Number(item.contractPrice) : 0.2,
+            contractPrice: Number.isFinite(Number(item?.contractPrice)) ? Number(item.contractPrice) : 0.46,
             totalInvestmentUsd: Number.isFinite(Number(item?.totalInvestmentUsd)) ? Number(item.totalInvestmentUsd) : 0,
             chunks: Array.isArray(item?.chunks) ? item.chunks : [],
             status: item?.status || 'COMPLETED',
@@ -516,7 +516,7 @@ export function useTradingBot() {
     return { locked: false };
   }, []);
 
-  // Execute LIVE Trade strictly across Limitless (15m Contract, Fixed 4% Bankroll, GTC at 20¢ limit)
+  // Execute LIVE Trade strictly across Limitless (15m Contract, Quarter-Kelly 3-5% Bankroll, FAK at 46¢ limit)
   const executeLiveTrade = useCallback(async (
     triggerZ: number,
     direction: 'SHORT' | 'LONG' = 'SHORT',

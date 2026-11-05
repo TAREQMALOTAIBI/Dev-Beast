@@ -8,142 +8,7 @@ import { BotConfig, KellyMath, ZScoreMetric } from '../types/bot';
  * stdDev = sqrt(variance)
  * zScore = (currentPrice - mean) / stdDev
  */
-export interface ThreeFiltersStatus {
-  openPriceFilter: {
-    passedShort: boolean;
-    passedLong: boolean;
-    openPrice: number | null;
-    sma30: number;
-    diffFromOpen: number | null;
-  };
-  ema60Filter: {
-    passedShort: boolean;
-    passedLong: boolean;
-    ema60: number;
-    ema60SlopeSigma: number;
-    trendState: 'NEUTRAL' | 'STRONG_UP' | 'STRONG_DOWN';
-  };
-  timeFilter: {
-    passed: boolean;
-    remainingMinutes: number | null;
-    minRequiredMinutes: number;
-  };
-  canEnterShort: boolean;
-  canEnterLong: boolean;
-  blockReasonShort: string | null;
-  blockReasonLong: string | null;
-}
 
-export function computeEmaSeries(prices: number[], period = 60): number[] {
-  if (!prices.length) return [];
-  const k = 2 / (period + 1);
-  if (prices.length < period) {
-    const ema: number[] = [prices[0]];
-    for (let i = 1; i < prices.length; i++) {
-      ema.push(prices[i] * k + ema[i - 1] * (1 - k));
-    }
-    return ema;
-  }
-  // Standard TradingView / Binance EMA: seed with Simple Moving Average (SMA) of first `period` candles
-  const ema: number[] = new Array(prices.length);
-  let sum = 0;
-  for (let i = 0; i < period; i++) {
-    sum += prices[i];
-    ema[i] = sum / (i + 1);
-  }
-  let prevEma = sum / period;
-  ema[period - 1] = prevEma;
-  for (let i = period; i < prices.length; i++) {
-    prevEma = prices[i] * k + prevEma * (1 - k);
-    ema[i] = prevEma;
-  }
-  return ema;
-}
-
-export function evaluateThreeFilters(params: {
-  closes: number[];
-  mean: number;
-  stdDev: number;
-  openPriceRaw?: string | number | null;
-  expirationTimestamp?: number | null;
-  minRemainingMinutes?: number;
-}): ThreeFiltersStatus {
-  const {
-    closes,
-    mean,
-    stdDev,
-    openPriceRaw,
-    expirationTimestamp,
-    minRemainingMinutes = 6,
-  } = params;
-
-  // 1) Filter 1: SMA-30 vs Contract Open Price ("Price to Beat")
-  const parsedOpen = openPriceRaw !== undefined && openPriceRaw !== null
-    ? Number(String(openPriceRaw).replace(/[^0-9.-]/g, ''))
-    : NaN;
-  const validOpenPrice = !isNaN(parsedOpen) && parsedOpen > 0 ? parsedOpen : null;
-  const openPriceTolerance = 15; // $15 tolerance buffer
-  const passedOpenShort = validOpenPrice === null ? true : mean <= validOpenPrice + openPriceTolerance;
-  const passedOpenLong = validOpenPrice === null ? true : mean >= validOpenPrice - openPriceTolerance;
-  const diffFromOpen = validOpenPrice !== null ? mean - validOpenPrice : null;
-
-  // 2) Filter 2: Higher Timeframe EMA-60 Trend Slope Filter
-  const emaSeries = computeEmaSeries(closes, 60);
-  const emaNow = emaSeries.length > 0 ? emaSeries[emaSeries.length - 1] : mean;
-  const lookbackIdx = Math.max(0, emaSeries.length - 6); // 5 minutes ago
-  const ema5mAgo = emaSeries.length > 0 ? emaSeries[lookbackIdx] : emaNow;
-  const ema60SlopeSigma = stdDev > 0 ? (emaNow - ema5mAgo) / stdDev : 0;
-
-  const isStrongUpBreakout = ema60SlopeSigma > 0.35 && mean > emaNow;
-  const isStrongDownBreakout = ema60SlopeSigma < -0.35 && mean < emaNow;
-  const trendState: 'NEUTRAL' | 'STRONG_UP' | 'STRONG_DOWN' = isStrongUpBreakout
-    ? 'STRONG_UP'
-    : isStrongDownBreakout
-    ? 'STRONG_DOWN'
-    : 'NEUTRAL';
-
-  const passedEmaShort = !isStrongUpBreakout;
-  const passedEmaLong = !isStrongDownBreakout;
-
-  // 3) Filter 3: Minimum Time Remaining in 15m Contract (>= 6 minutes)
-  const now = Date.now();
-  const expMs = Number(expirationTimestamp) || 0;
-  const remainingMinutes = expMs > now ? (expMs - now) / 60000 : expMs > 0 ? 0 : null;
-  const passedTime = remainingMinutes === null ? true : remainingMinutes >= minRemainingMinutes;
-
-  // Filters are disabled as requested: direct pure Z-Score execution
-  const canEnterShort = true;
-  const canEnterLong = true;
-
-  const blockReasonShort: string | null = null;
-  const blockReasonLong: string | null = null;
-
-  return {
-    openPriceFilter: {
-      passedShort: true,
-      passedLong: true,
-      openPrice: validOpenPrice,
-      sma30: mean,
-      diffFromOpen,
-    },
-    ema60Filter: {
-      passedShort: true,
-      passedLong: true,
-      ema60: emaNow,
-      ema60SlopeSigma,
-      trendState,
-    },
-    timeFilter: {
-      passed: true,
-      remainingMinutes,
-      minRequiredMinutes: 0,
-    },
-    canEnterShort,
-    canEnterLong,
-    blockReasonShort,
-    blockReasonLong,
-  };
-}
 
 export interface AdvancedFiltersStatus {
   rv3m: {
@@ -359,8 +224,9 @@ export function calculateZScore(
 }
 
 /**
- * Calculates position sizing with Fixed 4% of bankroll per 15m contract
- * and FAK order without max Entry price.
+ * Calculates position sizing per Document 6:
+ * Quarter-Kelly (0.25 * Kelly(Edge)) capped at 3-5% of bankroll per 15m contract,
+ * with Hard Cap Max Entry Price 46¢ ($0.46) and FAK order execution.
  */
 export function calculateKellySizing(
   balance: number,

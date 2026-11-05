@@ -20,10 +20,10 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
   symbol,
   timeframe,
   periods,
-  upperThreshold,
-  entryThreshold,
-  lowerThreshold = -2.0,
-  lowerEntryThreshold = -1.9,
+  upperThreshold = 2.4,
+  entryThreshold = 2.4,
+  lowerThreshold = -2.2,
+  lowerEntryThreshold = -2.2,
 }) => {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
@@ -58,8 +58,8 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
     return { minPrice: min - buffer, maxPrice: max + buffer };
   }, [visibleCandles, visibleMetrics]);
 
-  const safeUpper = Number.isFinite(Number(upperThreshold)) ? Number(upperThreshold) : 2.2;
-  const safeEntry = Number.isFinite(Number(entryThreshold)) ? Number(entryThreshold) : 2.2;
+  const safeUpper = Number.isFinite(Number(upperThreshold)) ? Number(upperThreshold) : 2.4;
+  const safeEntry = Number.isFinite(Number(entryThreshold)) ? Number(entryThreshold) : 2.4;
   const safeLower = Number.isFinite(Number(lowerThreshold)) ? Number(lowerThreshold) : -2.2;
   const safeLowerEntry = Number.isFinite(Number(lowerEntryThreshold)) ? Number(lowerEntryThreshold) : -2.2;
 
@@ -334,7 +334,7 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
               {periods}-PERIOD BIDIRECTIONAL Z-SCORE OSCILLATOR (σ)
             </text>
 
-            {/* Upper Entry Threshold Line (+2.20σ) */}
+            {/* Upper Entry Threshold Line (+2.40σ) */}
             <line
               x1={padding.left}
               y1={zY(safeUpper)}
@@ -441,7 +441,7 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
           </div>
         </div>
         <div className="text-emerald-400 font-mono font-semibold">
-          ⚡ Z-Score Single Direct Confirmation (±{safeUpper.toFixed(2)}σ)
+          ⚡ Asymmetric Z-Score: Short +{safeUpper.toFixed(2)}σ / Long {safeLower.toFixed(2)}σ
         </div>
       </div>
     </div>

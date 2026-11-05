@@ -27,20 +27,20 @@ import {
 } from '@limitless-exchange/sdk';
 
 // ==========================================
-// 1. إعدادات المتغيرات والاستراتيجية (Config)
+// 1. إعدادات المتغيرات والاستراتيجية (Document 6 Quant Config)
 // ==========================================
 const CONFIG = {
     SYMBOL: '${config.symbol}',
-    TIMEFRAME: '1m', // btcusdt@kline_1m — evaluate on every live WS update using unclosed candle live price
-    PERIODS: 30, // 30-period SMA (1m historical candles)
+    TIMEFRAME: '1m', // btcusdt@kline_1m — دقيقة واحدة فقط
+    PERIODS: ${config.periods || 180}, // 180-period SMA (3 hours lookback)
     STRATEGY_DIRECTION: '${config.strategyDirection || 'BOTH'}', // 'BOTH' | 'LONG_ONLY' | 'SHORT_ONLY'
-    Z_SCORE_UPPER: 2.0, // First confirmation (+2.0)
-    Z_SCORE_ENTRY: 1.0, // Second confirmation (+1.0)
-    Z_SCORE_LOWER: -2.0, // First confirmation (-2.0)
-    Z_SCORE_LOWER_ENTRY: -1.0, // Second confirmation (-1.0)
-    MAX_SHARE_PRICE: 0.20, // Maximum: $0.20 or 20% (20¢)
-    MAX_RISK_PERCENT: 0.04, // Maximum capital ratio: 4%
-    ORDER_TYPE: 'GTC', // GTC Limit Order at <= $0.20 (20%)
+    Z_SCORE_UPPER: ${config.zScoreUpper || 2.4}, // Asymmetric Short Entry (+2.4σ)
+    Z_SCORE_LOWER: ${config.zScoreLower || -2.2}, // Asymmetric Long Entry (-2.2σ)
+    VOLATILITY_FILTER: '10 bp < RV_3m < 60 bp', // فلتر التقلب المحقق
+    TREND_FILTER: 'ADX(14, 1m) < 25', // فلتر الاتجاه
+    MAX_SHARE_PRICE: ${config.maxPriceCents || 0.46}, // Hard Cap: $0.46 (46¢)
+    MAX_RISK_PERCENT: ${config.maxRiskPercent || 0.04}, // Quarter-Kelly Sizing: 3-5% Max
+    ORDER_TYPE: '${config.orderType || 'FAK'}', // Order Type: FAK (Fill-And-Kill / IOC)
     SINGLE_ENTRY_PER_15M_MARKET: true, // Single-Entry Lock per 15m Market
     EXECUTION_MODE: 'DIRECT_UNIFIED',
     
@@ -248,7 +248,7 @@ class LimitlessTradingBot {
     }
 
     private onTick(livePrice: number, isClosed: boolean, candleTime: number) {
-        // بناء نافذة 30 شمعة تشمل الشمعة الحية غير المغلقة وتقييمها فوراً عند كل تحديث WebSocket
+        // بناء نافذة 180 شمعة (3 ساعات) تشمل الشمعة الحية غير المغلقة وتقييمها فوراً عند كل تحديث WebSocket
         const liveWindow = [...this.closePrices.slice(-(CONFIG.PERIODS - 1)), livePrice];
         this.evaluateStrategy(liveWindow, candleTime);
 
@@ -279,48 +279,40 @@ class LimitlessTradingBot {
 
         const currentZScore = this.calculateZScore(prices);
 
-        // 1. Short (DOWN): First confirmation >= +2.0, Second confirmation <= +1.0
+        const currentZScore = this.calculateZScore(prices);
+
+        // 1. Short (DOWN): Asymmetric Entry >= +2.40σ + Filters (RV & ADX)
         if (CONFIG.STRATEGY_DIRECTION === 'BOTH' || CONFIG.STRATEGY_DIRECTION === 'SHORT_ONLY') {
             if (currentZScore >= CONFIG.Z_SCORE_UPPER) {
-                this.crossedUpperThreshold = true;
-            } else if (this.crossedUpperThreshold && currentZScore <= CONFIG.Z_SCORE_ENTRY && currentZScore > 0) {
-                this.crossedUpperThreshold = false;
                 if (!this.isExecutingTrade) {
-                    console.log(\`🎯 Short Second Confirmation! z=\${currentZScore.toFixed(2)}σ (<= +\${CONFIG.Z_SCORE_ENTRY}). Executing GTC DOWN order @ <= $0.20 (20%)!\`);
+                    console.log(\`🎯 Short Signal! z=\${currentZScore.toFixed(2)}σ (>= +\${CONFIG.Z_SCORE_UPPER}). Executing FAK DOWN order @ <= $0.46 (46¢)!\`);
                     this.executeTrade('SHORT');
                 }
-            } else if (currentZScore <= 0) {
-                this.crossedUpperThreshold = false;
             }
         }
 
-        // 2. Long (UP): First confirmation <= -2.0, Second confirmation >= -1.0
+        // 2. Long (UP): Asymmetric Entry <= -2.20σ + Filters (RV & ADX)
         if (CONFIG.STRATEGY_DIRECTION === 'BOTH' || CONFIG.STRATEGY_DIRECTION === 'LONG_ONLY') {
             if (currentZScore <= CONFIG.Z_SCORE_LOWER) {
-                this.crossedLowerThreshold = true;
-            } else if (this.crossedLowerThreshold && currentZScore >= CONFIG.Z_SCORE_LOWER_ENTRY && currentZScore < 0) {
-                this.crossedLowerThreshold = false;
                 if (!this.isExecutingTrade) {
-                    console.log(\`🎯 Long Second Confirmation! z=\${currentZScore.toFixed(2)}σ (>= \${CONFIG.Z_SCORE_LOWER_ENTRY}). Executing GTC UP order @ <= $0.20 (20%)!\`);
+                    console.log(\`🎯 Long Signal! z=\${currentZScore.toFixed(2)}σ (<= \${CONFIG.Z_SCORE_LOWER}). Executing FAK UP order @ <= $0.46 (46¢)!\`);
                     this.executeTrade('LONG');
                 }
-            } else if (currentZScore >= 0) {
-                this.crossedLowerThreshold = false;
             }
         }
     }
 
     // ==========================================
-    // 7. حجم الصفقة: Maximum Capital Ratio 4%
+    // 7. حجم الصفقة: Quarter-Kelly Sizing (3-5% Max)
     // ==========================================
     private calculatePositionSize(): number {
         const positionSizeUsd = this.currentBalance * CONFIG.MAX_RISK_PERCENT;
-        console.log(\`🛡️ Max Capital Ratio 4%: $\${positionSizeUsd.toFixed(2)} per 15m contract\`);
+        console.log(\`🛡️ Quarter-Kelly 3-5%: $\${positionSizeUsd.toFixed(2)} per 15m contract\`);
         return positionSizeUsd;
     }
 
     // ==========================================
-    // 8. تنفيذ أمر GTC بسقف دخول $0.20 (20%) مع قفل دخول واحد لكل عقد 15 دقيقة
+    // 8. تنفيذ أمر FAK بسقف صلب $0.46 (46¢) مع قفل دخول واحد لكل عقد 15 دقيقة
     // ==========================================
     private async executeTrade(direction: 'SHORT' | 'LONG' = 'SHORT') {
         const currentSlotSec = Math.floor(Date.now() / 900000) * 900;
@@ -343,8 +335,8 @@ class LimitlessTradingBot {
                 const market: any = await marketFetcher.getMarket(resolvedSlug);
                 const tokenId = direction === 'LONG' ? market.tokens?.yes : market.tokens?.no;
                 const livePrice = direction === 'LONG'
-                    ? (market.tradePrices?.buy?.market?.[0] ?? market.prices?.[0] ?? 0.20)
-                    : (market.tradePrices?.buy?.market?.[1] ?? market.prices?.[1] ?? 0.20);
+                    ? (market.tradePrices?.buy?.market?.[0] ?? market.prices?.[0] ?? 0.46)
+                    : (market.tradePrices?.buy?.market?.[1] ?? market.prices?.[1] ?? 0.46);
                 const executionPrice = Math.min(CONFIG.MAX_SHARE_PRICE, Math.max(0.001, Number(livePrice.toFixed(3))));
                 const numberOfContracts = Math.max(0.001, Math.floor((totalInvestment / executionPrice) * 1000) / 1000);
 
@@ -353,12 +345,12 @@ class LimitlessTradingBot {
                         marketSlug: market.slug || resolvedSlug,
                         tokenId: String(tokenId),
                         side: Side.BUY,
-                        orderType: OrderType.GTC,
-                        price: executionPrice, // Max_Share_Price <= $0.20 (20%)
+                        orderType: OrderType.FAK,
+                        price: executionPrice, // Hard Cap <= $0.46 (46¢)
                         size: numberOfContracts
                     });
                     this.lastExecutedMarketSlug = market.slug || resolvedSlug;
-                    console.log(\`✅ GTC Order Placed (\${outcome})! ID: \${signedOrder.id} | \${numberOfContracts} contracts @ $\${executionPrice} (<= $0.20 / 20%)\`);
+                    console.log(\`✅ FAK Order Placed (\${outcome})! ID: \${signedOrder.id} | \${numberOfContracts} contracts @ $\${executionPrice} (<= $0.46 / 46¢)\`);
                     return;
                 }
             }

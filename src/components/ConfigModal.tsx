@@ -31,15 +31,15 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
     setDraft({
       symbol: 'BTCUSDT',
       timeframe: '1m',
-      periods: 30,
+      periods: 180,
       strategyDirection: 'BOTH',
-      zScoreUpper: 2.2,
-      zScoreEntry: 2.2,
+      zScoreUpper: 2.4,
+      zScoreEntry: 2.4,
       zScoreLower: -2.2,
       zScoreLowerEntry: -2.2,
-      maxPriceCents: 0.20,
+      maxPriceCents: 0.46,
       maxRiskPercent: 0.04,
-      orderType: 'GTC',
+      orderType: 'FAK',
       fractionChunks: 1,
       chunkDelayMs: 0,
       winProbability: 0.55,
@@ -284,10 +284,10 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
           <div className="border-t border-slate-800 pt-4 space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold text-slate-100 uppercase tracking-wider text-[11px] text-sky-400">
-                {isAr ? 'عتبة Z-Score: تأكيد واحد مباشر (±2.20σ) + الفلاتر الثلاثة' : 'Z-Score Threshold: Single Direct Confirmation (±2.20σ) + 3 Filters'}
+                {isAr ? 'عتبات Z-Score غير المتماثلة (Short: +2.40σ / Long: -2.20σ) وفلاتر Document 6' : 'Asymmetric Z-Score (Short: +2.40σ / Long: -2.20σ) & Document 6 Filters'}
               </h3>
               <span className="text-[10px] text-emerald-400 font-bold bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/40">
-                {isAr ? '⚡ تأكيد واحد ±2.20σ + 3 فلاتر' : '⚡ Single ±2.20σ + 3 Filters'}
+                {isAr ? '⚡ L: -2.2σ / S: +2.4σ' : '⚡ L: -2.2σ / S: +2.4σ'}
               </span>
             </div>
 
@@ -448,13 +448,13 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
             <div className="mt-2.5 p-2.5 rounded-lg bg-emerald-950/40 border border-emerald-700/50 text-[11px] text-emerald-300 space-y-1.5">
               <div className="font-semibold text-emerald-200">
                 {isAr
-                  ? '✓ أمر GTC بسقف دخول 20% وتحت ($0.20 / 20 سنت): يتم إرسال الأمر فوراً لحظة لمس ±2.20σ وتطابق الفلاتر الثلاثة (Open Price + EMA 60 + الوقت المتبقي ≥ 6 دقائق).'
-                  : '✓ GTC Order with ≤ 20% ($0.20 / 20¢) Max Share Price: Places GTC limit order immediately upon ±2.20σ + 3 Filters (Open Price + EMA 60 + Time >= 6m).'}
+                  ? '✓ أمر FAK بسقف دخول صلب 46¢ ($0.46): لا تدفع أكثر من 50¢ أبداً، والهدف الفعلي 46¢، مع تنفيذ Fill-And-Kill فوري.'
+                  : '✓ FAK Order with ≤ 46¢ ($0.46) Hard Cap: Never pay > 50¢, actual target 46¢ with instant Fill-And-Kill execution.'}
               </div>
               <div className="text-sky-300">
                 {isAr
-                  ? '🛡️ نسبة رأس المال القصوى 4% لكل عقد 15 دقيقة مع قفل الدخول لصفقة واحدة فقط لكل سوق 15 دقيقة (Single-Entry Lock).'
-                  : '🛡️ Maximum capital ratio is 4% per 15-minute market with Single-Entry Lock per 15m Market.'}
+                  ? '🛡️ حجم الصفقة ربع-كيلي (0.25 × Kelly) بحد أقصى 3-5% من رصيد المحفظة مع قفل دخول لصفقة واحدة لكل عقد 15 دقيقة.'
+                  : '🛡️ Sizing: 0.25 × Kelly, max 3-5% of bankroll with Single-Entry Lock per 15m Market.'}
               </div>
             </div>
           </div>

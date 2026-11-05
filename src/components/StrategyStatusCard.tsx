@@ -284,8 +284,8 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
                 </div>
                 <div className="text-[10px] text-slate-300 mt-0.5 truncate">
                   {isAr
-                    ? 'يفتح الروبوت صفقة واحدة بحجم ثابت 4% لكل عقد 15 دقيقة، وينتقل تلقائياً للعقد القادم.'
-                    : 'Bot opens 1 trade max (Fixed 4% bankroll) per 15m contract, then auto-transitions to next contract.'}
+                    ? 'يفتح الروبوت صفقة واحدة بحجم ربع-كيلي (3-5%) لكل عقد 15 دقيقة، وينتقل تلقائياً للعقد القادم.'
+                    : 'Bot opens 1 trade max (Quarter-Kelly 3-5% bankroll) per 15m contract, then auto-transitions to next contract.'}
                 </div>
               </div>
             </div>
@@ -305,10 +305,10 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             <span>
               {isAr
                 ? (botActive
-                    ? `⚡ محرك البث الحي نشط (4% ثابت · قفل 15m): ينفذ فوراً عند التأكيد المباشر (±${safeUpperThresh.toFixed(2)}σ)`
+                    ? `⚡ محرك البث الحي نشط (ربع-كيلي 3-5% · قفل 15m): عتبات غير متماثلة (Short: +2.40σ / Long: -2.20σ) وفلاتر RV و ADX`
                     : 'التنفيذ التلقائي متوقف حالياً. اضغط الزر أعلاه لتشغيل الروبوت.')
                 : (botActive
-                    ? `⚡ Live WS engine active (Fixed 4% · 15m Lock): Executes immediately on Single Confirm (±${safeUpperThresh.toFixed(2)}σ).`
+                    ? `⚡ Live WS engine active (Quarter-Kelly 3-5% · 15m Lock): Asymmetric (Short: +2.40σ / Long: -2.20σ) + RV & ADX filters.`
                     : 'Automated execution is paused. Click above to start.')}
             </span>
           </div>
