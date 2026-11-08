@@ -45,7 +45,6 @@ const DEFAULT_CONFIG: BotConfig = {
   singleTradePerContract: true, // Single-Entry Lock per 15m Market
   cooldownMinutes: 15, // 15-minute contract cycle guard
   calculateOnCandleClose: true, // Calculate & execute strictly upon 1m candle close
-  signalHorizonMinutes: 3, // Signal Horizon (K): Lookback window in minutes (3m)
 };
 
 export function useTradingBot() {
@@ -57,7 +56,6 @@ export function useTradingBot() {
         const parsed = JSON.parse(saved);
         parsed.timeframe = '1m';
         parsed.periods = 180;
-        parsed.signalHorizonMinutes = Number(parsed.signalHorizonMinutes) || 3;
         parsed.calculateOnCandleClose = parsed.calculateOnCandleClose !== undefined ? parsed.calculateOnCandleClose : true;
         parsed.binanceWsUrl = 'wss://stream.binance.com/ws/btcusdt@kline_1m';
         if (parsed.binanceRestUrl && parsed.binanceRestUrl.includes('binance.vision')) {
@@ -313,6 +311,15 @@ export function useTradingBot() {
     const lowerThresh = cfg.zScoreLower !== undefined ? cfg.zScoreLower : -cfg.zScoreUpper;
     const lowerEntryThresh = cfg.zScoreLowerEntry !== undefined ? cfg.zScoreLowerEntry : -cfg.zScoreEntry;
 
+    // Parse active 15-minute round's Open Price ("Price to Beat") as the baseline reference for Z-Score
+    const rawOpenPrice = activeLimitlessMarketRef.current?.openPrice;
+    const parsedOpenPrice =
+      rawOpenPrice !== undefined && rawOpenPrice !== null
+        ? Number(String(rawOpenPrice).replace(/[^0-9.-]/g, ''))
+        : NaN;
+    const validContractOpenPrice =
+      Number.isFinite(parsedOpenPrice) && parsedOpenPrice > 0 ? parsedOpenPrice : null;
+
     for (let i = 0; i < candleList.length; i++) {
       const hasFullWindow = i >= cfg.periods - 1;
       const isLatestLiveCandle = i === candleList.length - 1;
@@ -321,7 +328,7 @@ export function useTradingBot() {
         const emptyMetric: ZScoreMetric = {
           time: candleList[i].time,
           price: candleList[i].close,
-          mean: candleList[i].close,
+          mean: validContractOpenPrice || candleList[i].close,
           stdDev: 0,
           variance: 0,
           zScore: 0,
@@ -342,7 +349,14 @@ export function useTradingBot() {
 
       const windowStart = Math.max(0, i - cfg.periods + 1);
       const windowSlice = closes.slice(windowStart, i + 1);
-      const stats = calculateZScore(windowSlice, cfg.zScoreUpper, cfg.zScoreEntry, lowerThresh, lowerEntryThresh);
+      const stats = calculateZScore(
+        windowSlice,
+        cfg.zScoreUpper,
+        cfg.zScoreEntry,
+        lowerThresh,
+        lowerEntryThresh,
+        validContractOpenPrice
+      );
 
       let signal: 'ARMED_UPPER' | 'ARMED_LOWER' | 'ENTRY_SHORT' | 'ENTRY_LONG' | 'ARMED' | 'ENTRY' | null = null;
       let dir: 'SHORT' | 'LONG' | null = null;
@@ -443,7 +457,6 @@ export function useTradingBot() {
       const docFilters = evaluateDocumentFilters({
         closePrices: evalCloses,
         candles: evalCandles,
-        signalHorizonMinutes: cfg.signalHorizonMinutes || 3,
       });
       setAdvancedFiltersStatus(docFilters);
 
@@ -919,6 +932,9 @@ export function useTradingBot() {
       ) {
         setActiveLimitlessMarket(newMarket);
         activeLimitlessMarketRef.current = newMarket;
+        if (candlesRef.current.length >= configRef.current.periods) {
+          rebuildMetricsRef.current(candlesRef.current, configRef.current, true);
+        }
         if (lastExecutedMarketSlugRef.current && lastExecutedMarketSlugRef.current !== newMarket.slug) {
           lastExecutedMarketSlugRef.current = '';
           lastExecutedTimestampRef.current = 0;
@@ -1132,6 +1148,9 @@ export function useTradingBot() {
         ) {
           setActiveLimitlessMarket(data);
           activeLimitlessMarketRef.current = data;
+          if (candlesRef.current.length >= configRef.current.periods) {
+            rebuildMetricsRef.current(candlesRef.current, configRef.current, true);
+          }
           if (lastExecutedMarketSlugRef.current && lastExecutedMarketSlugRef.current !== data.slug) {
             lastExecutedMarketSlugRef.current = '';
             lastExecutedTimestampRef.current = 0;

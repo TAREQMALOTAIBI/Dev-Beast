@@ -22,7 +22,6 @@ export interface AdvancedFiltersStatus {
     passed: boolean;
     threshold: number;
   };
-  return3m: number;
   canEnterShort: boolean;
   canEnterLong: boolean;
   blockReasonShort: string | null;
@@ -30,30 +29,15 @@ export interface AdvancedFiltersStatus {
 }
 
 /**
- * Calculates Return over Signal Horizon K (default K = 3 minutes per Document 6):
- * Return_3m = (Close[-1] - Close[-1 - K]) / Close[-1 - K]
- */
-export function calculateReturn3m(closePrices: number[], horizon = 3): number {
-  const n = closePrices.length;
-  const h = Math.max(1, horizon);
-  if (n < h + 1) return 0;
-  const closeNow = closePrices[n - 1];
-  const closePrev = closePrices[n - 1 - h];
-  if (closePrev <= 0) return 0;
-  return (closeNow - closePrev) / closePrev;
-}
-
-/**
- * Volatility Filter (RV_3m over Signal Horizon K):
- * Realized Volatility over last K minutes (default K = 3) expressed in basis points (bp)
+ * Volatility Filter (RV_3m):
+ * Realized Volatility over last 3 minutes expressed in basis points (bp)
  * 10 bp < RV < 60 bp (1 bp = 0.01% = 0.0001)
  */
-export function calculateRealizedVol3m(closePrices: number[], horizon = 3): number {
+export function calculateRealizedVol3m(closePrices: number[]): number {
   const n = closePrices.length;
-  const h = Math.max(1, horizon);
-  if (n < h + 1) return 25; // default neutral 25 bp if not enough candles
+  if (n < 4) return 25; // default neutral 25 bp if not enough candles
   let sumSq = 0;
-  for (let i = 0; i < h; i++) {
+  for (let i = 0; i < 3; i++) {
     const p1 = closePrices[n - 1 - i];
     const p0 = closePrices[n - 2 - i];
     if (p0 > 0 && p1 > 0) {
@@ -130,18 +114,16 @@ export function calculateAdx14(candles: import('../types/bot').CandleData[], per
 }
 
 /**
- * Evaluates the new document filters:
- * 1) Volatility Filter: 10 bp < RV_3m < 60 bp (measured across Signal Horizon K)
+ * Evaluates the Document 6 filters:
+ * 1) Volatility Filter: 10 bp < RV_3m < 60 bp
  * 2) Trend Filter: ADX(14, 1m) < 25
  */
 export function evaluateDocumentFilters(params: {
   closePrices: number[];
   candles?: import('../types/bot').CandleData[];
-  signalHorizonMinutes?: number;
 }): AdvancedFiltersStatus {
-  const { closePrices, candles = [], signalHorizonMinutes = 3 } = params;
-  const return3m = calculateReturn3m(closePrices, signalHorizonMinutes);
-  const rvBp = calculateRealizedVol3m(closePrices, signalHorizonMinutes);
+  const { closePrices, candles = [] } = params;
+  const rvBp = calculateRealizedVol3m(closePrices);
   const adx = calculateAdx14(candles, 14);
 
   const passedRv = rvBp > 10 && rvBp < 60;
@@ -170,7 +152,6 @@ export function evaluateDocumentFilters(params: {
       passed: passedAdx,
       threshold: 25,
     },
-    return3m,
     canEnterShort: canEnter,
     canEnterLong: canEnter,
     blockReasonShort: blockReason,
@@ -178,12 +159,18 @@ export function evaluateDocumentFilters(params: {
   };
 }
 
+/**
+ * Calculates Z-Score measuring price deviation directly from the active 15m Contract Open Price (Price to Beat),
+ * normalized by the 180-period statistical standard deviation (σ):
+ * Z = (CurrentPrice - ContractOpenPrice) / StdDev
+ */
 export function calculateZScore(
   closePrices: number[],
   upperThreshold = 2.4,
   entryThreshold = 2.4,
   lowerThreshold = -2.2,
-  lowerEntryThreshold = -2.2
+  lowerEntryThreshold = -2.2,
+  contractOpenPrice?: number | null
 ): {
   mean: number;
   variance: number;
@@ -211,22 +198,32 @@ export function calculateZScore(
   }
 
   const currentPrice = closePrices[n - 1];
-  const mean = closePrices.reduce((a, b) => a + b, 0) / n;
-  const variance = closePrices.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / n;
+  const smaMean = closePrices.reduce((a, b) => a + b, 0) / n;
+  const variance = closePrices.reduce((a, b) => a + Math.pow(b - smaMean, 2), 0) / n;
   const stdDev = Math.sqrt(variance);
 
-  const zScore = stdDev > 0 ? (currentPrice - mean) / stdDev : 0;
+  // Use the active 15-minute round's Open Price ("Price to Beat") as the baseline anchor if valid,
+  // falling back to the rolling SMA only before the market open price is loaded.
+  const validOpenPrice =
+    contractOpenPrice !== undefined &&
+    contractOpenPrice !== null &&
+    Number.isFinite(Number(contractOpenPrice)) &&
+    Number(contractOpenPrice) > 0
+      ? Number(contractOpenPrice)
+      : smaMean;
+
+  const zScore = stdDev > 0 ? (currentPrice - validOpenPrice) / stdDev : 0;
 
   return {
-    mean,
+    mean: validOpenPrice,
     variance,
     stdDev,
     zScore,
     currentPrice,
-    upperBand: mean + upperThreshold * stdDev,
-    entryBand: mean + entryThreshold * stdDev,
-    lowerEntryBand: mean + lowerEntryThreshold * stdDev,
-    lowerBand: mean + lowerThreshold * stdDev,
+    upperBand: validOpenPrice + upperThreshold * stdDev,
+    entryBand: validOpenPrice + entryThreshold * stdDev,
+    lowerEntryBand: validOpenPrice + lowerEntryThreshold * stdDev,
+    lowerBand: validOpenPrice + lowerThreshold * stdDev,
   };
 }
 

@@ -1197,61 +1197,37 @@ app.post('/api/limitless/order', async (req, res) => {
 
 // ============================================================================
 // Autonomous Server-Side Live 1m WebSocket Z-Score Engine (180-Period SMA, Asymmetric Z: Short +2.4σ / Long -2.2σ, RV & ADX Filters)
-// Evaluates on every live WebSocket update using the current unclosed candle's live price
+// Evaluates strictly upon 1m candle close using Contract Open Price (Price to Beat) as baseline
 // Guarantees trades execute 24/7 on the VM ONLY when serverBotActive === true
 // ============================================================================
 let serverArmedUpper = false;
 let serverArmedLower = false;
 let serverLastEvaluatedEntrySignalTime = 0;
+let serverLastEvaluatedClosedCandleTime = 0;
 let serverLastFilterBlockLogTime = 0;
 let serverKlinesBuffer = []; // [{ time, close, isClosed }]
 let serverBinanceWs = null;
 let serverBinanceWsEndpointIdx = 0;
 let lastServerBinanceWsTickTime = 0;
 
-function computeServerRollingStats(windowPrices) {
+function computeServerRollingStats(windowPrices, contractOpenPrice = null) {
   const n = windowPrices.length;
   if (n === 0) return { mean: 0, stdDev: 0, zScore: 0 };
-  const mean = windowPrices.reduce((acc, val) => acc + val, 0) / n;
-  const variance = windowPrices.reduce((acc, val) => acc + Math.pow(val - mean, 2), 0) / n;
+  const smaMean = windowPrices.reduce((acc, val) => acc + val, 0) / n;
+  const variance = windowPrices.reduce((acc, val) => acc + Math.pow(val - smaMean, 2), 0) / n;
   const stdDev = Math.sqrt(variance);
   const currentPrice = windowPrices[n - 1];
-  const zScore = stdDev > 0 ? (currentPrice - mean) / stdDev : 0;
-  return { mean, stdDev, zScore };
-}
 
-function computeServerEmaSeries(prices, period = 60) {
-  if (!Array.isArray(prices) || prices.length === 0) return [];
-  const k = 2 / (period + 1);
-  if (prices.length < period) {
-    const ema = [prices[0]];
-    for (let i = 1; i < prices.length; i++) {
-      ema.push(prices[i] * k + ema[i - 1] * (1 - k));
-    }
-    return ema;
-  }
-  const ema = new Array(prices.length);
-  let sum = 0;
-  for (let i = 0; i < period; i++) {
-    sum += prices[i];
-    ema[i] = sum / (i + 1);
-  }
-  let prevEma = sum / period;
-  ema[period - 1] = prevEma;
-  for (let i = period; i < prices.length; i++) {
-    prevEma = prices[i] * k + prevEma * (1 - k);
-    ema[i] = prevEma;
-  }
-  return ema;
-}
+  const validOpenPrice =
+    contractOpenPrice !== null &&
+    contractOpenPrice !== undefined &&
+    Number.isFinite(Number(contractOpenPrice)) &&
+    Number(contractOpenPrice) > 0
+      ? Number(contractOpenPrice)
+      : smaMean;
 
-function computeServerReturn3m(closePrices) {
-  const n = closePrices.length;
-  if (n < 4) return 0;
-  const closeNow = closePrices[n - 1];
-  const close4mAgo = closePrices[n - 4];
-  if (close4mAgo <= 0) return 0;
-  return (closeNow - close4mAgo) / close4mAgo;
+  const zScore = stdDev > 0 ? (currentPrice - validOpenPrice) / stdDev : 0;
+  return { mean: validOpenPrice, stdDev, zScore };
 }
 
 function computeServerRealizedVol3m(closePrices) {
@@ -1323,17 +1299,15 @@ function computeServerAdx14(candles, period = 14) {
 function evaluateServerDocumentFilters(closes, candles) {
   const rvBp = computeServerRealizedVol3m(closes);
   const adxVal = computeServerAdx14(candles, 14);
-  const ret3m = computeServerReturn3m(closes);
 
   // Document 6: 10 bp < RV_3m < 60 bp & ADX(14, 1m) < 25
-  const passedRv = rvBp >= 10 && rvBp <= 60;
+  const passedRv = rvBp > 10 && rvBp < 60;
   const passedAdx = adxVal < 25;
   const canEnter = passedRv && passedAdx;
 
   return {
     rv3m: { valueBp: rvBp, passed: passedRv, minBp: 10, maxBp: 60 },
     adx14: { value: adxVal, passed: passedAdx, threshold: 25 },
-    return3m: ret3m,
     canEnterShort: canEnter,
     canEnterLong: canEnter,
     blockReasonShort: !passedRv
@@ -1367,7 +1341,7 @@ async function fetchServerBinanceKlines(symbol = 'BTCUSDT', interval = '1m', lim
   return null;
 }
 
-function evaluateServerLiveWindow(closes, latestCandleTime, isHistoricalSeed = false) {
+function evaluateServerLiveWindow(closes, latestCandleTime, isHistoricalSeed = false, isCandleCloseEvent = false) {
   if (!Array.isArray(closes) || closes.length < 30) return;
 
   if (isHistoricalSeed) {
@@ -1376,18 +1350,37 @@ function evaluateServerLiveWindow(closes, latestCandleTime, isHistoricalSeed = f
     return;
   }
 
-  // Document 6: 180-period historical candles (3 hours)
-  const windowLength = Math.min(closes.length, 180);
-  const liveWindow = closes.slice(-windowLength);
-  const { mean, stdDev, zScore: liveZ } = computeServerRollingStats(liveWindow);
+  // Only evaluate upon 1m candle close
+  if (!isCandleCloseEvent) return;
 
-  const docFilters = evaluateServerDocumentFilters(closes, serverKlinesBuffer);
+  // Use confirmed closed candles up to the newly closed candle
+  const closedCandles = serverKlinesBuffer.filter((c) => c.isClosed !== false);
+  const evalCandles = closedCandles.length >= 30 ? closedCandles : serverKlinesBuffer;
+  const evalCloses = evalCandles.map((c) => c.close);
+  const evalCandleTime = evalCandles[evalCandles.length - 1]?.time || latestCandleTime;
+
+  if (serverLastEvaluatedClosedCandleTime === evalCandleTime) return;
+  serverLastEvaluatedClosedCandleTime = evalCandleTime;
+
+  const rawOpenPrice = cachedActiveBtc?.openPrice;
+  const parsedOpenPrice =
+    rawOpenPrice !== undefined && rawOpenPrice !== null
+      ? Number(String(rawOpenPrice).replace(/[^0-9.-]/g, ''))
+      : NaN;
+  const validContractOpenPrice =
+    Number.isFinite(parsedOpenPrice) && parsedOpenPrice > 0 ? parsedOpenPrice : null;
+
+  // Document 6: 180-period historical candles (3 hours)
+  const windowLength = Math.min(evalCloses.length, 180);
+  const liveWindow = evalCloses.slice(-windowLength);
+  const { mean, stdDev, zScore: liveZ } = computeServerRollingStats(liveWindow, validContractOpenPrice);
+
+  const docFilters = evaluateServerDocumentFilters(evalCloses, evalCandles);
 
   let triggeredSignal = null;
 
   // Document 6 Asymmetric Thresholds:
-  // Short: +2.4σ (requires stronger signal due to BTC upward drift)
-  // Long: -2.2σ
+  // Short: +2.4σ / Long: -2.2σ measured from Contract Open Price
   if (liveZ >= 2.40) {
     serverArmedUpper = true;
     if (docFilters.canEnterShort) {
@@ -1417,7 +1410,7 @@ function evaluateServerLiveWindow(closes, latestCandleTime, isHistoricalSeed = f
   if (
     (triggeredSignal === 'ENTRY_SHORT' || triggeredSignal === 'ENTRY_LONG') &&
     !isServerExecutingOrder &&
-    now - serverLastEvaluatedEntrySignalTime >= 5000
+    now - serverLastEvaluatedEntrySignalTime >= 4000
   ) {
     // Check if the current active 15m market is already locked before dispatching
     const preGuard = inMemoryTradeGuard || loadTradeGuardFromDisk();
@@ -1436,20 +1429,20 @@ function evaluateServerLiveWindow(closes, latestCandleTime, isHistoricalSeed = f
     const direction = triggeredSignal === 'ENTRY_LONG' ? 'LONG' : 'SHORT';
     const outcome = direction === 'LONG' ? 'UP' : 'DOWN';
     console.log(
-      `[VM LIVE WS 1m ENGINE] Document 6 Signal reached for ${triggeredSignal} at Z=${liveZ.toFixed(2)}σ (180-SMA, RV=${docFilters.rv3m.valueBp.toFixed(1)}bp, ADX=${docFilters.adx14.value.toFixed(1)})! Dispatching FAK order @ <= $0.46 (46¢)...`
+      `[VM 1m CLOSE ENGINE] Signal reached for ${triggeredSignal} at Z=${liveZ.toFixed(2)}σ vs OpenPrice=$${mean.toFixed(2)} (RV=${docFilters.rv3m.valueBp.toFixed(1)}bp, ADX=${docFilters.adx14.value.toFixed(1)})! Dispatching FAK order @ <= $0.46 (46¢)...`
     );
 
     setTimeout(async () => {
       if (!serverBotActive || isServerExecutingOrder) return;
       const liveMkt = cachedActiveBtc || (await fetchLive15MinBtcMarket());
       
-      const currentFilters = evaluateServerDocumentFilters(closes, serverKlinesBuffer);
+      const currentFilters = evaluateServerDocumentFilters(evalCloses, evalCandles);
       if (direction === 'SHORT' && !currentFilters.canEnterShort) {
-        console.log(`[VM LIVE WS ENGINE] Blocked Short entry: ${currentFilters.blockReasonShort}`);
+        console.log(`[VM 1m CLOSE ENGINE] Blocked Short entry: ${currentFilters.blockReasonShort}`);
         return;
       }
       if (direction === 'LONG' && !currentFilters.canEnterLong) {
-        console.log(`[VM LIVE WS ENGINE] Blocked Long entry: ${currentFilters.blockReasonLong}`);
+        console.log(`[VM 1m CLOSE ENGINE] Blocked Long entry: ${currentFilters.blockReasonLong}`);
         return;
       }
 
@@ -1467,7 +1460,7 @@ function evaluateServerLiveWindow(closes, latestCandleTime, isHistoricalSeed = f
         outcome,
         type: 'FAK',
         price: 0.46,
-        candleTime: latestCandleTime || now,
+        candleTime: evalCandleTime || now,
       });
       if (orderRes?.body?.success) {
         if (direction === 'SHORT') serverArmedUpper = false;
@@ -1499,7 +1492,7 @@ async function syncServerBinanceCandles(isInitial = false) {
 
     const closes = serverKlinesBuffer.map((c) => c.close);
     const latestTime = serverKlinesBuffer[serverKlinesBuffer.length - 1]?.time || now;
-    evaluateServerLiveWindow(closes, latestTime, isInitial);
+    evaluateServerLiveWindow(closes, latestTime, isInitial, !isInitial);
   } catch {
     // safe continuation
   }
@@ -1531,6 +1524,7 @@ async function initServerBinanceLiveWs() {
               const kLow = parseFloat(msg.k.l);
               const kClose = parseFloat(msg.k.c);
               const kClosed = Boolean(msg.k.x);
+              let isCandleCloseEvent = kClosed;
               if (serverKlinesBuffer.length > 0) {
                 const last = serverKlinesBuffer[serverKlinesBuffer.length - 1];
                 if (last.time === kTime) {
@@ -1541,6 +1535,7 @@ async function initServerBinanceLiveWs() {
                   last.isClosed = kClosed;
                 } else if (kTime > last.time) {
                   last.isClosed = true;
+                  isCandleCloseEvent = true;
                   serverKlinesBuffer.push({
                     time: kTime,
                     open: kOpen,
@@ -1552,7 +1547,7 @@ async function initServerBinanceLiveWs() {
                   if (serverKlinesBuffer.length > 300) serverKlinesBuffer.shift();
                 }
                 const closes = serverKlinesBuffer.map((c) => c.close);
-                evaluateServerLiveWindow(closes, kTime, false);
+                evaluateServerLiveWindow(closes, kTime, false, isCandleCloseEvent);
               }
             }
           } catch {}

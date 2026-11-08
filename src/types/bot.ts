@@ -26,7 +26,6 @@ export interface BotConfig {
   singleTradePerContract?: boolean; // Strictly max 1 trade per 15-minute contract
   cooldownMinutes?: number; // Minimum cooldown period between trades in minutes
   calculateOnCandleClose?: boolean; // Evaluate signals strictly upon 1m candle close (true) or live ticks (false)
-  signalHorizonMinutes?: number; // Signal Horizon (K): Lookback window in minutes (default 3m)
 }
 
 export interface LimitlessMarketDetails {

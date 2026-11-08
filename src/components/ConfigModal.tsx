@@ -240,9 +240,9 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
           {/* Section 2: Market & Timeframe */}
           <div>
             <h3 className="font-semibold text-slate-100 uppercase tracking-wider text-[11px] mb-3 text-sky-400">
-              {isAr ? 'السوق ومتوسط الشموع وأفق الإشارة (Binance 1m · 180-SMA · K=3m)' : 'Market, Lookback & Horizon (Binance 1m · 180-SMA · K=3m)'}
+              {isAr ? 'السوق ونافذة الانحراف المعياري (Binance 1m · 180 شمعة لقياس σ · مرجع سعر افتتاح الجولة)' : 'Market & StdDev Lookback (Binance 1m · 180 Candles for σ · Contract Open Price Anchor)'}
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block text-slate-400 mb-1">Trading Pair</label>
                 <input
@@ -267,7 +267,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-400 mb-1">{isAr ? 'الشموع (180-SMA)' : 'Lookback (180-SMA)'}</label>
+                <label className="block text-slate-400 mb-1">{isAr ? 'نافذة الانحراف المعياري (180 شمعة)' : 'StdDev Window (180 Candles)'}</label>
                 <input
                   type="number"
                   min="5"
@@ -277,23 +277,9 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
                 />
               </div>
-
-              <div>
-                <label className="block text-slate-400 mb-1" title="Signal Horizon K (دقائق)">
-                  {isAr ? 'أفق الإشارة (K دقائق)' : 'Signal Horizon (K)'}
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  max="15"
-                  value={draft.signalHorizonMinutes || 3}
-                  onChange={(e) => setDraft({ ...draft, signalHorizonMinutes: Math.max(1, parseInt(e.target.value) || 3) })}
-                  className="w-full bg-slate-950 border border-sky-600/60 rounded-lg px-3 py-2 text-sky-300 font-mono font-bold"
-                />
-              </div>
             </div>
             <div className="mt-1.5 text-[10px] text-slate-500 font-mono">
-              {isAr ? '💡 أفق الإشارة (K=3m): يقيس العائد Return_3m وفلتر التقلب RV_3m على مدى 3 دقائق لاقتناص الارتداد السريع.' : '💡 Signal Horizon (K=3m): Measures Return_3m and Volatility RV_3m over a 3-minute lookback for mean reversion.'}
+              {isAr ? '💡 يتم حساب Z-Score بقياس بُعد السعر الحالي مباشرة عن سعر افتتاح جولة الـ 15 دقيقة (Price to Beat) مقسوماً على الانحراف المعياري لآخر 180 شمعة.' : '💡 Z-Score measures distance from the active 15m Contract Open Price (Price to Beat) divided by the 180-candle Standard Deviation (σ).'}
             </div>
           </div>
 
@@ -359,7 +345,6 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                   ...draft,
                   timeframe: '1m',
                   periods: 180,
-                  signalHorizonMinutes: 3,
                   calculateOnCandleClose: true,
                   zScoreUpper: 2.4,
                   zScoreEntry: 2.4,
@@ -373,7 +358,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 })}
                 className="px-2.5 py-1 rounded text-[11px] font-bold bg-emerald-950/80 hover:bg-emerald-900/90 text-emerald-300 border border-emerald-600/50 cursor-pointer"
               >
-                {isAr ? '🎯 إعدادات Document 6 (180 شمعة 1m · Short +2.4σ / Long -2.2σ · فلاتر RV و ADX · أمر FAK ≤ 46¢)' : '🎯 Document 6 Preset (180-SMA 1m · Short +2.4σ / Long -2.2σ · RV & ADX · FAK ≤ 46¢)'}
+                {isAr ? '🎯 إعدادات Document 6 (180 شمعة 1m · مرجع سعر الافتتاح · Short +2.4σ / Long -2.2σ · فلاتر RV و ADX · FAK ≤ 46¢)' : '🎯 Document 6 Preset (180m σ · Open Price Anchor · Short +2.4σ / Long -2.2σ · RV & ADX · FAK ≤ 46¢)'}
               </button>
             </div>
 

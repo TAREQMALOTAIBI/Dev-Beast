@@ -121,8 +121,8 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
           <h3 className="font-bold text-slate-100 text-xs tracking-wider uppercase flex items-center gap-1.5">
             <span>
               {isAr
-                ? `استراتيجية التداول الكمية (1m Live · 180-SMA · Long -2.2σ / Short +2.4σ)`
-                : `Document 6 Quant Model (1m Live · 180-SMA · Long -2.2σ / Short +2.4σ)`}
+                ? `استراتيجية التداول الكمية (1m Close · انحراف عن سعر افتتاح العقد · Long -2.2σ / Short +2.4σ)`
+                : `Document 6 Quant Model (1m Close · Contract Open Price Anchor · Long -2.2σ / Short +2.4σ)`}
             </span>
           </h3>
         </div>
@@ -379,34 +379,25 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
           </div>
         </div>
 
-        {/* Live Document 6 Filters Status (RV_3m & ADX_14) & Signal Horizon K */}
-        <div className="pt-2 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] font-mono">
+        {/* Live Document 6 Filters Status (RV_3m & ADX_14) */}
+        <div className="pt-2 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] font-mono">
           <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900/60 border border-slate-800/80">
             <span className="text-slate-400">
-              {isAr ? 'أفق الإشارة (Horizon K):' : 'Signal Horizon (K):'}
+              {isAr ? 'فلتر التقلب (RV: 10-60 bp):' : 'Volatility Filter (RV: 10-60 bp):'}
             </span>
-            <span className="font-bold text-sky-400">
-              {config.signalHorizonMinutes || 3}m (Return & RV)
-            </span>
-          </div>
-
-          <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900/60 border border-slate-800/80">
-            <span className="text-slate-400">
-              {isAr ? 'فلتر التقلب (10-60 bp):' : 'RV_3m Filter (10-60 bp):'}
-            </span>
-            <span className={`font-bold flex items-center gap-1 ${docFilters?.rv3m?.passed ? 'text-emerald-400' : 'text-rose-400'}`}>
+            <span className={`font-bold flex items-center gap-1 ${docFilters?.rv3m?.passed ? 'text-emerald-400' : 'text-rose-400'}`} dir="ltr">
               <span>{docFilters?.rv3m ? `${docFilters.rv3m.valueBp.toFixed(1)} bp` : '18.5 bp'}</span>
-              <span>{docFilters?.rv3m?.passed ? '✓ مسموح' : '✗ محظور'}</span>
+              <span>{docFilters?.rv3m?.passed ? '✓' : '✗'}</span>
             </span>
           </div>
 
           <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900/60 border border-slate-800/80">
             <span className="text-slate-400">
-              {isAr ? 'فلتر الاتجاه ADX < 25:' : 'ADX(14) < 25:'}
+              {isAr ? 'فلتر الاتجاه (ADX < 25):' : 'Trend Filter (ADX < 25):'}
             </span>
-            <span className={`font-bold flex items-center gap-1 ${docFilters?.adx14?.passed ? 'text-emerald-400' : 'text-rose-400'}`}>
+            <span className={`font-bold flex items-center gap-1 ${docFilters?.adx14?.passed ? 'text-emerald-400' : 'text-rose-400'}`} dir="ltr">
               <span>{docFilters?.adx14 ? `${docFilters.adx14.value.toFixed(1)}` : '16.2'}</span>
-              <span>{docFilters?.adx14?.passed ? '✓ هادئ' : '✗ اتجاهي'}</span>
+              <span>{docFilters?.adx14?.passed ? '✓' : '✗'}</span>
             </span>
           </div>
         </div>
@@ -593,7 +584,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
 
           <div className="flex justify-between text-[10px] font-mono text-slate-500 px-0.5">
             <span className="text-emerald-400 font-bold">{lowerThresh.toFixed(2)}σ (Direct Long)</span>
-            <span className="text-slate-400">0.0σ ({config.periods}-SMA)</span>
+            <span className="text-slate-400">0.0σ (Contract Open Price)</span>
             <span className="text-rose-400 font-bold">+{safeUpperThresh.toFixed(2)}σ (Direct Short)</span>
           </div>
         </div>
@@ -603,9 +594,9 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
           <div className="mt-2.5 p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 text-[11px] font-mono space-y-1.5">
             <div className="flex items-center justify-between text-slate-400 border-b border-slate-900 pb-1 text-[10px]">
               <span className="font-sans font-semibold text-slate-300">
-                {isAr ? '📐 التحقق الحسابي الدقيق من معادلة Z-Score ثنائية الاتجاه' : '📐 Live Bidirectional Statistical Check'}
+                {isAr ? '📐 التحقق الحسابي الدقيق من معادلة Z-Score مقابل سعر افتتاح الجولة (Price to Beat)' : '📐 Live Z-Score vs. Contract Open Price (Price to Beat)'}
               </span>
-              <span className="text-emerald-400 font-bold">{config.periods}-Periods SMA</span>
+              <span className="text-emerald-400 font-bold">{config.periods}-Candle σ · Open Price Anchor</span>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-slate-300">
@@ -614,15 +605,15 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
                 <span className="font-bold text-slate-100">${Number(metric.price || 0).toFixed(2)}</span>
               </div>
               <div>
-                <span className="text-slate-500">{isAr ? 'المتوسط (μ): ' : 'Mean (μ): '}</span>
-                <span className="font-bold text-slate-100">${Number(metric.mean || 0).toFixed(2)}</span>
+                <span className="text-slate-500">{isAr ? 'سعر الافتتاح (O): ' : 'Open Price (O): '}</span>
+                <span className="font-bold text-amber-300">${Number(metric.mean || 0).toFixed(2)}</span>
               </div>
               <div>
-                <span className="text-slate-500">{isAr ? 'الانحراف (σ): ' : 'StdDev (σ): '}</span>
+                <span className="text-slate-500">{isAr ? 'انحراف 180م (σ): ' : 'StdDev 180m (σ): '}</span>
                 <span className="font-bold text-slate-100">${Number(metric.stdDev || 0).toFixed(2)}</span>
               </div>
               <div>
-                <span className="text-slate-500">{isAr ? 'الفارق (P-μ): ' : 'Diff (P-μ): '}</span>
+                <span className="text-slate-500">{isAr ? 'الفارق (P-O): ' : 'Diff (P-O): '}</span>
                 <span className={`font-bold ${Number(metric.price || 0) - Number(metric.mean || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                   {Number(metric.price || 0) - Number(metric.mean || 0) >= 0 ? '+' : ''}
                   {(Number(metric.price || 0) - Number(metric.mean || 0)).toFixed(2)}
@@ -631,7 +622,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             </div>
 
             <div className="pt-1.5 text-[10px] text-slate-400 border-t border-slate-900 flex flex-wrap items-center justify-between gap-1">
-              <span className="text-slate-400">Z = (Price - Mean) / StdDev</span>
+              <span className="text-slate-400">Z = (Price - OpenPrice) / StdDev₁₈₀</span>
               <span className="text-emerald-300 font-bold bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/40">
                 ({(Number(metric.price || 0) - Number(metric.mean || 0)).toFixed(2)}) / {Number(metric.stdDev || 0).toFixed(2)} = {Number(metric.zScore || 0) > 0 ? '+' : ''}{Number(metric.zScore || 0).toFixed(2)}σ
               </span>
