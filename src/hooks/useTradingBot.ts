@@ -22,12 +22,12 @@ import { soundController } from '../utils/audio';
 const DEFAULT_CONFIG: BotConfig = {
   symbol: 'BTCUSDT',
   timeframe: '1m',
-  periods: 180, // 180 Historical Candles (3 Hours)
-  strategyDirection: 'BOTH', // Asymmetric: Long (-2.2σ) / Short (+2.4σ)
-  zScoreUpper: 2.4, // Asymmetric Short Entry Threshold: +2.4σ
-  zScoreEntry: 2.4, // Asymmetric Short Entry Threshold: +2.4σ
-  zScoreLower: -2.2, // Asymmetric Long Entry Threshold: -2.2σ
-  zScoreLowerEntry: -2.2, // Asymmetric Long Entry Threshold: -2.2σ
+  periods: 12, // 12 Historical Candles (12 Minutes)
+  strategyDirection: 'BOTH', // Symmetric: Long (-2.00σ) / Short (+2.00σ)
+  zScoreUpper: 2.0, // Short Entry Threshold: +2.00σ
+  zScoreEntry: 2.0, // Short Entry Threshold: +2.00σ
+  zScoreLower: -2.0, // Long Entry Threshold: -2.00σ
+  zScoreLowerEntry: -2.0, // Long Entry Threshold: -2.00σ
   maxPriceCents: 0.46, // Max Entry Price (Hard Cap): 46¢ ($0.46)
   maxRiskPercent: 0.04, // 0.25 * Kelly(Edge) capped at 3-5% (default 4%)
   orderType: 'FAK', // Order Type: FAK (Fill-And-Kill)
@@ -45,6 +45,11 @@ const DEFAULT_CONFIG: BotConfig = {
   singleTradePerContract: true, // Single-Entry Lock per 15m Market
   cooldownMinutes: 15, // 15-minute contract cycle guard
   calculateOnCandleClose: true, // Calculate & execute strictly upon 1m candle close
+  adxThreshold: 20, // ADX < 20
+  rvMinBp: 9, // RV min: 9 bp
+  rvMaxBp: 25, // RV max: 25 bp
+  entryWindowStartMin: 3, // Entry window start: Minute 3 of 15m round
+  entryWindowEndMin: 10, // Entry window end: Minute 10 of 15m round
 };
 
 export function useTradingBot() {
@@ -55,7 +60,7 @@ export function useTradingBot() {
       if (saved) {
         const parsed = JSON.parse(saved);
         parsed.timeframe = '1m';
-        parsed.periods = 180;
+        parsed.periods = 12;
         parsed.calculateOnCandleClose = parsed.calculateOnCandleClose !== undefined ? parsed.calculateOnCandleClose : true;
         parsed.binanceWsUrl = 'wss://stream.binance.com/ws/btcusdt@kline_1m';
         if (parsed.binanceRestUrl && parsed.binanceRestUrl.includes('binance.vision')) {
@@ -78,12 +83,17 @@ export function useTradingBot() {
         if (!parsed.strategyDirection) {
           parsed.strategyDirection = 'BOTH';
         }
-        // Migrate to document specification parameters
-        parsed.periods = 180;
-        parsed.zScoreUpper = 2.4;
-        parsed.zScoreEntry = 2.4;
-        parsed.zScoreLower = -2.2;
-        parsed.zScoreLowerEntry = -2.2;
+        // Migrate to new strategy specification parameters (12 candles, Z ±2.00, ADX < 20, RV 9-25 bp, Min 3-10)
+        parsed.periods = 12;
+        parsed.zScoreUpper = 2.0;
+        parsed.zScoreEntry = 2.0;
+        parsed.zScoreLower = -2.0;
+        parsed.zScoreLowerEntry = -2.0;
+        parsed.adxThreshold = 20;
+        parsed.rvMinBp = 9;
+        parsed.rvMaxBp = 25;
+        parsed.entryWindowStartMin = 3;
+        parsed.entryWindowEndMin = 10;
         parsed.orderType = 'FAK';
         parsed.maxPriceCents = 0.46;
         parsed.fractionChunks = 1;
@@ -457,6 +467,11 @@ export function useTradingBot() {
       const docFilters = evaluateDocumentFilters({
         closePrices: evalCloses,
         candles: evalCandles,
+        rvMinBp: cfg.rvMinBp ?? 9,
+        rvMaxBp: cfg.rvMaxBp ?? 25,
+        adxThreshold: cfg.adxThreshold ?? 20,
+        entryWindowStartMin: cfg.entryWindowStartMin ?? 3,
+        entryWindowEndMin: cfg.entryWindowEndMin ?? 10,
       });
       setAdvancedFiltersStatus(docFilters);
 

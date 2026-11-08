@@ -31,12 +31,12 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
     setDraft({
       symbol: 'BTCUSDT',
       timeframe: '1m',
-      periods: 180,
+      periods: 12,
       strategyDirection: 'BOTH',
-      zScoreUpper: 2.4,
-      zScoreEntry: 2.4,
-      zScoreLower: -2.2,
-      zScoreLowerEntry: -2.2,
+      zScoreUpper: 2.0,
+      zScoreEntry: 2.0,
+      zScoreLower: -2.0,
+      zScoreLowerEntry: -2.0,
       maxPriceCents: 0.46,
       maxRiskPercent: 0.04,
       orderType: 'FAK',
@@ -54,6 +54,11 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
       singleTradePerContract: true,
       cooldownMinutes: 15,
       calculateOnCandleClose: true,
+      adxThreshold: 20,
+      rvMinBp: 9,
+      rvMaxBp: 25,
+      entryWindowStartMin: 3,
+      entryWindowEndMin: 10,
     });
   };
 
@@ -71,12 +76,12 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
             <Radio className="w-5 h-5 text-emerald-400 animate-pulse" />
             <div>
               <h2 className="text-base font-bold text-slate-100">
-                {isAr ? 'إعدادات استراتيجية التداول (1m Live WS · عقود 15 دقيقة)' : 'Trading Strategy Configuration (1m Live WS · 15m Contracts)'}
+                {isAr ? 'إعدادات استراتيجية التداول (1m Live WS · 12 شمعة · عقود 15 دقيقة)' : 'Trading Strategy Configuration (1m Live WS · 12 Candles · 15m Contracts)'}
               </h2>
               <div className="text-[11px] text-slate-400">
                 {isAr
-                  ? '180-SMA (1m) · عتبات غير متماثلة (Short +2.4σ / Long -2.2σ) · فلاتر RV و ADX · أمر FAK ≤ 46¢'
-                  : '180-SMA (1m) · Asymmetric Z (Short +2.4σ / Long -2.2σ) · RV & ADX Filters · FAK ≤ 46¢'}
+                  ? '12 شمعة (1m) · عتبات (Short +2.00σ / Long -2.00σ) · RV (9-25 bp) · ADX < 20 · نافذة الدقيقة 3-10'
+                  : '12 Candles (1m) · Z (Short +2.00σ / Long -2.00σ) · RV (9-25 bp) · ADX < 20 · Min 3-10 Window'}
               </div>
             </div>
           </div>
@@ -240,7 +245,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
           {/* Section 2: Market & Timeframe */}
           <div>
             <h3 className="font-semibold text-slate-100 uppercase tracking-wider text-[11px] mb-3 text-sky-400">
-              {isAr ? 'السوق ونافذة الانحراف المعياري (Binance 1m · 180 شمعة لقياس σ · مرجع سعر افتتاح الجولة)' : 'Market & StdDev Lookback (Binance 1m · 180 Candles for σ · Contract Open Price Anchor)'}
+              {isAr ? 'السوق ونافذة الانحراف المعياري (Binance 1m · 12 شمعة لقياس σ · مرجع سعر افتتاح الجولة)' : 'Market & StdDev Lookback (Binance 1m · 12 Candles for σ · Contract Open Price Anchor)'}
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
@@ -267,19 +272,19 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-400 mb-1">{isAr ? 'نافذة الانحراف المعياري (180 شمعة)' : 'StdDev Window (180 Candles)'}</label>
+                <label className="block text-slate-400 mb-1">{isAr ? 'عدد الشموع (12 شمعة)' : 'StdDev Window (12 Candles)'}</label>
                 <input
                   type="number"
                   min="5"
                   max="300"
                   value={draft.periods}
-                  onChange={(e) => setDraft({ ...draft, periods: parseInt(e.target.value) || 180 })}
+                  onChange={(e) => setDraft({ ...draft, periods: parseInt(e.target.value) || 12 })}
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
                 />
               </div>
             </div>
             <div className="mt-1.5 text-[10px] text-slate-500 font-mono">
-              {isAr ? '💡 يتم حساب Z-Score بقياس بُعد السعر الحالي مباشرة عن سعر افتتاح جولة الـ 15 دقيقة (Price to Beat) مقسوماً على الانحراف المعياري لآخر 180 شمعة.' : '💡 Z-Score measures distance from the active 15m Contract Open Price (Price to Beat) divided by the 180-candle Standard Deviation (σ).'}
+              {isAr ? '💡 يتم حساب Z-Score بقياس بُعد السعر الحالي مباشرة عن سعر افتتاح جولة الـ 15 دقيقة (Price to Beat) مقسوماً على الانحراف المعياري لآخر 12 شمعة (1m).' : '💡 Z-Score measures distance from the active 15m Contract Open Price (Price to Beat) divided by the 12-candle Standard Deviation (σ).'}
             </div>
           </div>
 
@@ -287,10 +292,10 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
           <div className="border-t border-slate-800 pt-4 space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold text-slate-100 uppercase tracking-wider text-[11px] text-sky-400">
-                {isAr ? 'عتبات Z-Score غير المتماثلة (Short: +2.40σ / Long: -2.20σ) وفلاتر Document 6' : 'Asymmetric Z-Score (Short: +2.40σ / Long: -2.20σ) & Document 6 Filters'}
+                {isAr ? 'عتبات الدخول (Short: +2.00σ / Long: -2.00σ) وفلاتر RV و ADX ونافذة الجولة' : 'Z-Score Thresholds (Short: +2.00σ / Long: -2.00σ), Filters & Round Window'}
               </h3>
               <span className="text-[10px] text-emerald-400 font-bold bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/40">
-                {isAr ? '⚡ L: -2.2σ / S: +2.4σ' : '⚡ L: -2.2σ / S: +2.4σ'}
+                {isAr ? '⚡ L: -2.00σ / S: +2.00σ' : '⚡ L: -2.00σ / S: +2.00σ'}
               </span>
             </div>
 
@@ -344,12 +349,17 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 onClick={() => setDraft({
                   ...draft,
                   timeframe: '1m',
-                  periods: 180,
+                  periods: 12,
                   calculateOnCandleClose: true,
-                  zScoreUpper: 2.4,
-                  zScoreEntry: 2.4,
-                  zScoreLower: -2.2,
-                  zScoreLowerEntry: -2.2,
+                  zScoreUpper: 2.0,
+                  zScoreEntry: 2.0,
+                  zScoreLower: -2.0,
+                  zScoreLowerEntry: -2.0,
+                  adxThreshold: 20,
+                  rvMinBp: 9,
+                  rvMaxBp: 25,
+                  entryWindowStartMin: 3,
+                  entryWindowEndMin: 10,
                   maxRiskPercent: 0.04,
                   maxPriceCents: 0.46,
                   orderType: 'FAK',
@@ -358,11 +368,11 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 })}
                 className="px-2.5 py-1 rounded text-[11px] font-bold bg-emerald-950/80 hover:bg-emerald-900/90 text-emerald-300 border border-emerald-600/50 cursor-pointer"
               >
-                {isAr ? '🎯 إعدادات Document 6 (180 شمعة 1m · مرجع سعر الافتتاح · Short +2.4σ / Long -2.2σ · فلاتر RV و ADX · FAK ≤ 46¢)' : '🎯 Document 6 Preset (180m σ · Open Price Anchor · Short +2.4σ / Long -2.2σ · RV & ADX · FAK ≤ 46¢)'}
+                {isAr ? '🎯 الإعدادات المعتمدة (12 شمعة 1m · Z ±2.00σ · ADX < 20 · RV 9-25 bp · الدقيقة 3-10)' : '🎯 Approved Preset (12 Candles 1m · Z ±2.00σ · ADX < 20 · RV 9-25 bp · Min 3-10)'}
               </button>
             </div>
 
-            {/* Thresholds Grid: Upper & Lower (Asymmetric Document 6) */}
+            {/* Thresholds Grid: Upper & Lower */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
               {/* Upper Threshold (Short / DOWN) */}
               <div className="p-2.5 rounded-lg bg-slate-950/60 border border-rose-900/40 space-y-2">
@@ -371,14 +381,14 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 </div>
                 <div>
                   <label className="block text-slate-400 mb-1 text-[11px]">
-                    {isAr ? 'عتبة الدخول (≥ +2.40σ انحياز الصعود):' : 'Entry Threshold (≥ +2.40σ):'}
+                    {isAr ? 'عتبة الدخول (≥ +2.00σ):' : 'Entry Threshold (≥ +2.00σ):'}
                   </label>
                   <input
                     type="number"
                     step="0.05"
                     value={draft.zScoreUpper}
                     onChange={(e) => {
-                      const val = parseFloat(e.target.value) || 2.4;
+                      const val = parseFloat(e.target.value) || 2.0;
                       setDraft({
                         ...draft,
                         zScoreUpper: val,
@@ -397,14 +407,14 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 </div>
                 <div>
                   <label className="block text-slate-400 mb-1 text-[11px]">
-                    {isAr ? 'عتبة الدخول (≤ -2.20σ):' : 'Entry Threshold (≤ -2.20σ):'}
+                    {isAr ? 'عتبة الدخول (≤ -2.00σ):' : 'Entry Threshold (≤ -2.00σ):'}
                   </label>
                   <input
                     type="number"
                     step="0.05"
-                    value={draft.zScoreLower ?? -2.2}
+                    value={draft.zScoreLower ?? -2.0}
                     onChange={(e) => {
-                      const val = parseFloat(e.target.value) || -2.2;
+                      const val = parseFloat(e.target.value) || -2.0;
                       setDraft({
                         ...draft,
                         zScoreLower: val,
@@ -412,6 +422,75 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                       });
                     }}
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-100 font-mono"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Filters & Round Entry Window Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+              <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800 space-y-1.5">
+                <label className="block text-slate-300 font-semibold text-[11px]">
+                  {isAr ? 'فلتر الاتجاه (ADX < X):' : 'ADX Trend Filter (< X):'}
+                </label>
+                <input
+                  type="number"
+                  min="5"
+                  max="50"
+                  value={draft.adxThreshold ?? 20}
+                  onChange={(e) => setDraft({ ...draft, adxThreshold: parseFloat(e.target.value) || 20 })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-slate-100 font-mono"
+                />
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800 space-y-1.5">
+                <label className="block text-slate-300 font-semibold text-[11px]">
+                  {isAr ? 'فلتر التقلب RV (من - إلى bp):' : 'RV Filter (Min - Max bp):'}
+                </label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={draft.rvMinBp ?? 9}
+                    onChange={(e) => setDraft({ ...draft, rvMinBp: parseFloat(e.target.value) || 9 })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-slate-100 font-mono text-center"
+                    title="Min RV bp"
+                  />
+                  <input
+                    type="number"
+                    min="2"
+                    max="200"
+                    value={draft.rvMaxBp ?? 25}
+                    onChange={(e) => setDraft({ ...draft, rvMaxBp: parseFloat(e.target.value) || 25 })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-slate-100 font-mono text-center"
+                    title="Max RV bp"
+                  />
+                </div>
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800 space-y-1.5">
+                <label className="block text-slate-300 font-semibold text-[11px]">
+                  {isAr ? 'نافذة الدخول بالجولة (دقيقة من - إلى):' : 'Round Window (Min Start - End):'}
+                </label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <input
+                    type="number"
+                    min="0"
+                    max="14"
+                    value={draft.entryWindowStartMin ?? 3}
+                    onChange={(e) => setDraft({ ...draft, entryWindowStartMin: Math.max(0, parseInt(e.target.value) || 3) })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-amber-300 font-mono font-bold text-center"
+                    title="Start Minute"
+                  />
+                  <input
+                    type="number"
+                    min="1"
+                    max="14"
+                    value={draft.entryWindowEndMin ?? 10}
+                    onChange={(e) => setDraft({ ...draft, entryWindowEndMin: Math.min(14, parseInt(e.target.value) || 10) })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-amber-300 font-mono font-bold text-center"
+                    title="End Minute"
                   />
                 </div>
               </div>

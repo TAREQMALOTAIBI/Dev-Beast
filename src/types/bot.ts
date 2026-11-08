@@ -26,6 +26,11 @@ export interface BotConfig {
   singleTradePerContract?: boolean; // Strictly max 1 trade per 15-minute contract
   cooldownMinutes?: number; // Minimum cooldown period between trades in minutes
   calculateOnCandleClose?: boolean; // Evaluate signals strictly upon 1m candle close (true) or live ticks (false)
+  adxThreshold?: number; // Max ADX trend filter threshold (default 20)
+  rvMinBp?: number; // Min Realized Volatility in bp (default 9)
+  rvMaxBp?: number; // Max Realized Volatility in bp (default 25)
+  entryWindowStartMin?: number; // Start minute in 15m round (default 3)
+  entryWindowEndMin?: number; // End minute in 15m round (default 10)
 }
 
 export interface LimitlessMarketDetails {

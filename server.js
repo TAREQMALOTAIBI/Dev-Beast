@@ -1296,30 +1296,35 @@ function computeServerAdx14(candles, period = 14) {
   return adx;
 }
 
-function evaluateServerDocumentFilters(closes, candles) {
+function evaluateServerDocumentFilters(closes, candles, nowMs = Date.now()) {
   const rvBp = computeServerRealizedVol3m(closes);
   const adxVal = computeServerAdx14(candles, 14);
 
-  // Document 6: 10 bp < RV_3m < 60 bp & ADX(14, 1m) < 25
-  const passedRv = rvBp > 10 && rvBp < 60;
-  const passedAdx = adxVal < 25;
-  const canEnter = passedRv && passedAdx;
+  // Current minute within the 15-minute round (0..14)
+  const currentMinute = Math.floor(nowMs / 60000) % 15;
+  const passedWindow = currentMinute >= 3 && currentMinute <= 10;
+
+  // Filters: 9 bp <= RV_3m <= 25 bp, ADX(14, 1m) < 20, and Round Minute 3..10
+  const passedRv = rvBp >= 9 && rvBp <= 25;
+  const passedAdx = adxVal < 20;
+  const canEnter = passedRv && passedAdx && passedWindow;
+
+  const blockReason = !passedWindow
+    ? `Round Minute ${currentMinute} outside [3..10] window`
+    : !passedRv
+    ? `RV_3m=${rvBp.toFixed(1)}bp outside 9-25bp`
+    : !passedAdx
+    ? `ADX=${adxVal.toFixed(1)} >= 20 (Trending)`
+    : null;
 
   return {
-    rv3m: { valueBp: rvBp, passed: passedRv, minBp: 10, maxBp: 60 },
-    adx14: { value: adxVal, passed: passedAdx, threshold: 25 },
+    rv3m: { valueBp: rvBp, passed: passedRv, minBp: 9, maxBp: 25 },
+    adx14: { value: adxVal, passed: passedAdx, threshold: 20 },
+    roundWindow: { currentMinute, startMin: 3, endMin: 10, passed: passedWindow },
     canEnterShort: canEnter,
     canEnterLong: canEnter,
-    blockReasonShort: !passedRv
-      ? `RV_3m=${rvBp.toFixed(1)}bp outside 10-60bp`
-      : !passedAdx
-      ? `ADX=${adxVal.toFixed(1)} >= 25 (Trending)`
-      : null,
-    blockReasonLong: !passedRv
-      ? `RV_3m=${rvBp.toFixed(1)}bp outside 10-60bp`
-      : !passedAdx
-      ? `ADX=${adxVal.toFixed(1)} >= 25 (Trending)`
-      : null,
+    blockReasonShort: blockReason,
+    blockReasonLong: blockReason,
   };
 }
 
@@ -1370,8 +1375,8 @@ function evaluateServerLiveWindow(closes, latestCandleTime, isHistoricalSeed = f
   const validContractOpenPrice =
     Number.isFinite(parsedOpenPrice) && parsedOpenPrice > 0 ? parsedOpenPrice : null;
 
-  // Document 6: 180-period historical candles (3 hours)
-  const windowLength = Math.min(evalCloses.length, 180);
+  // 12-period historical candles (12 minutes)
+  const windowLength = Math.min(evalCloses.length, 12);
   const liveWindow = evalCloses.slice(-windowLength);
   const { mean, stdDev, zScore: liveZ } = computeServerRollingStats(liveWindow, validContractOpenPrice);
 
@@ -1379,9 +1384,9 @@ function evaluateServerLiveWindow(closes, latestCandleTime, isHistoricalSeed = f
 
   let triggeredSignal = null;
 
-  // Document 6 Asymmetric Thresholds:
-  // Short: +2.4σ / Long: -2.2σ measured from Contract Open Price
-  if (liveZ >= 2.40) {
+  // Entry Thresholds:
+  // Short: +2.00σ / Long: -2.00σ measured from Contract Open Price
+  if (liveZ >= 2.00) {
     serverArmedUpper = true;
     if (docFilters.canEnterShort) {
       triggeredSignal = 'ENTRY_SHORT';
@@ -1390,7 +1395,7 @@ function evaluateServerLiveWindow(closes, latestCandleTime, isHistoricalSeed = f
     serverArmedUpper = false;
   }
 
-  if (liveZ <= -2.20) {
+  if (liveZ <= -2.00) {
     serverArmedLower = true;
     if (docFilters.canEnterLong) {
       triggeredSignal = 'ENTRY_LONG';

@@ -22,6 +22,12 @@ export interface AdvancedFiltersStatus {
     passed: boolean;
     threshold: number;
   };
+  roundWindow: {
+    currentMinute: number;
+    startMin: number;
+    endMin: number;
+    passed: boolean;
+  };
   canEnterShort: boolean;
   canEnterLong: boolean;
   blockReasonShort: string | null;
@@ -31,11 +37,11 @@ export interface AdvancedFiltersStatus {
 /**
  * Volatility Filter (RV_3m):
  * Realized Volatility over last 3 minutes expressed in basis points (bp)
- * 10 bp < RV < 60 bp (1 bp = 0.01% = 0.0001)
+ * Default range: 9 bp - 25 bp (1 bp = 0.01% = 0.0001)
  */
 export function calculateRealizedVol3m(closePrices: number[]): number {
   const n = closePrices.length;
-  if (n < 4) return 25; // default neutral 25 bp if not enough candles
+  if (n < 4) return 15; // default neutral 15 bp if not enough candles
   let sumSq = 0;
   for (let i = 0; i < 3; i++) {
     const p1 = closePrices[n - 1 - i];
@@ -46,17 +52,17 @@ export function calculateRealizedVol3m(closePrices: number[]): number {
     }
   }
   const rv = Math.sqrt(sumSq);
-  // Convert to basis points (e.g. 0.0025 = 25 bp)
+  // Convert to basis points (e.g. 0.0015 = 15 bp)
   return rv * 10000;
 }
 
 /**
  * ADX(14, 1m) Trend Filter:
- * Measures trend strength. Strategy stops if ADX >= 25 (Trending market).
- * Passed if ADX < 25.
+ * Measures trend strength. Strategy stops if ADX >= 20 (Trending market).
+ * Passed if ADX < 20.
  */
 export function calculateAdx14(candles: import('../types/bot').CandleData[], period = 14): number {
-  if (candles.length < period * 2) return 15; // default calm 15 if buffer building
+  if (candles.length < period * 2) return 14; // default calm 14 if buffer building
   const trList: number[] = [];
   const plusDmList: number[] = [];
   const minusDmList: number[] = [];
@@ -82,7 +88,7 @@ export function calculateAdx14(candles: import('../types/bot').CandleData[], per
     minusDmList.push(minusDm);
   }
 
-  if (trList.length < period) return 15;
+  if (trList.length < period) return 14;
 
   // Wilder's smoothing
   let trSmooth = trList.slice(0, period).reduce((a, b) => a + b, 0);
@@ -103,7 +109,7 @@ export function calculateAdx14(candles: import('../types/bot').CandleData[], per
     dxList.push(dx);
   }
 
-  if (dxList.length < period) return 15;
+  if (dxList.length < period) return 14;
 
   let adx = dxList.slice(0, period).reduce((a, b) => a + b, 0) / period;
   for (let i = period; i < dxList.length; i++) {
@@ -114,43 +120,76 @@ export function calculateAdx14(candles: import('../types/bot').CandleData[], per
 }
 
 /**
- * Evaluates the Document 6 filters:
- * 1) Volatility Filter: 10 bp < RV_3m < 60 bp
- * 2) Trend Filter: ADX(14, 1m) < 25
+ * Evaluates the active quant filters:
+ * 1) Volatility Filter: 9 bp <= RV_3m <= 25 bp
+ * 2) Trend Filter: ADX(14, 1m) < 20
+ * 3) Round Entry Window: Minute 3 to Minute 10 of the 15-minute round
  */
 export function evaluateDocumentFilters(params: {
   closePrices: number[];
   candles?: import('../types/bot').CandleData[];
+  rvMinBp?: number;
+  rvMaxBp?: number;
+  adxThreshold?: number;
+  entryWindowStartMin?: number;
+  entryWindowEndMin?: number;
+  nowMs?: number;
 }): AdvancedFiltersStatus {
-  const { closePrices, candles = [] } = params;
+  const {
+    closePrices,
+    candles = [],
+    rvMinBp = 9,
+    rvMaxBp = 25,
+    adxThreshold = 20,
+    entryWindowStartMin = 3,
+    entryWindowEndMin = 10,
+    nowMs = Date.now(),
+  } = params;
+
   const rvBp = calculateRealizedVol3m(closePrices);
   const adx = calculateAdx14(candles, 14);
 
-  const passedRv = rvBp > 10 && rvBp < 60;
-  const passedAdx = adx < 25;
+  // Current minute within the 15-minute round (0..14)
+  const currentMinute = Math.floor(nowMs / 60000) % 15;
+  const passedWindow = currentMinute >= entryWindowStartMin && currentMinute <= entryWindowEndMin;
 
-  const canEnter = passedRv && passedAdx;
+  const passedRv = rvBp >= rvMinBp && rvBp <= rvMaxBp;
+  const passedAdx = adx < adxThreshold;
+
+  const canEnter = passedRv && passedAdx && passedWindow;
 
   let blockReason: string | null = null;
-  if (!passedRv) {
-    blockReason = rvBp <= 10
-      ? `تقلبات منخفضة جداً (${rvBp.toFixed(1)} bp <= 10 bp - سكون)`
-      : `تقلبات مفرطة (${rvBp.toFixed(1)} bp >= 60 bp - انهيارات/انفجارات)`;
+  if (!passedWindow) {
+    blockReason =
+      currentMinute < entryWindowStartMin
+        ? `خارج نافذة الدخول (الدقيقة ${currentMinute} < الدقيقة ${entryWindowStartMin} بداية النافذة)`
+        : `انتهت نافذة الدخول للجولة الحالية (الدقيقة ${currentMinute} > الدقيقة ${entryWindowEndMin})`;
+  } else if (!passedRv) {
+    blockReason =
+      rvBp < rvMinBp
+        ? `تقلبات منخفضة جداً (${rvBp.toFixed(1)} bp < ${rvMinBp} bp - سكون)`
+        : `تقلبات مفرطة (${rvBp.toFixed(1)} bp > ${rvMaxBp} bp - خارج نطاق ${rvMinBp}-${rvMaxBp} bp)`;
   } else if (!passedAdx) {
-    blockReason = `ترند قوي جداً ADX=${adx.toFixed(1)} >= 25 (إيقاف الاستراتيجية)`;
+    blockReason = `ترند قوي ADX=${adx.toFixed(1)} >= ${adxThreshold} (إيقاف الدخول)`;
   }
 
   return {
     rv3m: {
       valueBp: rvBp,
       passed: passedRv,
-      minBp: 10,
-      maxBp: 60,
+      minBp: rvMinBp,
+      maxBp: rvMaxBp,
     },
     adx14: {
       value: adx,
       passed: passedAdx,
-      threshold: 25,
+      threshold: adxThreshold,
+    },
+    roundWindow: {
+      currentMinute,
+      startMin: entryWindowStartMin,
+      endMin: entryWindowEndMin,
+      passed: passedWindow,
     },
     canEnterShort: canEnter,
     canEnterLong: canEnter,
@@ -161,15 +200,15 @@ export function evaluateDocumentFilters(params: {
 
 /**
  * Calculates Z-Score measuring price deviation directly from the active 15m Contract Open Price (Price to Beat),
- * normalized by the 180-period statistical standard deviation (σ):
+ * normalized by the 12-period statistical standard deviation (σ):
  * Z = (CurrentPrice - ContractOpenPrice) / StdDev
  */
 export function calculateZScore(
   closePrices: number[],
-  upperThreshold = 2.4,
-  entryThreshold = 2.4,
-  lowerThreshold = -2.2,
-  lowerEntryThreshold = -2.2,
+  upperThreshold = 2.0,
+  entryThreshold = 2.0,
+  lowerThreshold = -2.0,
+  lowerEntryThreshold = -2.0,
   contractOpenPrice?: number | null
 ): {
   mean: number;

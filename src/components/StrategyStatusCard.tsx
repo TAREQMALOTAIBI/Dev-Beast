@@ -82,12 +82,12 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
 
   const docFilters = advancedFiltersStatus || (threeFiltersStatus?.rv3m ? threeFiltersStatus : null);
 
-  // Document 6: Asymmetric thresholds (Short +2.40σ / Long -2.20σ)
-  const safeUpperThresh = Number.isFinite(Number(config?.zScoreUpper)) ? Number(config.zScoreUpper) : 2.4;
+  // Symmetric thresholds (Short +2.00σ / Long -2.00σ)
+  const safeUpperThresh = Number.isFinite(Number(config?.zScoreUpper)) ? Number(config.zScoreUpper) : 2.0;
   const lowerThresh =
     config?.zScoreLower !== undefined && Number.isFinite(Number(config.zScoreLower))
       ? Number(config.zScoreLower)
-      : -2.2;
+      : -2.0;
   const safeCurrentZ = Number.isFinite(Number(currentZScore)) ? Number(currentZScore) : 0;
 
   // Upper direction phase (Short / Down): +2.40σ + Document 6 Filters (RV & ADX)
@@ -121,8 +121,8 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
           <h3 className="font-bold text-slate-100 text-xs tracking-wider uppercase flex items-center gap-1.5">
             <span>
               {isAr
-                ? `استراتيجية التداول الكمية (1m Close · انحراف عن سعر افتتاح العقد · Long -2.2σ / Short +2.4σ)`
-                : `Document 6 Quant Model (1m Close · Contract Open Price Anchor · Long -2.2σ / Short +2.4σ)`}
+                ? `استراتيجية التداول الكمية (1m Close · 12 شمعة · Long -2.00σ / Short +2.00σ)`
+                : `Quant Trading Strategy (1m Close · 12 Candles · Long -2.00σ / Short +2.00σ)`}
             </span>
           </h3>
         </div>
@@ -305,10 +305,10 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             <span>
               {isAr
                 ? (botActive
-                    ? `⚡ محرك البث نشط (${config.calculateOnCandleClose !== false ? 'حساب عند إغلاق الشمعة 1m' : 'لحظي'} · ربع-كيلي 3-5% · قفل 15m): Short: +2.40σ / Long: -2.20σ مع فلاتر RV و ADX`
+                    ? `⚡ محرك البث نشط (إغلاق 1m · 12 شمعة · نافذة الدقيقة 3-10 · صفقة واحدة/15m): Short: +2.00σ / Long: -2.00σ مع فلاتر RV (9-25 bp) و ADX (< 20)`
                     : 'التنفيذ التلقائي متوقف حالياً. اضغط الزر أعلاه لتشغيل الروبوت.')
                 : (botActive
-                    ? `⚡ Engine active (${config.calculateOnCandleClose !== false ? 'On 1m Candle Close' : 'Live Tick'} · Quarter-Kelly 3-5% · 15m Lock): Short: +2.40σ / Long: -2.20σ + RV & ADX filters.`
+                    ? `⚡ Engine active (1m Close · 12 Candles · Min 3-10 Window · 1 Trade/15m): Short: +2.00σ / Long: -2.00σ + RV (9-25 bp) & ADX (< 20).`
                     : 'Automated execution is paused. Click above to start.')}
             </span>
           </div>
@@ -353,50 +353,73 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
         <div className="flex items-center justify-between border-b border-slate-800/80 pb-2 flex-wrap gap-1.5">
           <span className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-            <span>{isAr ? 'معلمات النموذج الكمي المعتمد (Document 6):' : 'Document 6 Approved Quant Parameters:'}</span>
+            <span>{isAr ? 'معلمات النموذج الكمي المعتمد (12 شمعة · 1m):' : 'Approved Quant Model Parameters (12 Candles · 1m):'}</span>
           </span>
           <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-500/50">
-            {isAr ? `Long: -2.20σ / Short: +2.40σ` : `Long: -2.20σ / Short: +2.40σ`}
+            {isAr ? `Long: ${lowerThresh.toFixed(2)}σ / Short: +${safeUpperThresh.toFixed(2)}σ` : `Long: ${lowerThresh.toFixed(2)}σ / Short: +${safeUpperThresh.toFixed(2)}σ`}
           </span>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] font-mono">
           <div className="p-2 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col">
-            <span className="text-slate-400 text-[10px]">{isAr ? 'توقيت الحساب والشموع:' : 'Timing & Lookback:'}</span>
-            <span className="text-sky-300 font-bold">{config.calculateOnCandleClose !== false ? (isAr ? 'إغلاق 1m · 180 (3h)' : '1m Close · 180 (3h)') : (isAr ? 'لحظي Live · 180 (3h)' : 'Live Tick · 180 (3h)')}</span>
+            <span className="text-slate-400 text-[10px]">{isAr ? 'الشموع وفريم البث:' : 'Candles & Stream:'}</span>
+            <span className="text-sky-300 font-bold">{isAr ? `${config.periods || 12} شمعة · 1m` : `${config.periods || 12} Candles · 1m`}</span>
           </div>
           <div className="p-2 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col">
-            <span className="text-slate-400 text-[10px]">{isAr ? 'عتبات الدخول:' : 'Z-Thresholds:'}</span>
-            <span className="text-emerald-400 font-bold">L: -2.2σ / S: +2.4σ</span>
+            <span className="text-slate-400 text-[10px]">{isAr ? 'عتبات الدخول:' : 'Entry Thresholds:'}</span>
+            <span className="text-emerald-400 font-bold">{`L: ${lowerThresh.toFixed(2)}σ / S: +${safeUpperThresh.toFixed(2)}σ`}</span>
+          </div>
+          <div className="p-2 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col">
+            <span className="text-slate-400 text-[10px]">{isAr ? 'نافذة الدخول في الجولة:' : 'Round Entry Window:'}</span>
+            <span className="text-amber-400 font-bold">{isAr ? `دقيقة ${config.entryWindowStartMin ?? 3} إلى ${config.entryWindowEndMin ?? 10} (1/15m)` : `Min ${config.entryWindowStartMin ?? 3}-${config.entryWindowEndMin ?? 10} (Max 1/15m)`}</span>
           </div>
           <div className="p-2 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col">
             <span className="text-slate-400 text-[10px]">{isAr ? 'سقف السعر والأمر:' : 'Max Price & Order:'}</span>
-            <span className="text-amber-400 font-bold">46¢ · FAK (IOC)</span>
-          </div>
-          <div className="p-2 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col">
-            <span className="text-slate-400 text-[10px]">{isAr ? 'الحجم ورأس المال:' : 'Sizing & Risk:'}</span>
-            <span className="text-slate-100 font-bold">0.25×Kelly (3-5%)</span>
+            <span className="text-slate-100 font-bold">46¢ · FAK (1/15m)</span>
           </div>
         </div>
 
-        {/* Live Document 6 Filters Status (RV_3m & ADX_14) */}
-        <div className="pt-2 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] font-mono">
+        {/* Live Filters Status (Round Window 3-10m, RV 9-25 bp, ADX < 20) */}
+        <div className="pt-2 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] font-mono">
           <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900/60 border border-slate-800/80">
             <span className="text-slate-400">
-              {isAr ? 'فلتر التقلب (RV: 10-60 bp):' : 'Volatility Filter (RV: 10-60 bp):'}
+              {isAr
+                ? `نافذة الجولة (د ${config.entryWindowStartMin ?? 3}-${config.entryWindowEndMin ?? 10}):`
+                : `Round Window (m ${config.entryWindowStartMin ?? 3}-${config.entryWindowEndMin ?? 10}):`}
+            </span>
+            <span
+              className={`font-bold flex items-center gap-1 ${
+                docFilters?.roundWindow ? (docFilters.roundWindow.passed ? 'text-emerald-400' : 'text-amber-400') : 'text-emerald-400'
+              }`}
+              dir="ltr"
+            >
+              <span>
+                {docFilters?.roundWindow
+                  ? `Min ${docFilters.roundWindow.currentMinute}/15`
+                  : `Min ${Math.floor(Date.now() / 60000) % 15}/15`}
+              </span>
+              <span>{docFilters?.roundWindow ? (docFilters.roundWindow.passed ? '✓' : '✗') : '✓'}</span>
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900/60 border border-slate-800/80">
+            <span className="text-slate-400">
+              {isAr
+                ? `فلتر التقلب (RV: ${config.rvMinBp ?? 9}-${config.rvMaxBp ?? 25} bp):`
+                : `Volatility (RV: ${config.rvMinBp ?? 9}-${config.rvMaxBp ?? 25} bp):`}
             </span>
             <span className={`font-bold flex items-center gap-1 ${docFilters?.rv3m?.passed ? 'text-emerald-400' : 'text-rose-400'}`} dir="ltr">
-              <span>{docFilters?.rv3m ? `${docFilters.rv3m.valueBp.toFixed(1)} bp` : '18.5 bp'}</span>
+              <span>{docFilters?.rv3m ? `${docFilters.rv3m.valueBp.toFixed(1)} bp` : '15.0 bp'}</span>
               <span>{docFilters?.rv3m?.passed ? '✓' : '✗'}</span>
             </span>
           </div>
 
           <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900/60 border border-slate-800/80">
             <span className="text-slate-400">
-              {isAr ? 'فلتر الاتجاه (ADX < 25):' : 'Trend Filter (ADX < 25):'}
+              {isAr ? `فلتر الاتجاه (ADX < ${config.adxThreshold ?? 20}):` : `Trend Filter (ADX < ${config.adxThreshold ?? 20}):`}
             </span>
             <span className={`font-bold flex items-center gap-1 ${docFilters?.adx14?.passed ? 'text-emerald-400' : 'text-rose-400'}`} dir="ltr">
-              <span>{docFilters?.adx14 ? `${docFilters.adx14.value.toFixed(1)}` : '16.2'}</span>
+              <span>{docFilters?.adx14 ? `${docFilters.adx14.value.toFixed(1)}` : '14.2'}</span>
               <span>{docFilters?.adx14?.passed ? '✓' : '✗'}</span>
             </span>
           </div>
@@ -609,7 +632,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
                 <span className="font-bold text-amber-300">${Number(metric.mean || 0).toFixed(2)}</span>
               </div>
               <div>
-                <span className="text-slate-500">{isAr ? 'انحراف 180م (σ): ' : 'StdDev 180m (σ): '}</span>
+                <span className="text-slate-500">{isAr ? `انحراف ${config.periods || 12}م (σ): ` : `StdDev ${config.periods || 12}m (σ): `}</span>
                 <span className="font-bold text-slate-100">${Number(metric.stdDev || 0).toFixed(2)}</span>
               </div>
               <div>
@@ -622,7 +645,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             </div>
 
             <div className="pt-1.5 text-[10px] text-slate-400 border-t border-slate-900 flex flex-wrap items-center justify-between gap-1">
-              <span className="text-slate-400">Z = (Price - OpenPrice) / StdDev₁₈₀</span>
+              <span className="text-slate-400">Z = (Price - OpenPrice) / StdDev₁₂</span>
               <span className="text-emerald-300 font-bold bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/40">
                 ({(Number(metric.price || 0) - Number(metric.mean || 0)).toFixed(2)}) / {Number(metric.stdDev || 0).toFixed(2)} = {Number(metric.zScore || 0) > 0 ? '+' : ''}{Number(metric.zScore || 0).toFixed(2)}σ
               </span>
