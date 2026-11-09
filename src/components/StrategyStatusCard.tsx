@@ -121,8 +121,8 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
           <h3 className="font-bold text-slate-100 text-xs tracking-wider uppercase flex items-center gap-1.5">
             <span>
               {isAr
-                ? `استراتيجية التداول الكمية (1m Close · 12 شمعة · Long -2.00σ / Short +2.00σ)`
-                : `Quant Trading Strategy (1m Close · 12 Candles · Long -2.00σ / Short +2.00σ)`}
+                ? `استراتيجية التداول الكمية (1m Close · 45 شمعة · Long -2.00σ / Short +2.00σ)`
+                : `Quant Trading Strategy (1m Close · 45 Candles · Long -2.00σ / Short +2.00σ)`}
             </span>
           </h3>
         </div>
@@ -305,10 +305,10 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             <span>
               {isAr
                 ? (botActive
-                    ? `⚡ محرك البث نشط (إغلاق 1m · 12 شمعة · نافذة الدقيقة 3-10 · صفقة واحدة/15m): Short: +2.00σ / Long: -2.00σ مع فلاتر RV (9-25 bp) و ADX (< 20)`
+                    ? `⚡ محرك البث نشط (إغلاق 1m · 45 شمعة · نافذة الدقيقة 3-10 · صفقة واحدة/15m): Short: +2.00σ / Long: -2.00σ مع فلاتر RV (9-25 bp) و ADX (< 20)`
                     : 'التنفيذ التلقائي متوقف حالياً. اضغط الزر أعلاه لتشغيل الروبوت.')
                 : (botActive
-                    ? `⚡ Engine active (1m Close · 12 Candles · Min 3-10 Window · 1 Trade/15m): Short: +2.00σ / Long: -2.00σ + RV (9-25 bp) & ADX (< 20).`
+                    ? `⚡ Engine active (1m Close · 45 Candles · Min 3-10 Window · 1 Trade/15m): Short: +2.00σ / Long: -2.00σ + RV (9-25 bp) & ADX (< 20).`
                     : 'Automated execution is paused. Click above to start.')}
             </span>
           </div>
@@ -353,7 +353,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
         <div className="flex items-center justify-between border-b border-slate-800/80 pb-2 flex-wrap gap-1.5">
           <span className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-            <span>{isAr ? 'معلمات النموذج الكمي المعتمد (12 شمعة · 1m):' : 'Approved Quant Model Parameters (12 Candles · 1m):'}</span>
+            <span>{isAr ? 'معلمات النموذج الكمي المعتمد (45 شمعة · 1m):' : 'Approved Quant Model Parameters (45 Candles · 1m):'}</span>
           </span>
           <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-500/50">
             {isAr ? `Long: ${lowerThresh.toFixed(2)}σ / Short: +${safeUpperThresh.toFixed(2)}σ` : `Long: ${lowerThresh.toFixed(2)}σ / Short: +${safeUpperThresh.toFixed(2)}σ`}
@@ -363,7 +363,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] font-mono">
           <div className="p-2 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col">
             <span className="text-slate-400 text-[10px]">{isAr ? 'الشموع وفريم البث:' : 'Candles & Stream:'}</span>
-            <span className="text-sky-300 font-bold">{isAr ? `${config.periods || 12} شمعة · 1m` : `${config.periods || 12} Candles · 1m`}</span>
+            <span className="text-sky-300 font-bold">{isAr ? `${config.periods || 45} شمعة · 1m` : `${config.periods || 45} Candles · 1m`}</span>
           </div>
           <div className="p-2 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col">
             <span className="text-slate-400 text-[10px]">{isAr ? 'عتبات الدخول:' : 'Entry Thresholds:'}</span>
@@ -632,7 +632,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
                 <span className="font-bold text-amber-300">${Number(metric.mean || 0).toFixed(2)}</span>
               </div>
               <div>
-                <span className="text-slate-500">{isAr ? `انحراف ${config.periods || 12}م (σ): ` : `StdDev ${config.periods || 12}m (σ): `}</span>
+                <span className="text-slate-500">{isAr ? `انحراف ${config.periods || 45}م (σ): ` : `StdDev ${config.periods || 45}m (σ): `}</span>
                 <span className="font-bold text-slate-100">${Number(metric.stdDev || 0).toFixed(2)}</span>
               </div>
               <div>
@@ -645,7 +645,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             </div>
 
             <div className="pt-1.5 text-[10px] text-slate-400 border-t border-slate-900 flex flex-wrap items-center justify-between gap-1">
-              <span className="text-slate-400">Z = (Price - OpenPrice) / StdDev₁₂</span>
+              <span className="text-slate-400">Z = (Price - OpenPrice) / StdDev₄₅</span>
               <span className="text-emerald-300 font-bold bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/40">
                 ({(Number(metric.price || 0) - Number(metric.mean || 0)).toFixed(2)}) / {Number(metric.stdDev || 0).toFixed(2)} = {Number(metric.zScore || 0) > 0 ? '+' : ''}{Number(metric.zScore || 0).toFixed(2)}σ
               </span>

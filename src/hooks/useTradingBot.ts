@@ -22,7 +22,7 @@ import { soundController } from '../utils/audio';
 const DEFAULT_CONFIG: BotConfig = {
   symbol: 'BTCUSDT',
   timeframe: '1m',
-  periods: 12, // 12 Historical Candles (12 Minutes)
+  periods: 45, // 45 Historical Candles (45 Minutes)
   strategyDirection: 'BOTH', // Symmetric: Long (-2.00σ) / Short (+2.00σ)
   zScoreUpper: 2.0, // Short Entry Threshold: +2.00σ
   zScoreEntry: 2.0, // Short Entry Threshold: +2.00σ
@@ -60,7 +60,7 @@ export function useTradingBot() {
       if (saved) {
         const parsed = JSON.parse(saved);
         parsed.timeframe = '1m';
-        parsed.periods = 12;
+        parsed.periods = 45;
         parsed.calculateOnCandleClose = parsed.calculateOnCandleClose !== undefined ? parsed.calculateOnCandleClose : true;
         parsed.binanceWsUrl = 'wss://stream.binance.com/ws/btcusdt@kline_1m';
         if (parsed.binanceRestUrl && parsed.binanceRestUrl.includes('binance.vision')) {
@@ -83,8 +83,8 @@ export function useTradingBot() {
         if (!parsed.strategyDirection) {
           parsed.strategyDirection = 'BOTH';
         }
-        // Migrate to new strategy specification parameters (12 candles, Z ±2.00, ADX < 20, RV 9-25 bp, Min 3-10)
-        parsed.periods = 12;
+        // Migrate to new strategy specification parameters (45 candles, Z ±2.00, ADX < 20, RV 9-25 bp, Min 3-10)
+        parsed.periods = 45;
         parsed.zScoreUpper = 2.0;
         parsed.zScoreEntry = 2.0;
         parsed.zScoreLower = -2.0;
@@ -377,33 +377,17 @@ export function useTradingBot() {
         const wasCandleEntryShort = entryShortCandlesRef.current.has(candleTime);
         const wasCandleEntryLong = entryLongCandlesRef.current.has(candleTime);
 
-        // Upper Direction (Short / DOWN): Asymmetric Entry >= +2.40σ
+        // Entry arrows on chart: Only mark candles that were recorded as actual entries in this round
         if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'SHORT_ONLY') {
           if (wasCandleEntryShort) {
-            hadArmedUpper = false;
             signal = 'ENTRY_SHORT';
             dir = 'SHORT';
-          } else if (stats.zScore >= cfg.zScoreUpper) {
-            hadArmedUpper = true;
-            signal = 'ENTRY_SHORT';
-            dir = 'SHORT';
-          } else if (stats.zScore <= 0) {
-            hadArmedUpper = false;
           }
         }
-
-        // Lower Direction (Long / UP): Asymmetric Entry <= -2.20σ
         if (cfg.strategyDirection === 'BOTH' || cfg.strategyDirection === 'LONG_ONLY') {
           if (wasCandleEntryLong) {
-            hadArmedLower = false;
             signal = 'ENTRY_LONG';
             dir = 'LONG';
-          } else if (stats.zScore <= lowerThresh) {
-            hadArmedLower = true;
-            signal = 'ENTRY_LONG';
-            dir = 'LONG';
-          } else if (stats.zScore >= 0) {
-            hadArmedLower = false;
           }
         }
       }

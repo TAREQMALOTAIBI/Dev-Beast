@@ -31,7 +31,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
     setDraft({
       symbol: 'BTCUSDT',
       timeframe: '1m',
-      periods: 12,
+      periods: 45,
       strategyDirection: 'BOTH',
       zScoreUpper: 2.0,
       zScoreEntry: 2.0,
@@ -76,12 +76,12 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
             <Radio className="w-5 h-5 text-emerald-400 animate-pulse" />
             <div>
               <h2 className="text-base font-bold text-slate-100">
-                {isAr ? 'إعدادات استراتيجية التداول (1m Live WS · 12 شمعة · عقود 15 دقيقة)' : 'Trading Strategy Configuration (1m Live WS · 12 Candles · 15m Contracts)'}
+                {isAr ? 'إعدادات استراتيجية التداول (1m Live WS · 45 شمعة · عقود 15 دقيقة)' : 'Trading Strategy Configuration (1m Live WS · 45 Candles · 15m Contracts)'}
               </h2>
               <div className="text-[11px] text-slate-400">
                 {isAr
-                  ? '12 شمعة (1m) · عتبات (Short +2.00σ / Long -2.00σ) · RV (9-25 bp) · ADX < 20 · نافذة الدقيقة 3-10'
-                  : '12 Candles (1m) · Z (Short +2.00σ / Long -2.00σ) · RV (9-25 bp) · ADX < 20 · Min 3-10 Window'}
+                  ? '45 شمعة (1m) · عتبات (Short +2.00σ / Long -2.00σ) · RV (9-25 bp) · ADX < 20 · نافذة الدقيقة 3-10'
+                  : '45 Candles (1m) · Z (Short +2.00σ / Long -2.00σ) · RV (9-25 bp) · ADX < 20 · Min 3-10 Window'}
               </div>
             </div>
           </div>
@@ -272,19 +272,19 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-400 mb-1">{isAr ? 'عدد الشموع (12 شمعة)' : 'StdDev Window (12 Candles)'}</label>
+                <label className="block text-slate-400 mb-1">{isAr ? 'عدد الشموع (45 شمعة)' : 'StdDev Window (45 Candles)'}</label>
                 <input
                   type="number"
                   min="5"
                   max="300"
                   value={draft.periods}
-                  onChange={(e) => setDraft({ ...draft, periods: parseInt(e.target.value) || 12 })}
+                  onChange={(e) => setDraft({ ...draft, periods: parseInt(e.target.value) || 45 })}
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-100 font-mono"
                 />
               </div>
             </div>
             <div className="mt-1.5 text-[10px] text-slate-500 font-mono">
-              {isAr ? '💡 يتم حساب Z-Score بقياس بُعد السعر الحالي مباشرة عن سعر افتتاح جولة الـ 15 دقيقة (Price to Beat) مقسوماً على الانحراف المعياري لآخر 12 شمعة (1m).' : '💡 Z-Score measures distance from the active 15m Contract Open Price (Price to Beat) divided by the 12-candle Standard Deviation (σ).'}
+              {isAr ? '💡 يتم حساب Z-Score بقياس بُعد السعر الحالي مباشرة عن سعر افتتاح جولة الـ 15 دقيقة (Price to Beat) مقسوماً على الانحراف المعياري لآخر 45 شمعة (1m).' : '💡 Z-Score measures distance from the active 15m Contract Open Price (Price to Beat) divided by the 45-candle Standard Deviation (σ).'}
             </div>
           </div>
 
@@ -349,7 +349,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 onClick={() => setDraft({
                   ...draft,
                   timeframe: '1m',
-                  periods: 12,
+                  periods: 45,
                   calculateOnCandleClose: true,
                   zScoreUpper: 2.0,
                   zScoreEntry: 2.0,
@@ -368,7 +368,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 })}
                 className="px-2.5 py-1 rounded text-[11px] font-bold bg-emerald-950/80 hover:bg-emerald-900/90 text-emerald-300 border border-emerald-600/50 cursor-pointer"
               >
-                {isAr ? '🎯 الإعدادات المعتمدة (12 شمعة 1m · Z ±2.00σ · ADX < 20 · RV 9-25 bp · الدقيقة 3-10)' : '🎯 Approved Preset (12 Candles 1m · Z ±2.00σ · ADX < 20 · RV 9-25 bp · Min 3-10)'}
+                {isAr ? '🎯 الإعدادات المعتمدة (45 شمعة 1m · Z ±2.00σ · ADX < 20 · RV 9-25 bp · الدقيقة 3-10)' : '🎯 Approved Preset (45 Candles 1m · Z ±2.00σ · ADX < 20 · RV 9-25 bp · Min 3-10)'}
               </button>
             </div>
 

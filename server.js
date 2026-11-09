@@ -1378,8 +1378,8 @@ function evaluateServerLiveWindow(closes, latestCandleTime, isHistoricalSeed = f
   const validContractOpenPrice =
     Number.isFinite(parsedOpenPrice) && parsedOpenPrice > 0 ? parsedOpenPrice : null;
 
-  // 12-period historical candles (12 minutes)
-  const windowLength = Math.min(evalCloses.length, 12);
+  // 45-period historical candles (45 minutes)
+  const windowLength = Math.min(evalCloses.length, 45);
   const liveWindow = evalCloses.slice(-windowLength);
   const { mean, stdDev, zScore: liveZ } = computeServerRollingStats(liveWindow, validContractOpenPrice);
 
