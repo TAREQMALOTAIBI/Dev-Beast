@@ -332,7 +332,10 @@ async function pollActiveBtcMarket() {
         clearTradeGuardFromDisk();
         broadcastSse('tradeGuardUpdate', null);
       }
-      console.log(`[Limitless 15m Rollover] New 15-minute contract active on VM: ${market.slug} (Armed state preserved across contract rollover)`);
+      serverArmedUpper = false;
+      serverArmedLower = false;
+      serverLastEvaluatedClosedCandleTime = 0;
+      console.log(`[Limitless 15m Rollover] New 15-minute contract active on VM: ${market.slug} (Armed state reset for fresh round)`);
       broadcastSse('marketChange', cachedActiveBtc);
     }
 

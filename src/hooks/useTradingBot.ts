@@ -475,10 +475,14 @@ export function useTradingBot() {
       });
       setAdvancedFiltersStatus(docFilters);
 
-      crossedUpperThresholdRef.current = hadArmedUpper;
-      setCrossedUpperThreshold(hadArmedUpper);
-      crossedLowerThresholdRef.current = hadArmedLower;
-      setCrossedLowerThreshold(hadArmedLower);
+      // Direct threshold arming: Armed only if the currently evaluated candle is at or beyond threshold
+      const isArmedUpperNow = evalMetric.zScore >= cfg.zScoreUpper;
+      const isArmedLowerNow = evalMetric.zScore <= lowerThresh;
+
+      crossedUpperThresholdRef.current = isArmedUpperNow;
+      setCrossedUpperThreshold(isArmedUpperNow);
+      crossedLowerThresholdRef.current = isArmedLowerNow;
+      setCrossedLowerThreshold(isArmedLowerNow);
 
       setRecentChartSignal(null);
 
@@ -958,6 +962,13 @@ export function useTradingBot() {
             localStorage.removeItem('limitless_last_trade_guard');
           } catch {}
         }
+        // Reset armed state and entry candle tracking for the fresh round
+        entryShortCandlesRef.current.clear();
+        entryLongCandlesRef.current.clear();
+        crossedUpperThresholdRef.current = false;
+        setCrossedUpperThreshold(false);
+        crossedLowerThresholdRef.current = false;
+        setCrossedLowerThreshold(false);
       }
     });
     const unsubOracle = limitlessService.subscribeOracle((orc) => setOracle(orc));
@@ -1173,6 +1184,14 @@ export function useTradingBot() {
             try {
               localStorage.removeItem('limitless_last_trade_guard');
             } catch {}
+          }
+          if (activeLimitlessMarketRef.current?.slug && activeLimitlessMarketRef.current.slug !== data.slug) {
+            entryShortCandlesRef.current.clear();
+            entryLongCandlesRef.current.clear();
+            crossedUpperThresholdRef.current = false;
+            setCrossedUpperThreshold(false);
+            crossedLowerThresholdRef.current = false;
+            setCrossedLowerThreshold(false);
           }
         }
       }
