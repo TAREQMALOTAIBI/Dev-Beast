@@ -306,6 +306,8 @@ export function useTradingBot() {
     });
   };
 
+  const lastRoundStartMsRef = useRef<number>(0);
+
   // Recompute metrics series: live UI ticker updates continuously, while signal evaluation & trade execution trigger strictly upon candle close when calculateOnCandleClose is true
   const rebuildMetrics = useCallback((
     candleList: CandleData[],
@@ -315,30 +317,55 @@ export function useTradingBot() {
   ) => {
     const result: ZScoreMetric[] = [];
     const closes = candleList.map((c) => c.close);
-    let hadArmedUpper = false;
-    let hadArmedLower = false;
 
     const lowerThresh = cfg.zScoreLower !== undefined ? cfg.zScoreLower : -cfg.zScoreUpper;
     const lowerEntryThresh = cfg.zScoreLowerEntry !== undefined ? cfg.zScoreLowerEntry : -cfg.zScoreEntry;
 
-    // Parse active 15-minute round's Open Price ("Price to Beat") as the baseline reference for Z-Score
-    const rawOpenPrice = activeLimitlessMarketRef.current?.openPrice;
-    const parsedOpenPrice =
-      rawOpenPrice !== undefined && rawOpenPrice !== null
-        ? Number(String(rawOpenPrice).replace(/[^0-9.-]/g, ''))
-        : NaN;
-    const validContractOpenPrice =
-      Number.isFinite(parsedOpenPrice) && parsedOpenPrice > 0 ? parsedOpenPrice : null;
+    // Detect 15-minute round boundary rollover (00, 15, 30, 45 minutes of the hour)
+    const latestCandle = candleList[candleList.length - 1];
+    const latestTimeMs = latestCandle
+      ? latestCandle.time > 1e11
+        ? latestCandle.time
+        : latestCandle.time * 1000
+      : Date.now();
+    const currentRoundStartMs = Math.floor(latestTimeMs / 900000) * 900000;
+
+    if (lastRoundStartMsRef.current > 0 && lastRoundStartMsRef.current !== currentRoundStartMs) {
+      // Automatic hard reset at the start of a new 15-minute round
+      entryShortCandlesRef.current.clear();
+      entryLongCandlesRef.current.clear();
+      crossedUpperThresholdRef.current = false;
+      setCrossedUpperThreshold(false);
+      crossedLowerThresholdRef.current = false;
+      setCrossedLowerThreshold(false);
+      setIsEntrySignal(false);
+      setActiveSignal(null);
+    }
+    lastRoundStartMsRef.current = currentRoundStartMs;
+
+    // Build a lookup of each 15-minute round's opening price from the same Binance feed
+    // This eliminates the ~$90 USDT/USD basis spread between Binance BTCUSDT and Chainlink BTC/USD
+    // and guarantees Z = 0.00σ at second 00:00 of every new 15-minute contract.
+    const roundOpenBySlot = new Map<number, number>();
+    for (let k = 0; k < candleList.length; k++) {
+      const cTimeMs = candleList[k].time > 1e11 ? candleList[k].time : candleList[k].time * 1000;
+      const slotMs = Math.floor(cTimeMs / 900000) * 900000;
+      if (!roundOpenBySlot.has(slotMs) && Number.isFinite(candleList[k].open) && candleList[k].open > 0) {
+        roundOpenBySlot.set(slotMs, candleList[k].open);
+      }
+    }
 
     for (let i = 0; i < candleList.length; i++) {
       const hasFullWindow = i >= cfg.periods - 1;
-      const isLatestLiveCandle = i === candleList.length - 1;
+      const cTimeMs = candleList[i].time > 1e11 ? candleList[i].time : candleList[i].time * 1000;
+      const slotMs = Math.floor(cTimeMs / 900000) * 900000;
+      const roundOpenPriceForCandle = roundOpenBySlot.get(slotMs) ?? candleList[i].open;
 
       if (i === 0) {
         const emptyMetric: ZScoreMetric = {
           time: candleList[i].time,
           price: candleList[i].close,
-          mean: validContractOpenPrice || candleList[i].close,
+          mean: roundOpenPriceForCandle,
           stdDev: 0,
           variance: 0,
           zScore: 0,
@@ -365,13 +392,13 @@ export function useTradingBot() {
         cfg.zScoreEntry,
         lowerThresh,
         lowerEntryThresh,
-        validContractOpenPrice
+        roundOpenPriceForCandle
       );
 
       let signal: 'ARMED_UPPER' | 'ARMED_LOWER' | 'ENTRY_SHORT' | 'ENTRY_LONG' | 'ARMED' | 'ENTRY' | null = null;
       let dir: 'SHORT' | 'LONG' | null = null;
 
-      // Evaluate on every candle with full SMA window
+      // Evaluate on every candle with full window
       if (hasFullWindow) {
         const candleTime = candleList[i].time;
         const wasCandleEntryShort = entryShortCandlesRef.current.has(candleTime);
@@ -448,6 +475,12 @@ export function useTradingBot() {
         }
       }
 
+      // Check whether the evaluated closed candle actually belongs to the CURRENT 15-minute round.
+      // During Minute 0 of a new round (before the first 1m candle of the new round closes),
+      // evalMetric is from the previous round and MUST NOT arm or trigger signals in the new round.
+      const evalMetricTimeMs = evalMetric.time > 1e11 ? evalMetric.time : evalMetric.time * 1000;
+      const isEvalCandleInCurrentRound = !evalOnClose || evalMetricTimeMs >= currentRoundStartMs;
+
       const docFilters = evaluateDocumentFilters({
         closePrices: evalCloses,
         candles: evalCandles,
@@ -459,9 +492,9 @@ export function useTradingBot() {
       });
       setAdvancedFiltersStatus(docFilters);
 
-      // Direct threshold arming: Armed only if the currently evaluated candle is at or beyond threshold
-      const isArmedUpperNow = evalMetric.zScore >= cfg.zScoreUpper;
-      const isArmedLowerNow = evalMetric.zScore <= lowerThresh;
+      // Direct threshold arming: Armed only if the currently evaluated candle belongs to the current round and is at/beyond threshold
+      const isArmedUpperNow = isEvalCandleInCurrentRound && evalMetric.zScore >= cfg.zScoreUpper;
+      const isArmedLowerNow = isEvalCandleInCurrentRound && evalMetric.zScore <= lowerThresh;
 
       crossedUpperThresholdRef.current = isArmedUpperNow;
       setCrossedUpperThreshold(isArmedUpperNow);
@@ -470,9 +503,10 @@ export function useTradingBot() {
 
       setRecentChartSignal(null);
 
-      // 3) Only evaluate entry signals and execute orders upon candle close (or every tick if evalOnClose is false)
+      // 3) Only evaluate entry signals and execute orders upon candle close within the current round
       const shouldEvaluateSignals =
         !isInitialLoad &&
+        isEvalCandleInCurrentRound &&
         (!evalOnClose || (isCandleCloseEvent && lastEvaluatedClosedCandleTimeRef.current !== evalMetric.time));
 
       if (shouldEvaluateSignals) {
@@ -933,11 +967,24 @@ export function useTradingBot() {
         !/(^|[^0-9])5-min/i.test(newMarket.slug) &&
         !/hourly/i.test(newMarket.slug)
       ) {
+        const prevSlug = activeLimitlessMarketRef.current?.slug;
+        const isNewRoundSlug = Boolean(prevSlug && prevSlug !== newMarket.slug);
+
         setActiveLimitlessMarket(newMarket);
         activeLimitlessMarketRef.current = newMarket;
-        if (candlesRef.current.length >= configRef.current.periods) {
-          rebuildMetricsRef.current(candlesRef.current, configRef.current, true);
+
+        if (isNewRoundSlug) {
+          // Reset armed state and entry candle tracking BEFORE rebuilding metrics for the fresh round
+          entryShortCandlesRef.current.clear();
+          entryLongCandlesRef.current.clear();
+          crossedUpperThresholdRef.current = false;
+          setCrossedUpperThreshold(false);
+          crossedLowerThresholdRef.current = false;
+          setCrossedLowerThreshold(false);
+          setIsEntrySignal(false);
+          setActiveSignal(null);
         }
+
         if (lastExecutedMarketSlugRef.current && lastExecutedMarketSlugRef.current !== newMarket.slug) {
           lastExecutedMarketSlugRef.current = '';
           lastExecutedTimestampRef.current = 0;
@@ -946,13 +993,10 @@ export function useTradingBot() {
             localStorage.removeItem('limitless_last_trade_guard');
           } catch {}
         }
-        // Reset armed state and entry candle tracking for the fresh round
-        entryShortCandlesRef.current.clear();
-        entryLongCandlesRef.current.clear();
-        crossedUpperThresholdRef.current = false;
-        setCrossedUpperThreshold(false);
-        crossedLowerThresholdRef.current = false;
-        setCrossedLowerThreshold(false);
+
+        if (candlesRef.current.length >= configRef.current.periods) {
+          rebuildMetricsRef.current(candlesRef.current, configRef.current, true);
+        }
       }
     });
     const unsubOracle = limitlessService.subscribeOracle((orc) => setOracle(orc));
@@ -1156,11 +1200,23 @@ export function useTradingBot() {
           !/(^|[^0-9])5-min/i.test(data.slug) &&
           !/hourly/i.test(data.slug)
         ) {
+          const prevSlug = activeLimitlessMarketRef.current?.slug;
+          const isNewRoundSlug = Boolean(prevSlug && prevSlug !== data.slug);
+
           setActiveLimitlessMarket(data);
           activeLimitlessMarketRef.current = data;
-          if (candlesRef.current.length >= configRef.current.periods) {
-            rebuildMetricsRef.current(candlesRef.current, configRef.current, true);
+
+          if (isNewRoundSlug) {
+            entryShortCandlesRef.current.clear();
+            entryLongCandlesRef.current.clear();
+            crossedUpperThresholdRef.current = false;
+            setCrossedUpperThreshold(false);
+            crossedLowerThresholdRef.current = false;
+            setCrossedLowerThreshold(false);
+            setIsEntrySignal(false);
+            setActiveSignal(null);
           }
+
           if (lastExecutedMarketSlugRef.current && lastExecutedMarketSlugRef.current !== data.slug) {
             lastExecutedMarketSlugRef.current = '';
             lastExecutedTimestampRef.current = 0;
@@ -1169,13 +1225,9 @@ export function useTradingBot() {
               localStorage.removeItem('limitless_last_trade_guard');
             } catch {}
           }
-          if (activeLimitlessMarketRef.current?.slug && activeLimitlessMarketRef.current.slug !== data.slug) {
-            entryShortCandlesRef.current.clear();
-            entryLongCandlesRef.current.clear();
-            crossedUpperThresholdRef.current = false;
-            setCrossedUpperThreshold(false);
-            crossedLowerThresholdRef.current = false;
-            setCrossedLowerThreshold(false);
+
+          if (candlesRef.current.length >= configRef.current.periods) {
+            rebuildMetricsRef.current(candlesRef.current, configRef.current, true);
           }
         }
       }

@@ -1370,13 +1370,16 @@ function evaluateServerLiveWindow(closes, latestCandleTime, isHistoricalSeed = f
   if (serverLastEvaluatedClosedCandleTime === evalCandleTime) return;
   serverLastEvaluatedClosedCandleTime = evalCandleTime;
 
-  const rawOpenPrice = cachedActiveBtc?.openPrice;
-  const parsedOpenPrice =
-    rawOpenPrice !== undefined && rawOpenPrice !== null
-      ? Number(String(rawOpenPrice).replace(/[^0-9.-]/g, ''))
-      : NaN;
-  const validContractOpenPrice =
-    Number.isFinite(parsedOpenPrice) && parsedOpenPrice > 0 ? parsedOpenPrice : null;
+  // Anchor baseline to the opening price of the current 15-minute round from the same Binance BTCUSDT feed
+  // to avoid the ~$90 USDT/USD basis spread between Binance BTCUSDT and Chainlink BTC/USD
+  const evalTimeMs = evalCandleTime > 1e11 ? evalCandleTime : evalCandleTime * 1000;
+  const currentRoundStartMs = Math.floor(evalTimeMs / 900000) * 900000;
+  const roundStartCandle = serverKlinesBuffer.find((c) => {
+    const tMs = c.time > 1e11 ? c.time : c.time * 1000;
+    return tMs >= currentRoundStartMs && tMs < currentRoundStartMs + 900000 && Number.isFinite(c.open) && c.open > 0;
+  });
+
+  const validContractOpenPrice = roundStartCandle ? roundStartCandle.open : null;
 
   // 45-period historical candles (45 minutes)
   const windowLength = Math.min(evalCloses.length, 45);

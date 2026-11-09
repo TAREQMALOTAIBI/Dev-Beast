@@ -90,19 +90,19 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
       : -2.0;
   const safeCurrentZ = Number.isFinite(Number(currentZScore)) ? Number(currentZScore) : 0;
 
-  // Upper direction phase (Short / Down): +2.40σ + Document 6 Filters (RV & ADX)
+  // Upper direction phase (Short / Down): +2.00σ + Filters (RV, ADX, Min 3-10)
   let upperPhase: 'MONITORING' | 'ARMED' | 'ENTRY_TRIGGERED' = 'MONITORING';
   if (isEntrySignal && (activeSignal === 'ENTRY_SHORT' || lastTradeDirection === 'SHORT')) {
     upperPhase = 'ENTRY_TRIGGERED';
-  } else if (crossedUpperThreshold || safeCurrentZ >= safeUpperThresh) {
+  } else if (crossedUpperThreshold) {
     upperPhase = 'ARMED';
   }
 
-  // Lower direction phase (Long / Up): -2.20σ + Document 6 Filters (RV & ADX)
+  // Lower direction phase (Long / Up): -2.00σ + Filters (RV, ADX, Min 3-10)
   let lowerPhase: 'MONITORING' | 'ARMED' | 'ENTRY_TRIGGERED' = 'MONITORING';
   if (isEntrySignal && (activeSignal === 'ENTRY_LONG' || lastTradeDirection === 'LONG')) {
     lowerPhase = 'ENTRY_TRIGGERED';
-  } else if (crossedLowerThreshold || safeCurrentZ <= lowerThresh) {
+  } else if (crossedLowerThreshold) {
     lowerPhase = 'ARMED';
   }
 
