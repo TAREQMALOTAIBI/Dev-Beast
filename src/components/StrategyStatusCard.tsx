@@ -84,7 +84,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
   const openPrice = Number(metric?.mean || priceDeviation?.openPrice || 0);
   const priceDiff = priceDeviation?.delta ?? (currentPrice && openPrice ? currentPrice - openPrice : 0);
   const absPriceDiff = Math.abs(priceDiff);
-  const isMove150Reached = absPriceDiff >= 150;
+  const isMove80Reached = absPriceDiff >= 80;
   const isUpLeading = priceDiff >= 0;
 
   return (
@@ -96,8 +96,8 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
           <h3 className="font-bold text-slate-100 text-xs tracking-wider uppercase flex items-center gap-1.5">
             <span>
               {isAr
-                ? 'استراتيجية تحرك 150$ · أمر GTC عند 20% · إلغاء عند بقاء 1 دقيقة'
-                : '$150 Movement Strategy · GTC @ 20% · Cancel @ 1m'}
+                ? 'استراتيجية تحرك 80$ · أمر GTC عند 20% · إلغاء عند بقاء 1 دقيقة'
+                : '$80 Movement Strategy · GTC @ 20% · Cancel @ 1m'}
             </span>
           </h3>
         </div>
@@ -196,8 +196,8 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
             <span>
               {isAr
-                ? '⚠️ تنبيه: الروبوت متوقف حالياً. اضغط "تشغيل الآن" ليقوم بوضع أمر GTC عند 20% تلقائياً عند تحرك السعر 150$.'
-                : '⚠️ Notice: Bot is paused. Click Start Now to enable automatic GTC orders upon $150 price movement.'}
+                ? '⚠️ تنبيه: الروبوت متوقف حالياً. اضغط "تشغيل الآن" ليقوم بوضع أمر GTC عند 20% تلقائياً عند تحرك السعر 80$.'
+                : '⚠️ Notice: Bot is paused. Click Start Now to enable automatic GTC orders upon $80 price movement.'}
             </span>
           </div>
           <button
@@ -236,7 +236,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
                 : 'bg-slate-800 text-slate-400 border border-slate-700'
             }`}
           >
-            {isAr ? (botActive ? '● نشط ويعمل تلقائياً (استراتيجية 150$)' : '○ متوقف حالياً') : (botActive ? '● AUTO RUNNING ($150 STRATEGY)' : '○ PAUSED')}
+            {isAr ? (botActive ? '● نشط ويعمل تلقائياً (استراتيجية 80$)' : '○ متوقف حالياً') : (botActive ? '● AUTO RUNNING ($80 STRATEGY)' : '○ PAUSED')}
           </span>
         </div>
 
@@ -273,8 +273,8 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
                 </div>
                 <div className="text-[10px] text-slate-300 mt-0.5 truncate">
                   {isAr
-                    ? 'يفتح الروبوت أمر GTC واحد لكل عقد 5 دقائق عند تحرك السعر 150$، وينتقل للعقد الجديد فور بدئه.'
-                    : 'Bot places 1 GTC order per 5m contract when price moves $150, then auto-transitions.'}
+                    ? 'يفتح الروبوت أمر GTC واحد لكل عقد 5 دقائق عند تحرك السعر 80$، وينتقل للعقد الجديد فور بدئه.'
+                    : 'Bot places 1 GTC order per 5m contract when price moves $80, then auto-transitions.'}
                 </div>
               </div>
             </div>
@@ -293,10 +293,10 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             <span>
               {isAr
                 ? (botActive
-                    ? '⚡ الروبوت يراقب حركة السعر: عند وصول الفارق إلى ≥ 150$ صعوداً أو هبوطاً يضع أمر GTC عند 20%، ويلغيه تلقائياً إذا بقي دقيقة واحدة دون تنفيذ.'
+                    ? '⚡ الروبوت يراقب حركة السعر: عند وصول الفارق إلى ≥ 80$ صعوداً أو هبوطاً يضع أمر GTC عند 20%، ويلغيه تلقائياً إذا بقي دقيقة واحدة دون تنفيذ.'
                     : 'التنفيذ التلقائي متوقف حالياً. اضغط الزر أعلاه لتشغيل الروبوت.')
                 : (botActive
-                    ? '⚡ Bot is monitoring: When price moves ≥ $150 up/down, places GTC @ 20% and cancels at 1 min remaining if unfilled.'
+                    ? '⚡ Bot is monitoring: When price moves ≥ $80 up/down, places GTC @ 20% and cancels at 1 min remaining if unfilled.'
                     : 'Automated execution is paused. Click above to start.')}
             </span>
           </div>
@@ -339,37 +339,37 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
         <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
           <span className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
             <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            <span>{isAr ? 'مؤشر مراقبة تحرك الـ 150 دولار عن سعر الأساس:' : '$150 Price Deviation Status:'}</span>
+            <span>{isAr ? 'مؤشر مراقبة تحرك الـ 80 دولار عن سعر الأساس:' : '$80 Price Deviation Status:'}</span>
           </span>
           <span
             className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
-              isMove150Reached
+              isMove80Reached
                 ? 'bg-emerald-500 text-slate-950 animate-pulse'
                 : 'bg-slate-800 text-slate-300'
             }`}
           >
-            {isMove150Reached
-              ? (isAr ? `✓ تم الوصول إلى 150$ (${absPriceDiff.toFixed(1)}$)` : `✓ Reached $150 ($${absPriceDiff.toFixed(1)})`)
-              : (isAr ? `بانتظار 150$ (${absPriceDiff.toFixed(1)}$ / 150$)` : `Waiting for $150 ($${absPriceDiff.toFixed(1)} / $150)`)}
+            {isMove80Reached
+              ? (isAr ? `✓ تم الوصول إلى 80$ (${absPriceDiff.toFixed(1)}$)` : `✓ Reached $80 ($${absPriceDiff.toFixed(1)})`)
+              : (isAr ? `بانتظار 80$ (${absPriceDiff.toFixed(1)}$ / 80$)` : `Waiting for $80 ($${absPriceDiff.toFixed(1)} / $80)`)}
           </span>
         </div>
 
-        {/* Progress meter to $150 */}
+        {/* Progress meter to $80 */}
         <div className="space-y-1">
           <div className="flex justify-between text-[11px] font-mono text-slate-400">
             <span>{isAr ? 'التحرك الحالي من سعر الأساس:' : 'Current Deviation:'}</span>
-            <span className={`font-bold ${isMove150Reached ? 'text-emerald-400' : 'text-amber-400'}`}>
-              {priceDiff >= 0 ? '+' : ''}${priceDiff.toFixed(1)} {isMove150Reached ? '✓' : ''}
+            <span className={`font-bold ${isMove80Reached ? 'text-emerald-400' : 'text-amber-400'}`}>
+              {priceDiff >= 0 ? '+' : ''}${priceDiff.toFixed(1)} {isMove80Reached ? '✓' : ''}
             </span>
           </div>
           <div className="w-full bg-slate-900 border border-slate-800 rounded-full h-2.5 overflow-hidden">
             <div
               className={`h-2.5 rounded-full transition-all duration-500 ${
-                isMove150Reached
+                isMove80Reached
                   ? 'bg-emerald-400 shadow-md shadow-emerald-500/50'
                   : 'bg-amber-400'
               }`}
-              style={{ width: `${Math.min(100, Math.max(0, (absPriceDiff / 150) * 100))}%` }}
+              style={{ width: `${Math.min(100, Math.max(0, (absPriceDiff / 80) * 100))}%` }}
             ></div>
           </div>
         </div>

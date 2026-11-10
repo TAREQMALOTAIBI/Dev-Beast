@@ -1045,7 +1045,7 @@ async function executeLimitlessOrderOnServer(params = {}) {
     let rawSize = parseFloat(Number(size || 0).toFixed(2));
     if (isNaN(rawSize) || rawSize <= 0) rawSize = 0;
 
-    // Server-Side 10% Bankroll Sizing Shield per 5m contract based on live on-chain balance
+    // Server-Side 5% Bankroll Sizing Shield per 5m contract based on live on-chain balance
     let effectiveUsdcBalance = lastKnownUsdcBalance;
     try {
       const liveBal = await fetchLiveWalletAndBalance(wallet.address, true);
@@ -1058,7 +1058,7 @@ async function executeLimitlessOrderOnServer(params = {}) {
     }
 
     if (effectiveUsdcBalance > 0) {
-      const maxRiskBudgetUsd = effectiveUsdcBalance * 0.10; // 10% of capital
+      const maxRiskBudgetUsd = effectiveUsdcBalance * 0.05; // 5% of capital
       let maxAllowedContracts = Math.floor((maxRiskBudgetUsd / tickAlignedPrice) * 100) / 100;
       while (maxAllowedContracts > 0.01 && maxAllowedContracts * tickAlignedPrice > maxRiskBudgetUsd) {
         maxAllowedContracts = Math.round((maxAllowedContracts - 0.01) * 100) / 100;
@@ -1115,7 +1115,7 @@ async function executeLimitlessOrderOnServer(params = {}) {
       size: contractCount,
     };
 
-    console.log(`[Limitless LIVE 5m ORDER] Sending ${executedOrderType} order via SDK (10% Capital, No Price Cap)...`, {
+    console.log(`[Limitless LIVE 5m ORDER] Sending ${executedOrderType} order via SDK (5% Capital, GTC @ 20%)...`, {
       account: wallet.address,
       slug: activeMarketSlug,
       outcome: isLong ? 'UP' : 'DOWN',
@@ -1244,9 +1244,9 @@ app.post('/api/limitless/cancel-order', async (req, res) => {
 });
 
 // ============================================================================
-// Autonomous Server-Side $150 Price Movement GTC Strategy Engine:
+// Autonomous Server-Side $80 Price Movement GTC Strategy Engine:
 // 1. Monitors BTC Spot vs 5-minute Contract Open Price (Price to Beat).
-// 2. When |Spot - OpenPrice| >= $150: places GTC BUY order on leading outcome @ $0.20 (20%).
+// 2. When |Spot - OpenPrice| >= $80: places GTC BUY order on leading outcome @ $0.20 (20%).
 // 3. If order not executed by the time 1 minute (<= 60s) remains on contract, cancels order automatically.
 // ============================================================================
 let serverLastEvaluatedEntrySignalTime = 0;
@@ -1331,15 +1331,15 @@ async function evaluateServerStrategy() {
   const priceDelta = liveSpotPrice - openPrice; // positive = UP, negative = DOWN
   const absDelta = Math.abs(priceDelta);
 
-  // Strategy condition: Price moved $150 or more from base price (open price)
-  if (absDelta >= 150) {
-    const isUpMove = priceDelta >= 150;
+  // Strategy condition: Price moved $80 or more from base price (open price)
+  if (absDelta >= 80) {
+    const isUpMove = priceDelta >= 80;
     const direction = isUpMove ? 'LONG' : 'SHORT';
     const outcome = isUpMove ? 'UP' : 'DOWN';
 
     serverLastEvaluatedEntrySignalTime = now;
     console.log(
-      `🎯 [150$ MOVEMENT TRIGGER] Spot: $${liveSpotPrice.toFixed(2)} vs Open: $${openPrice.toFixed(2)} (Diff: ${priceDelta > 0 ? '+' : ''}$${priceDelta.toFixed(2)} >= $150). Submitting GTC order @ 20% ($0.20)...`
+      `🎯 [80$ MOVEMENT TRIGGER] Spot: $${liveSpotPrice.toFixed(2)} vs Open: $${openPrice.toFixed(2)} (Diff: ${priceDelta > 0 ? '+' : ''}$${priceDelta.toFixed(2)} >= $80). Submitting GTC order @ 20% ($0.20)...`
     );
 
     const execResult = await executeLimitlessOrderOnServer({

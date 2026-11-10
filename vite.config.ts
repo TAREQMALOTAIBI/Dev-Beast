@@ -1061,11 +1061,11 @@ function setupApiMiddlewares(middlewares: any) {
         let rawSize = parseFloat(Number(size || 0.1).toFixed(2));
         if (isNaN(rawSize) || rawSize <= 0) rawSize = 0.1;
 
-        // Server-Side 10% Bankroll Allocation per 5m contract based on live on-chain balance
+        // Server-Side 5% Bankroll Allocation per 5m contract based on live on-chain balance
         try {
           const liveBal = await fetchLiveWalletAndBalance();
           if (liveBal && liveBal.usdcBalance > 0) {
-            const maxRiskBudgetUsd = liveBal.usdcBalance * 0.10;
+            const maxRiskBudgetUsd = liveBal.usdcBalance * 0.05;
             const requestedOrderCost = rawSize * tickAlignedPrice;
             if (requestedOrderCost > maxRiskBudgetUsd * 1.02) {
               const maxAllowedContracts = Math.floor((maxRiskBudgetUsd / tickAlignedPrice) * 100) / 100;
@@ -1110,7 +1110,7 @@ function setupApiMiddlewares(middlewares: any) {
           size: contractCount,
         };
 
-        console.log(`[Limitless LIVE 5m ORDER] Sending ${orderTypeEnum} order via SDK (10% Bankroll, No Price Cap)...`, {
+        console.log(`[Limitless LIVE 5m ORDER] Sending ${orderTypeEnum} order via SDK (5% Bankroll, GTC @ 20%)...`, {
           account: wallet.address,
           slug: activeMarketSlug,
           outcome: isLong ? 'UP' : 'DOWN',

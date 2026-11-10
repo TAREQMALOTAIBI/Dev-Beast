@@ -267,9 +267,9 @@ export function calculateZScore(
 }
 
 /**
- * Calculates position sizing for 5-Minute Last-Minute Sniper Strategy:
- * Fixed 10% of bankroll (0.10) per 5m contract,
- * with FAK order execution and NO price cap (0.99 ceiling).
+ * Calculates position sizing for 5-Minute Strategy:
+ * Fixed 5% of bankroll (0.05) per 5m contract,
+ * with GTC order execution @ 20% ($0.20).
  */
 export function calculateKellySizing(
   balance: number,
@@ -277,18 +277,18 @@ export function calculateKellySizing(
 ): KellyMath {
   const { maxPriceCents, winProbability, maxRiskPercent } = config;
 
-  // No Price Cap: defaults to 0.99 ($0.99) or live market price
-  const price = Math.max(0.001, Math.min(0.99, maxPriceCents || 0.99));
+  // GTC Limit Price: defaults to 0.20 ($0.20)
+  const price = Math.max(0.001, Math.min(0.99, maxPriceCents || 0.20));
   const b = (1.00 - price) / price;
   const p = Math.max(0.01, Math.min(0.99, winProbability || 0.90));
   const q = 1 - p;
 
-  const rawKelly = b > 0 ? (b * p - q) / b : 0.10;
+  const rawKelly = b > 0 ? (b * p - q) / b : 0.05;
 
-  // Fixed 10% of capital per trade (or user-configured percentage)
-  const riskToTake = Math.min(1.0, Math.max(0.01, Number(maxRiskPercent) || 0.10));
+  // Fixed 5% of capital per trade (or user-configured percentage)
+  const riskToTake = Math.min(1.0, Math.max(0.01, Number(maxRiskPercent) || 0.05));
 
-  // Exact dollar allocation (10% of balance)
+  // Exact dollar allocation (5% of balance)
   const maxAllowedUsd = balance > 0 ? balance * riskToTake : 0;
   const positionSizeUsd = maxAllowedUsd;
 

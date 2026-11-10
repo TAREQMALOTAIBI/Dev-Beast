@@ -153,7 +153,7 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
   const priceDifference = priceToBeat && activeCurrentPrice ? activeCurrentPrice - priceToBeat : null;
   const priceDifferencePct = priceToBeat && priceDifference !== null ? (priceDifference / priceToBeat) * 100 : null;
   const isCurrentlyUp = priceDifference !== null ? priceDifference >= 0 : yesPrice >= noPrice;
-  const isMovementTriggered = priceDifference !== null && Math.abs(priceDifference) >= 150;
+  const isMovementTriggered = priceDifference !== null && Math.abs(priceDifference) >= 80;
   const isInCancellationZone = timeLeft.totalSeconds > 0 && timeLeft.totalSeconds <= 60;
 
   return (
@@ -173,8 +173,8 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
               <ShieldCheck className="w-3.5 h-3.5 text-sky-400" />
               <span>
                 {isAr
-                  ? 'استراتيجية تحرك 150$ · أمر GTC عند 20% · إلغاء تلقائي عند بقاء 1 دقيقة'
-                  : '$150 Movement Strategy · GTC @ 20% · Auto-Cancel @ 1 Min'}
+                  ? 'استراتيجية تحرك 80$ · أمر GTC عند 20% · إلغاء تلقائي عند بقاء 1 دقيقة'
+                  : '$80 Movement Strategy · GTC @ 20% · Auto-Cancel @ 1 Min'}
               </span>
             </span>
           </div>
@@ -212,7 +212,7 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
 
       {/* Main Market Insights Grid */}
       <div className="p-4 sm:p-6 grid grid-cols-1 md:grid-cols-12 gap-4 lg:gap-6 items-center">
-        {/* Column 1: Base Price (Price to Beat) & 150$ Movement Gauge (4 cols) */}
+        {/* Column 1: Base Price (Price to Beat) & 80$ Movement Gauge (4 cols) */}
         <div className="md:col-span-4 bg-slate-950/60 p-4 rounded-xl border border-slate-800/80 flex flex-col justify-between space-y-3">
           <div className="flex items-center justify-between text-xs text-slate-400">
             <span className="flex items-center gap-1.5 font-medium">
@@ -233,7 +233,7 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
             </span>
           </div>
 
-          {/* Current Live Comparison & $150 Movement Threshold Status */}
+          {/* Current Live Comparison & $80 Movement Threshold Status */}
           <div className="pt-2 border-t border-slate-800/70 flex items-center justify-between text-xs">
             <span className="text-slate-400">{isAr ? 'السعر اللحظي الحالي:' : 'Current Spot:'}</span>
             <div className="flex items-center gap-1.5 font-mono">
@@ -254,9 +254,9 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
             </div>
           </div>
 
-          {/* 150$ Movement Progress & Condition Pill */}
+          {/* 80$ Movement Progress & Condition Pill */}
           <div className="flex items-center justify-between text-xs pt-1">
-            <span className="text-slate-400">{isAr ? 'شرط تحرك 150$ صعود/هبوط:' : '150$ Movement Condition:'}</span>
+            <span className="text-slate-400">{isAr ? 'شرط تحرك 80$ صعود/هبوط:' : '80$ Movement Condition:'}</span>
             <span
               className={`text-[11px] font-bold px-2 py-0.5 rounded font-mono ${
                 isMovementTriggered
@@ -266,8 +266,8 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
             >
               {priceDifference !== null
                 ? isMovementTriggered
-                  ? (isAr ? `✓ تحقق التحرك (${Math.abs(priceDifference).toFixed(1)}$ ≥ 150$)` : `✓ Triggered (${Math.abs(priceDifference).toFixed(1)}$ ≥ $150)`)
-                  : (isAr ? `${Math.abs(priceDifference).toFixed(1)}$ / 150$` : `$${Math.abs(priceDifference).toFixed(1)} / $150`)
+                  ? (isAr ? `✓ تحقق التحرك (${Math.abs(priceDifference).toFixed(1)}$ ≥ 80$)` : `✓ Triggered (${Math.abs(priceDifference).toFixed(1)}$ ≥ $80)`)
+                  : (isAr ? `${Math.abs(priceDifference).toFixed(1)}$ / 80$` : `$${Math.abs(priceDifference).toFixed(1)} / $80`)
                 : '---'}
             </span>
           </div>
@@ -454,11 +454,11 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
           <span>
             {isAr ? (
               <>
-                <strong className="text-slate-200">الاستراتيجية المعتمدة:</strong> إذا تحرك السعر <strong className="text-amber-300">150 دولار صعوداً أو هبوطاً</strong> من سعر الأساس، يتم وضع <strong className="text-sky-300">أمر شراء معلق GTC عند 20% (0.20$)</strong>، ويتم <strong className="text-rose-400">إلغاؤه تلقائياً في حال عدم التنفيذ</strong> فور وصول الوقت المتبقي إلى <strong className="text-rose-400">1 دقيقة (≤ 60 ثانية)</strong> على نهاية العقد!
+                <strong className="text-slate-200">الاستراتيجية المعتمدة:</strong> إذا تحرك السعر <strong className="text-amber-300">80 دولار صعوداً أو هبوطاً</strong> من سعر الأساس، يتم وضع <strong className="text-sky-300">أمر شراء معلق GTC عند 20% (0.20$)</strong>، ويتم <strong className="text-rose-400">إلغاؤه تلقائياً في حال عدم التنفيذ</strong> فور وصول الوقت المتبقي إلى <strong className="text-rose-400">1 دقيقة (≤ 60 ثانية)</strong> على نهاية العقد!
               </>
             ) : (
               <>
-                <strong className="text-slate-200">Active Strategy:</strong> If price moves <strong className="text-amber-300">≥ $150 up or down</strong> from base price, a <strong className="text-sky-300">GTC limit order @ 20% ($0.20)</strong> is placed, and <strong className="text-rose-400">auto-cancelled if unfilled</strong> once <strong className="text-rose-400">1 minute (≤ 60s)</strong> remains!
+                <strong className="text-slate-200">Active Strategy:</strong> If price moves <strong className="text-amber-300">≥ $80 up or down</strong> from base price, a <strong className="text-sky-300">GTC limit order @ 20% ($0.20)</strong> is placed, and <strong className="text-rose-400">auto-cancelled if unfilled</strong> once <strong className="text-rose-400">1 minute (≤ 60s)</strong> remains!
               </>
             )}
           </span>

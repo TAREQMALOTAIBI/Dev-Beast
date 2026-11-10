@@ -22,7 +22,7 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
 }) => {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
-  // Display last 45 1-minute candles cleanly with base price and $150 breakout bands
+  // Display last 45 1-minute candles cleanly with base price and $80 breakout bands
   const displayCount = Math.min(candles.length, 45);
   const visibleCandles = useMemo(() => candles.slice(-displayCount), [candles, displayCount]);
   const visibleMetrics = useMemo(() => metrics.slice(-displayCount), [metrics, displayCount]);
@@ -32,7 +32,7 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
   const candleHeight = 320;
   const padding = { top: 24, right: 80, bottom: 28, left: 16 };
 
-  // Price Extents with buffer for +150$ and -150$ bands
+  // Price Extents with buffer for +80$ and -80$ bands
   const { minPrice, maxPrice } = useMemo(() => {
     if (visibleCandles.length === 0) return { minPrice: 0, maxPrice: 100 };
     let min = Infinity;
@@ -45,8 +45,8 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
 
     visibleMetrics.forEach((m) => {
       if (m.mean > 0) {
-        if (m.mean + 160 > max) max = m.mean + 160;
-        if (m.mean - 160 < min) min = m.mean - 160;
+        if (m.mean + 90 > max) max = m.mean + 90;
+        if (m.mean - 90 < min) min = m.mean - 90;
       }
     });
 
@@ -81,23 +81,23 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
       .join(' ');
   }, [visibleMetrics, candleX, candleY]);
 
-  // +150$ Movement Trigger line (Upper)
-  const upper150Path = useMemo(() => {
+  // +80$ Movement Trigger line (Upper)
+  const upper80Path = useMemo(() => {
     return visibleMetrics
       .map((m, i) => {
         const x = candleX(i);
-        const y = candleY(m.mean + 150);
+        const y = candleY(m.mean + 80);
         return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
       })
       .join(' ');
   }, [visibleMetrics, candleX, candleY]);
 
-  // -150$ Movement Trigger line (Lower)
-  const lower150Path = useMemo(() => {
+  // -80$ Movement Trigger line (Lower)
+  const lower80Path = useMemo(() => {
     return visibleMetrics
       .map((m, i) => {
         const x = candleX(i);
-        const y = candleY(m.mean - 150);
+        const y = candleY(m.mean - 80);
         return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
       })
       .join(' ');
@@ -119,7 +119,7 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
           </div>
           <span className="text-slate-600">·</span>
           <span className="text-emerald-400 text-[11px] font-medium hidden sm:inline">
-            → عتبات تحرك السعر ±150$ من سعر الأساس (وضع أمر GTC عند 20%)
+            → عتبات تحرك السعر ±80$ من سعر الأساس (وضع أمر GTC عند 20%)
           </span>
         </div>
 
@@ -179,11 +179,11 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
             );
           })}
 
-          {/* +150$ Movement Trigger Line (Green dashed) */}
-          {upper150Path && (
+          {/* +80$ Movement Trigger Line (Green dashed) */}
+          {upper80Path && (
             <g>
               <path
-                d={upper150Path}
+                d={upper80Path}
                 fill="none"
                 stroke="#10b981"
                 strokeWidth="1.2"
@@ -193,13 +193,13 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
               {visibleMetrics.length > 0 && (
                 <text
                   x={width - padding.right + 6}
-                  y={candleY(visibleMetrics[visibleMetrics.length - 1].mean + 150) + 3}
+                  y={candleY(visibleMetrics[visibleMetrics.length - 1].mean + 80) + 3}
                   fill="#10b981"
                   fontSize="9"
                   fontFamily="JetBrains Mono, monospace"
                   fontWeight="bold"
                 >
-                  +150$ (UP)
+                  +80$ (UP)
                 </text>
               )}
             </g>
@@ -216,11 +216,11 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
             />
           )}
 
-          {/* -150$ Movement Trigger Line (Rose dashed) */}
-          {lower150Path && (
+          {/* -80$ Movement Trigger Line (Rose dashed) */}
+          {lower80Path && (
             <g>
               <path
-                d={lower150Path}
+                d={lower80Path}
                 fill="none"
                 stroke="#f43f5e"
                 strokeWidth="1.2"
@@ -230,13 +230,13 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
               {visibleMetrics.length > 0 && (
                 <text
                   x={width - padding.right + 6}
-                  y={candleY(visibleMetrics[visibleMetrics.length - 1].mean - 150) + 3}
+                  y={candleY(visibleMetrics[visibleMetrics.length - 1].mean - 80) + 3}
                   fill="#f43f5e"
                   fontSize="9"
                   fontFamily="JetBrains Mono, monospace"
                   fontWeight="bold"
                 >
-                  -150$ (DOWN)
+                  -80$ (DOWN)
                 </text>
               )}
             </g>
@@ -325,11 +325,11 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-3 h-0.5 bg-emerald-500 inline-block border-b border-dashed border-emerald-500"></span>
-            <span>+150$ صعود (تفعيل أمر GTC صعود عند 20%)</span>
+            <span>+80$ صعود (تفعيل أمر GTC صعود عند 20%)</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-3 h-0.5 bg-rose-500 inline-block border-b border-dashed border-rose-500"></span>
-            <span>-150$ هبوط (تفعيل أمر GTC هبوط عند 20%)</span>
+            <span>-80$ هبوط (تفعيل أمر GTC هبوط عند 20%)</span>
           </div>
         </div>
         <div className="text-sky-300 font-mono font-semibold">

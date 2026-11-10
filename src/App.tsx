@@ -87,7 +87,7 @@ export default function App() {
           <div className="flex items-center gap-3 shrink-0">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
             <span className="text-base md:text-lg font-extrabold tracking-tight text-white whitespace-nowrap">
-              {isAr ? 'منصة التداول الحي المباشر · Limitless (استراتيجية 150$)' : 'Limitless Live $150 Strategy Terminal'}
+              {isAr ? 'منصة التداول الحي المباشر · Limitless (استراتيجية 80$)' : 'Limitless Live $80 Strategy Terminal'}
             </span>
           </div>
 
@@ -273,7 +273,7 @@ export default function App() {
             <div className="flex items-center gap-1">
               <span className="text-slate-400">{isAr ? 'شرط الدخول:' : 'Condition:'}</span>
               <span className="text-amber-300 font-bold bg-amber-950/70 px-1.5 py-0.5 rounded border border-amber-600/50">
-                |Δ| ≥ $150
+                |Δ| ≥ $80
               </span>
             </div>
             {hasEnvCredentials && (
@@ -362,7 +362,7 @@ export default function App() {
                     <div className="flex justify-between text-slate-400">
                       <span>{isAr ? 'شرط وضع الأمر:' : 'Trigger Movement:'}</span>
                       <span className="text-amber-400 font-bold">
-                        {isAr ? 'تحرك السعر ≥ 150 دولار صعوداً أو هبوطاً' : '≥ $150 Move Up or Down'}
+                        {isAr ? 'تحرك السعر ≥ 80 دولار صعوداً أو هبوطاً' : '≥ $80 Move Up or Down'}
                       </span>
                     </div>
                     <div className="flex justify-between text-slate-400">
@@ -372,7 +372,7 @@ export default function App() {
                       </span>
                     </div>
                     <div className="flex justify-between text-slate-400">
-                      <span>{isAr ? 'حجم الاستثمار بالدولار:' : 'Position Size (USD):'}</span>
+                      <span>{isAr ? 'حجم الاستثمار (5% من رأس المال):' : 'Position Size (5% of Capital):'}</span>
                       <span className="text-slate-100 font-bold">
                         {formatUsd(kelly.positionSizeUsd)}
                       </span>
@@ -434,7 +434,7 @@ export default function App() {
       <footer className="border-t border-slate-800/80 bg-slate-950/80 py-4 px-4 md:px-8 mt-auto text-xs text-slate-500">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-2">
-            <span>{isAr ? 'استراتيجية تحرك 150$' : '$150 Movement Strategy'}</span>
+            <span>{isAr ? 'استراتيجية تحرك 80$' : '$80 Movement Strategy'}</span>
             <span>·</span>
             <span>{isAr ? 'أمر شراء معلق GTC عند 20% (0.20$)' : 'GTC Buy Limit Order @ 20% ($0.20)'}</span>
             <span>·</span>

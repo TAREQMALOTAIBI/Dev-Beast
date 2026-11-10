@@ -28,7 +28,7 @@ const DEFAULT_CONFIG: BotConfig = {
   zScoreLower: 0,
   zScoreLowerEntry: 0,
   maxPriceCents: 0.20, // GTC Limit Price: 20% ($0.20)
-  maxRiskPercent: 0.10, // 10% Capital
+  maxRiskPercent: 0.05, // 5% Capital
   orderType: 'GTC', // GTC (Good-Til-Cancelled) Limit Order at 20%
   fractionChunks: 1,
   chunkDelayMs: 0,
@@ -92,7 +92,7 @@ export function useTradingBot() {
         parsed.maxPriceCents = 0.20; // 20% ($0.20)
         parsed.fractionChunks = 1;
         parsed.chunkDelayMs = 0;
-        parsed.maxRiskPercent = 0.10; // 10% Capital
+        parsed.maxRiskPercent = 0.05; // 5% Capital
         parsed.singleTradePerContract = true;
         parsed.cooldownMinutes = 5;
 
@@ -290,7 +290,7 @@ export function useTradingBot() {
     setConfig((prev) => {
       const next = { ...prev, ...partial };
       if (next.maxRiskPercent !== undefined) {
-        next.maxRiskPercent = Math.min(Math.max(Number(next.maxRiskPercent) || 0.10, 0.01), 1.0);
+        next.maxRiskPercent = Math.min(Math.max(Number(next.maxRiskPercent) || 0.05, 0.01), 1.0);
       }
       if (next.maxPriceCents !== undefined) {
         next.maxPriceCents = Math.min(Math.max(Number(next.maxPriceCents) || 0.20, 0.01), 0.99);
@@ -444,7 +444,7 @@ export function useTradingBot() {
     }
   }, []);
 
-  // Execute LIVE Trade across Limitless (5m Contract, GTC Limit Order @ $0.20 / 20%, 10% Capital)
+  // Execute LIVE Trade across Limitless (5m Contract, GTC Limit Order @ $0.20 / 20%, 5% Capital)
   const executeLiveTrade = useCallback(async (
     triggerZ: number,
     direction: 'SHORT' | 'LONG' = 'LONG',
@@ -544,10 +544,10 @@ export function useTradingBot() {
     const outcome = isLong ? 'UP' : 'DOWN';
 
     // Order Type GTC @ 20% ($0.20) as explicitly requested:
-    // "إذا تحرك السعر الى 150 دولار صعودا أو هبوطا من سعر الأساس نضع أمر GTC عند 20% ونلغيه في حال عدم التنفيذ إذا وصل 1 دقيقة على نهاية العقد"
+    // "إذا تحرك السعر الى 80 دولار صعودا أو هبوطا من سعر الأساس نضع أمر GTC عند 20% ونلغيه في حال عدم التنفيذ إذا وصل 1 دقيقة على نهاية العقد"
     const effectiveContractPrice = 0.20; // 20% limit price
 
-    const maxRiskCap = Math.min(Math.max(cfg.maxRiskPercent || 0.10, 0.01), 1.0);
+    const maxRiskCap = Math.min(Math.max(cfg.maxRiskPercent || 0.05, 0.01), 1.0);
     const maxBudgetUsd = balance * maxRiskCap;
 
     const kelly = calculateKellySizing(balance, {
@@ -575,7 +575,7 @@ export function useTradingBot() {
       if (maxBudgetUsd >= (0.01 * effectiveContractPrice)) {
         effectiveContracts = 0.01;
       } else {
-        const minWarning = `⚠️ رصيد المحفظة الحالي ($${balance.toFixed(2)} USDC) والميزانية المخصصة 10% ($${maxBudgetUsd.toFixed(2)}) لا تكفي لشراء عقد بسعر $${effectiveContractPrice}.`;
+        const minWarning = `⚠️ رصيد المحفظة الحالي ($${balance.toFixed(2)} USDC) والميزانية المخصصة 5% ($${maxBudgetUsd.toFixed(2)}) لا تكفي لشراء عقد بسعر $${effectiveContractPrice}.`;
         console.warn(minWarning);
         limitlessService.logDirect('SYSTEM', minWarning);
         setExecutionNotice({
@@ -724,7 +724,7 @@ export function useTradingBot() {
 
   // Real-Time 1-Second Strategy Monitor:
   // 1. Monitors BTC spot price vs 5-minute contract Open Price (Price to Beat).
-  // 2. When price moves $150 or more (|Spot - OpenPrice| >= $150) -> places GTC BUY order @ 20% ($0.20).
+  // 2. When price moves $80 or more (|Spot - OpenPrice| >= $80) -> places GTC BUY order @ 20% ($0.20).
   // 3. If unexecuted by 1 minute before expiry (<= 60s remaining) -> cancels order automatically.
   useEffect(() => {
     const strategyTimer = setInterval(() => {
@@ -748,12 +748,12 @@ export function useTradingBot() {
         setPriceDeviation({ delta, absDelta, openPrice });
 
         // Visual threshold triggers
-        if (delta >= 150) {
+        if (delta >= 80) {
           crossedLowerThresholdRef.current = true;
           setCrossedLowerThreshold(true);
           crossedUpperThresholdRef.current = false;
           setCrossedUpperThreshold(false);
-        } else if (delta <= -150) {
+        } else if (delta <= -80) {
           crossedUpperThresholdRef.current = true;
           setCrossedUpperThreshold(true);
           crossedLowerThresholdRef.current = false;
@@ -773,9 +773,9 @@ export function useTradingBot() {
           }
         }
 
-        // Rule 2: Trigger GTC order at 20% if price moves >= $150 and more than 60s remaining
-        if (absDelta >= 150 && remainingSec > 60) {
-          const isUp = delta >= 150;
+        // Rule 2: Trigger GTC order at 20% if price moves >= $80 and more than 60s remaining
+        if (absDelta >= 80 && remainingSec > 60) {
+          const isUp = delta >= 80;
           const targetDirection: 'LONG' | 'SHORT' = isUp ? 'LONG' : 'SHORT';
           const targetOutcome = isUp ? 'UP (صعود)' : 'DOWN (هبوط)';
 
@@ -789,7 +789,7 @@ export function useTradingBot() {
           if (!alreadyLocked && now - lastEvaluatedEntrySignalTimeRef.current >= 4000) {
             if (!botActiveRef.current) {
               lastEvaluatedEntrySignalTimeRef.current = now;
-              const pauseWarn = `⚠️ تحرك السعر $${absDelta.toFixed(1)} من سعر الأساس (≥ $150)! إشارة دخول ${targetOutcome} بأمر GTC عند 20%، ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
+              const pauseWarn = `⚠️ تحرك السعر $${absDelta.toFixed(1)} من سعر الأساس (≥ $80)! إشارة دخول ${targetOutcome} بأمر GTC عند 20%، ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
               limitlessService.logDirect('SYSTEM', pauseWarn);
               setExecutionNotice({
                 type: 'WARNING',
@@ -805,7 +805,7 @@ export function useTradingBot() {
               } else {
                 entryShortCandlesRef.current.add(cTime);
               }
-              const trigMsg = `🎯 [تحرك السعر ${delta > 0 ? '+' : ''}$${delta.toFixed(1)} ≥ 150$] جاري وضع أمر GTC عند 20% ($0.20) لعقد ${targetOutcome} (سيتم إلغاؤه تلقائياً في حال عدم التنفيذ عند بقاء 1 دقيقة).`;
+              const trigMsg = `🎯 [تحرك السعر ${delta > 0 ? '+' : ''}$${delta.toFixed(1)} ≥ 80$] جاري وضع أمر GTC عند 20% ($0.20) لعقد ${targetOutcome} (سيتم إلغاؤه تلقائياً في حال عدم التنفيذ عند بقاء 1 دقيقة).`;
               console.log(trigMsg);
               limitlessService.logDirect('SYSTEM', trigMsg);
               executeLiveTradeRef.current(0, targetDirection, cTime, false);
@@ -1244,7 +1244,7 @@ export function useTradingBot() {
   const kelly = calculateKellySizing(currentBalance, {
     maxPriceCents: 0.20,
     winProbability: config.winProbability,
-    maxRiskPercent: config.maxRiskPercent || 0.10,
+    maxRiskPercent: config.maxRiskPercent || 0.05,
     fractionChunks: 1,
   });
 
