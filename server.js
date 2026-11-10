@@ -1192,38 +1192,72 @@ app.post('/api/limitless/order', async (req, res) => {
   return res.status(outcomeResult.httpStatus).json(outcomeResult.body);
 });
 
+// Dedicated Cancel Order Endpoint
+app.post('/api/limitless/cancel-order', async (req, res) => {
+  try {
+    const { orderId, privateKey, tokenId: bodyTokenId, secret: bodySecret } = req.body || {};
+    const pk = (privateKey || process.env.PRIVATE_KEY || '').trim();
+    const tokenId = (bodyTokenId || process.env.LMTS_TOKEN_ID || '').trim();
+    const secret = (bodySecret || process.env.LMTS_TOKEN_SECRET || '').trim();
+
+    if (!orderId) {
+      return res.status(400).json({ success: false, error: 'Order ID is required' });
+    }
+    if (!pk || !tokenId || !secret) {
+      return res.status(400).json({ success: false, error: 'Credentials required to cancel order' });
+    }
+
+    const { ethers } = await import('ethers');
+    const sdk = await import('@limitless-exchange/sdk');
+    const formattedPk = pk.startsWith('0x') ? pk : `0x${pk}`;
+    const wallet = new ethers.Wallet(formattedPk);
+
+    const httpClient = new sdk.HttpClient({
+      baseURL: sdk.DEFAULT_API_URL,
+      hmacCredentials: { tokenId, secret },
+    });
+
+    const orderClient = new sdk.OrderClient({
+      httpClient,
+      wallet,
+      logger: new sdk.ConsoleLogger(),
+    });
+
+    console.log(`[VM Server Cancel Order] Cancelling order ${orderId}...`);
+    const cancelResult = await orderClient.cancelOrder(orderId).catch(async (e) => {
+      try {
+        const axiosClient = httpClient.http?.client;
+        if (axiosClient && typeof axiosClient.delete === 'function') {
+          const r = await axiosClient.delete(`/orders/${encodeURIComponent(orderId)}`);
+          return r?.data;
+        }
+      } catch {}
+      throw e;
+    });
+
+    return res.json({ success: true, orderId, result: cancelResult });
+  } catch (err) {
+    const errMsg = err?.response?.data?.message || err?.message || String(err);
+    console.warn('[VM Server Cancel Order Error]', errMsg);
+    return res.status(500).json({ success: false, error: errMsg });
+  }
+});
+
 // ============================================================================
-// Autonomous Server-Side 5-Minute Last-Minute Sniper Engine
-// No indicators, no filters: enters in the last minute (<= 60s remaining)
-// into the almost-guaranteed winning outcome (UP or DOWN) via FAK with no price cap (0.99)
-// and 10% of capital per 5m contract.
+// Autonomous Server-Side $150 Price Movement GTC Strategy Engine:
+// 1. Monitors BTC Spot vs 5-minute Contract Open Price (Price to Beat).
+// 2. When |Spot - OpenPrice| >= $150: places GTC BUY order on leading outcome @ $0.20 (20%).
+// 3. If order not executed by the time 1 minute (<= 60s) remains on contract, cancels order automatically.
 // ============================================================================
 let serverLastEvaluatedEntrySignalTime = 0;
 let serverKlinesBuffer = [];
 let serverBinanceWs = null;
 let serverBinanceWsEndpointIdx = 0;
 let lastServerBinanceWsTickTime = 0;
+let activePendingGtcOrder = null; // { orderId, marketSlug, placedAt, price }
 
-async function fetchServerBinanceKlines(symbol = 'BTCUSDT', interval = '1m', limit = 60) {
-  const urls = [
-    `https://data-api.binance.vision/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
-    `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
-  ];
-  for (const url of urls) {
-    try {
-      const r = await fetch(url);
-      if (!r.ok) continue;
-      const data = await r.json();
-      if (Array.isArray(data) && data.length > 0) return data;
-    } catch {
-      // Try next endpoint
-    }
-  }
-  return null;
-}
-
-async function evaluateServerLastMinuteSniper() {
-  if (!serverBotActive || isServerExecutingOrder) return;
+async function evaluateServerStrategy() {
+  if (!serverBotActive) return;
 
   const pk = (process.env.PRIVATE_KEY || '').trim();
   const tokenId = (process.env.LMTS_TOKEN_ID || '').trim();
@@ -1231,8 +1265,6 @@ async function evaluateServerLastMinuteSniper() {
   if (!pk || !tokenId || !secret) return;
 
   const now = Date.now();
-  if (now - serverLastEvaluatedEntrySignalTime < 3000) return;
-
   const liveMkt = cachedActiveBtc || (await fetchLive15MinBtcMarket());
   if (!liveMkt || !liveMkt.slug || !is15MinBtcMarket(liveMkt)) return;
 
@@ -1240,10 +1272,39 @@ async function evaluateServerLastMinuteSniper() {
   if (!expMs || expMs <= now) return;
 
   const remainingSec = Math.floor((expMs - now) / 1000);
-  // Enter strictly in the last minute of the 5-minute contract (2s..60s remaining)
-  if (remainingSec > 60 || remainingSec < 2) return;
 
-  // Check Single-Entry Lock per 5-minute contract
+  // 1. Auto-Cancel unexecuted GTC order if remaining time reaches 1 minute (<= 60s)
+  if (activePendingGtcOrder && activePendingGtcOrder.orderId) {
+    if (remainingSec <= 60 || activePendingGtcOrder.marketSlug !== liveMkt.slug) {
+      console.log(
+        `⏰ [Auto-Cancel GTC] Contract ${activePendingGtcOrder.marketSlug} has ${remainingSec}s remaining (<= 60s). Cancelling unexecuted GTC order ${activePendingGtcOrder.orderId}...`
+      );
+      try {
+        const { ethers } = await import('ethers');
+        const sdk = await import('@limitless-exchange/sdk');
+        const formattedPk = pk.startsWith('0x') ? pk : `0x${pk}`;
+        const wallet = new ethers.Wallet(formattedPk);
+        const httpClient = new sdk.HttpClient({
+          baseURL: sdk.DEFAULT_API_URL,
+          hmacCredentials: { tokenId, secret },
+        });
+        const orderClient = new sdk.OrderClient({ httpClient, wallet, logger: new sdk.ConsoleLogger() });
+        await orderClient.cancelOrder(activePendingGtcOrder.orderId).catch(() => {});
+        console.log(`✅ [Auto-Cancel GTC] Order ${activePendingGtcOrder.orderId} cancelled.`);
+      } catch (e) {
+        console.warn(`[Auto-Cancel GTC Error]`, e?.message);
+      } finally {
+        activePendingGtcOrder = null;
+      }
+    }
+  }
+
+  // 2. Only search for new entry if we have more than 60 seconds left on the 5-minute contract
+  if (remainingSec <= 60) return;
+  if (isServerExecutingOrder) return;
+  if (now - serverLastEvaluatedEntrySignalTime < 2500) return;
+
+  // Single-Trade lock per contract
   const preGuard = inMemoryTradeGuard || loadTradeGuardFromDisk();
   if (
     preGuard &&
@@ -1253,48 +1314,52 @@ async function evaluateServerLastMinuteSniper() {
     return;
   }
 
-  // Determine the "almost guaranteed" winning contract (UP vs DOWN)
-  const yesPrice = Number(liveMkt.prices?.[0] ?? 0.5);
-  const noPrice = Number(liveMkt.prices?.[1] ?? 1 - yesPrice);
-
+  // Parse Open Price (Price to Beat)
   const rawOpenPrice = liveMkt.openPrice ?? liveMkt.metadata?.openPrice;
   const parsedOpenPrice =
     rawOpenPrice !== undefined && rawOpenPrice !== null
       ? Number(String(rawOpenPrice).replace(/[^0-9.-]/g, ''))
       : NaN;
   const openPrice = Number.isFinite(parsedOpenPrice) && parsedOpenPrice > 0 ? parsedOpenPrice : null;
+  if (!openPrice) return;
 
   const latestBinanceClose =
     serverKlinesBuffer.length > 0 ? serverKlinesBuffer[serverKlinesBuffer.length - 1].close : 0;
   const liveSpotPrice = Number(latestOracleData?.value || latestBinanceClose || 0);
+  if (!liveSpotPrice || liveSpotPrice <= 0) return;
 
-  let winningDirection = null;
-  if (yesPrice > noPrice && yesPrice >= 0.52) {
-    winningDirection = 'LONG'; // UP is winning
-  } else if (noPrice > yesPrice && noPrice >= 0.52) {
-    winningDirection = 'SHORT'; // DOWN is winning
-  } else if (openPrice && liveSpotPrice > 0) {
-    winningDirection = liveSpotPrice >= openPrice ? 'LONG' : 'SHORT';
+  const priceDelta = liveSpotPrice - openPrice; // positive = UP, negative = DOWN
+  const absDelta = Math.abs(priceDelta);
+
+  // Strategy condition: Price moved $150 or more from base price (open price)
+  if (absDelta >= 150) {
+    const isUpMove = priceDelta >= 150;
+    const direction = isUpMove ? 'LONG' : 'SHORT';
+    const outcome = isUpMove ? 'UP' : 'DOWN';
+
+    serverLastEvaluatedEntrySignalTime = now;
+    console.log(
+      `🎯 [150$ MOVEMENT TRIGGER] Spot: $${liveSpotPrice.toFixed(2)} vs Open: $${openPrice.toFixed(2)} (Diff: ${priceDelta > 0 ? '+' : ''}$${priceDelta.toFixed(2)} >= $150). Submitting GTC order @ 20% ($0.20)...`
+    );
+
+    const execResult = await executeLimitlessOrderOnServer({
+      market: liveMkt.slug,
+      direction,
+      outcome,
+      type: 'GTC',
+      price: 0.20, // 20% Limit Order
+      candleTime: now,
+    });
+
+    if (execResult?.body?.success && execResult?.body?.orderId) {
+      activePendingGtcOrder = {
+        orderId: execResult.body.orderId,
+        marketSlug: liveMkt.slug,
+        placedAt: now,
+        price: 0.20,
+      };
+    }
   }
-
-  if (!winningDirection) return;
-
-  serverLastEvaluatedEntrySignalTime = now;
-  const outcome = winningDirection === 'LONG' ? 'UP' : 'DOWN';
-  const winningProb = winningDirection === 'LONG' ? (yesPrice * 100).toFixed(1) : (noPrice * 100).toFixed(1);
-
-  console.log(
-    `[VM 5m LAST-MINUTE SNIPER] ${remainingSec}s remaining on ${liveMkt.slug}! Almost-guaranteed outcome: ${outcome} (${winningProb}%). Dispatching FAK order (10% Capital, No Price Cap)...`
-  );
-
-  await executeLimitlessOrderOnServer({
-    market: liveMkt.slug,
-    direction: winningDirection,
-    outcome,
-    type: 'FAK',
-    price: 0.99,
-    candleTime: now,
-  });
 }
 
 async function syncServerBinanceCandles(isInitial = false) {
@@ -1390,7 +1455,7 @@ async function initServerBinanceLiveWs() {
 initServerBinanceLiveWs();
 setInterval(() => syncServerBinanceCandles(false), 5000);
 setInterval(() => {
-  evaluateServerLastMinuteSniper().catch(() => {});
+  evaluateServerStrategy().catch(() => {});
 }, 1000);
 
 // Binance Klines Proxy with global data-api.binance.vision failover for US Google Cloud VMs

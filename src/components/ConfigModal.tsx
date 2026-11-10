@@ -36,12 +36,12 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
       zScoreEntry: 0,
       zScoreLower: 0,
       zScoreLowerEntry: 0,
-      maxPriceCents: 0.99,
+      maxPriceCents: 0.20,
       maxRiskPercent: 0.10,
-      orderType: 'FAK',
+      orderType: 'GTC',
       fractionChunks: 1,
       chunkDelayMs: 0,
-      winProbability: 0.90,
+      winProbability: 0.80,
       initialBalance: 1000,
       binanceRestUrl: 'https://api.binance.com/api/v3/klines',
       binanceWsUrl: 'wss://stream.binance.com/ws/btcusdt@kline_1m',
@@ -57,16 +57,16 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
       adxThreshold: 100,
       rvMinBp: 0,
       rvMaxBp: 10000,
-      entryWindowStartMin: 4,
-      entryWindowEndMin: 5,
+      entryWindowStartMin: 0,
+      entryWindowEndMin: 4,
     });
   };
 
   const handleSave = () => {
     onSave({
       ...draft,
-      orderType: 'FAK',
-      maxPriceCents: 0.99,
+      orderType: 'GTC',
+      maxPriceCents: 0.20,
       limitlessMarketSlug: 'btc-up-or-down-5-min',
       cooldownMinutes: 5,
     });
@@ -83,13 +83,13 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
             <div>
               <h2 className="text-base font-bold text-slate-100">
                 {isAr
-                  ? 'إعدادات قنص الدقيقة الأخيرة (عقود بيتكوين 5 دقائق · بدون مؤشرات أو فلاتر)'
-                  : 'Last-Minute 5m BTC Sniper Configuration (No Indicators / No Filters)'}
+                  ? 'إعدادات استراتيجية تحرك 150$ (أمر GTC عند 20% · إلغاء عند بقاء 1 دقيقة)'
+                  : '$150 Movement Strategy Configuration (GTC @ 20% · Cancel @ 1m)'}
               </h2>
               <div className="text-[11px] text-slate-400">
                 {isAr
-                  ? 'دخول آخر دقيقة (≤ 60 ثانية) · العقد المضمون تقريباً · أمر FAK بدون سقف سعري · 10% من رأس المال'
-                  : 'Last-Minute Entry (≤ 60s) · Winning Outcome · FAK No Price Cap · 10% Capital'}
+                  ? 'تحرك ≥ 150$ من سعر الأساس · أمر GTC عند 0.20$ (20%) · إلغاء تلقائي عند بقاء ≤ 1 دقيقة'
+                  : '≥ $150 move from base · GTC order @ $0.20 (20%) · Auto-cancel at ≤ 1 min remaining'}
               </div>
             </div>
           </div>
@@ -154,13 +154,13 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                   <div>
                     <div className="font-bold text-amber-300 mb-0.5">
                       {isAr
-                        ? 'تنبيه: الصفقات لن تنفذ على محفظتك في Limitless حتى تضيف المفاتيح الحية'
-                        : 'Notice: Live on-chain orders will not execute until live keys are configured'}
+                        ? 'تنبيه: الأوامر لن تنفذ على محفظتك في Limitless حتى تضيف المفاتيح الحية'
+                        : 'Notice: Live orders will not execute until live keys are configured'}
                     </div>
                     <p className="text-amber-200/90 leading-relaxed">
                       {isAr
-                        ? 'لكي يقوم الروبوت بتوقيع وإرسال أوامر الشراء مباشرة لحسابك في منصة Limitless، يجب توفر المفتاح الخاص (PRIVATE_KEY) وتوثيق HMAC.'
-                        : 'To execute signed EIP-712 orders directly to Limitless, provide your PRIVATE_KEY and HMAC credentials below or in your server .env file.'}
+                        ? 'لكي يقوم الروبوت بتوقيع وإرسال أوامر الشراء وإلغائها مباشرة لحسابك في منصة Limitless، يجب توفر المفتاح الخاص (PRIVATE_KEY) وتوثيق HMAC.'
+                        : 'To execute and cancel signed EIP-712 orders on Limitless, provide your PRIVATE_KEY and HMAC credentials below or in your server .env file.'}
                     </p>
                   </div>
                 </div>
@@ -229,66 +229,63 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
             </div>
           </div>
 
-          {/* Section 2: 5-Minute Last-Minute Execution Settings */}
+          {/* Section 2: Strategy Parameters */}
           <div className="border-t border-slate-800 pt-4 space-y-3">
             <h3 className="font-semibold text-slate-100 uppercase tracking-wider text-[11px] text-sky-400">
               {isAr
-                ? 'إعدادات التنفيذ: عقد بيتكوين 5 دقائق · آخر دقيقة · أمر FAK بدون سقف سعري · 10% من رأس المال'
-                : 'Execution Settings: 5-Minute BTC Contract · Last Minute · FAK No Price Cap · 10% Capital'}
+                ? 'معايير الاستراتيجية: تحرك 150$ · أمر GTC عند 20% · إلغاء عند بقاء 1 دقيقة'
+                : 'Strategy Parameters: $150 Move · GTC @ 20% · Auto-Cancel @ 1 Min'}
             </h3>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block text-slate-400 mb-1">
-                  {isAr ? 'نوع العقد المستهدف' : 'Target Contract'}
+                  {isAr ? 'شرط تحرك السعر' : 'Price Move Trigger'}
                 </label>
                 <input
                   type="text"
                   disabled
-                  value="btc-up-or-down-5-min (5m)"
-                  className="w-full bg-slate-950 border border-emerald-600/60 rounded-lg px-3 py-2 text-emerald-300 font-mono font-bold"
+                  value={isAr ? '≥ 150 دولار صعوداً أو هبوطاً' : '≥ $150 Up or Down'}
+                  className="w-full bg-slate-950 border border-amber-600/60 rounded-lg px-3 py-2 text-amber-300 font-mono font-bold"
                 />
               </div>
 
               <div>
                 <label className="block text-slate-400 mb-1">
-                  {isAr ? 'نوع الأمر وسقف السعر' : 'Order Type & Price Cap'}
+                  {isAr ? 'نوع الأمر وسعر التنفيذ' : 'Order Type & Price'}
                 </label>
                 <input
                   type="text"
                   disabled
-                  value={isAr ? 'FAK (بدون سقف سعري)' : 'FAK (No Price Cap)'}
+                  value={isAr ? 'GTC عند 20% ($0.20)' : 'GTC @ 20% ($0.20)'}
                   className="w-full bg-slate-950 border border-sky-600/60 rounded-lg px-3 py-2 text-sky-300 font-mono font-bold"
                 />
               </div>
 
               <div>
                 <label className="block text-slate-400 mb-1">
-                  {isAr ? 'نسبة الدخول من رأس المال (0.10 = 10%)' : 'Capital Allocation (0.10 = 10%)'}
+                  {isAr ? 'شرط إلغاء الأمر' : 'Cancellation Rule'}
                 </label>
                 <input
-                  type="number"
-                  step="0.01"
-                  min="0.01"
-                  max="1.00"
-                  value={draft.maxRiskPercent || 0.10}
-                  onChange={(e) => setDraft({ ...draft, maxRiskPercent: Math.min(Math.max(parseFloat(e.target.value) || 0.10, 0.01), 1.0) })}
-                  className="w-full bg-slate-950 border border-emerald-500/60 rounded-lg px-3 py-2 text-emerald-300 font-mono font-bold"
+                  type="text"
+                  disabled
+                  value={isAr ? 'عند بقاء 1 دقيقة للتسوية' : 'At 1 Min Remaining'}
+                  className="w-full bg-slate-950 border border-rose-600/60 rounded-lg px-3 py-2 text-rose-300 font-mono font-bold"
                 />
               </div>
             </div>
 
-            <div className="p-3 rounded-xl bg-emerald-950/30 border border-emerald-700/50 text-[11px] text-emerald-200 space-y-1.5">
-              <div className="font-bold">
+            <div className="p-3 rounded-xl bg-sky-950/30 border border-sky-700/50 text-[11px] text-sky-200 space-y-1.5">
+              <div className="font-bold text-slate-100">
                 {isAr
-                  ? '✓ تم حذف جميع المؤشرات والفلاتر (Z-Score / ADX / RV) بالكامل.'
-                  : '✓ All indicators and filters (Z-Score / ADX / RV) are completely removed.'}
+                  ? '🎯 آلية العمل المؤتمتة:'
+                  : '🎯 Automated Workflow:'}
               </div>
-              <div className="text-slate-300">
+              <p className="text-slate-300 leading-relaxed">
                 {isAr
-                  ? '🎯 يقوم الروبوت بمراقبة عقد البيتكوين 5 دقائق، وعند دخول الدقيقة الأخيرة (≤ 60 ثانية متبقية للتسوية) يشتري العقد المضمون تقريباً (الأعلى احتمالاً للفوز UP أو DOWN) فوراً بأمر FAK بدون سقف سعري وبنسبة 10% من رأس المال.'
-                  : '🎯 The bot monitors the active 5-minute BTC contract and enters during the final 60 seconds into the leading outcome (UP or DOWN) using a FAK order with no price cap and 10% of capital.'}
-              </div>
+                  ? 'يقيس الروبوت باستمرار بُعد السعر اللحظي للبيتكوين عن سعر الأساس (سعر افتتاح عقد الـ 5 دقائق). إذا تحرك السعر بمقدار 150 دولار صعوداً يتم وضع أمر شراء معلق (GTC) لعقد UP بسعر 20% ($0.20)، وإذا تحرك 150 دولار هبوطاً يتم وضع أمر GTC لعقد DOWN بسعر 20%. وفي حال لم يُنفذ الأمر بحلول الدقيقة الأخيرة (≤ 60 ثانية متبقية)، يقوم الروبوت بإلغاء الأمر تلقائياً لمنع أي مخاطر متأخرة.'
+                  : 'The bot continuously tracks BTC spot deviation from the 5m base price (contract open). Upon reaching a $150 upward movement, it submits a GTC buy limit order for UP at 20% ($0.20). For a $150 downward movement, it submits a GTC order for DOWN at 20%. If unfilled when the countdown reaches 1 minute (≤ 60s), the order is auto-cancelled.'}
+              </p>
             </div>
           </div>
         </div>
@@ -300,7 +297,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
             className="flex items-center gap-1.5 px-3 py-2 text-xs text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
           >
             <RotateCcw className="w-3.5 h-3.5" />
-            <span>{isAr ? 'استعادة الإعدادات الافتراضية (10% · 5m)' : 'Reset Defaults (10% · 5m)'}</span>
+            <span>{isAr ? 'استعادة الإعدادات الافتراضية' : 'Reset Defaults'}</span>
           </button>
 
           <div className="flex items-center gap-3">

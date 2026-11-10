@@ -27,12 +27,12 @@ const DEFAULT_CONFIG: BotConfig = {
   zScoreEntry: 0,
   zScoreLower: 0,
   zScoreLowerEntry: 0,
-  maxPriceCents: 0.99, // No Price Cap (بدون سقف سعري - تنفيذ فوري بأي سعر متاح)
-  maxRiskPercent: 0.10, // 10% of Capital per 5-minute contract (10% من رأس المال)
-  orderType: 'FAK', // Order Type: FAK (Fill-And-Kill)
-  fractionChunks: 1, // 1 unified direct order
+  maxPriceCents: 0.20, // GTC Limit Price: 20% ($0.20)
+  maxRiskPercent: 0.10, // 10% Capital
+  orderType: 'GTC', // GTC (Good-Til-Cancelled) Limit Order at 20%
+  fractionChunks: 1,
   chunkDelayMs: 0,
-  winProbability: 0.90,
+  winProbability: 0.80,
   initialBalance: 1000,
   binanceRestUrl: 'https://api.binance.com/api/v3/klines',
   binanceWsUrl: 'wss://stream.binance.com/ws/btcusdt@kline_1m',
@@ -41,15 +41,26 @@ const DEFAULT_CONFIG: BotConfig = {
   limitlessApiKey: (typeof process !== 'undefined' && process.env?.LIMITLESS_API_KEY) || '',
   limitlessTokenId: (typeof process !== 'undefined' && process.env?.LMTS_TOKEN_ID) || '',
   limitlessTokenSecret: (typeof process !== 'undefined' && process.env?.LMTS_TOKEN_SECRET) || '',
-  singleTradePerContract: true, // Single-Entry Lock per 5m Market
-  cooldownMinutes: 5, // 5-minute contract cycle guard
+  singleTradePerContract: true,
+  cooldownMinutes: 5,
   calculateOnCandleClose: false,
   adxThreshold: 100,
   rvMinBp: 0,
   rvMaxBp: 10000,
-  entryWindowStartMin: 4, // Last minute of 5m contract (Minute 4 -> <= 60s remaining)
-  entryWindowEndMin: 5,
+  entryWindowStartMin: 0,
+  entryWindowEndMin: 4, // Active until 1 minute before expiry (<= 60s -> cancel)
 };
+
+export interface PendingGtcOrderState {
+  orderId: string;
+  marketSlug: string;
+  placedAt: number;
+  direction: 'LONG' | 'SHORT';
+  outcome: 'UP' | 'DOWN';
+  price: number;
+  contracts: number;
+  status: 'PENDING_FILL' | 'CANCELLED' | 'FILLED';
+}
 
 export function useTradingBot() {
   const [config, setConfig] = useState<BotConfig>(() => {
@@ -65,7 +76,6 @@ export function useTradingBot() {
         if (parsed.limitlessWsUrl && parsed.limitlessWsUrl.includes('api.limitless.exchange')) {
           parsed.limitlessWsUrl = DEFAULT_CONFIG.limitlessWsUrl;
         }
-        // Migrate strictly to 5-minute BTC market slug
         if (
           !parsed.limitlessMarketSlug ||
           /(^|[^0-9])15-min/i.test(parsed.limitlessMarketSlug) ||
@@ -78,15 +88,14 @@ export function useTradingBot() {
           parsed.limitlessMarketSlug = DEFAULT_CONFIG.limitlessMarketSlug;
         }
         parsed.strategyDirection = 'BOTH';
-        parsed.orderType = 'FAK';
-        parsed.maxPriceCents = 0.99; // No Price Cap
+        parsed.orderType = 'GTC';
+        parsed.maxPriceCents = 0.20; // 20% ($0.20)
         parsed.fractionChunks = 1;
         parsed.chunkDelayMs = 0;
         parsed.maxRiskPercent = 0.10; // 10% Capital
         parsed.singleTradePerContract = true;
         parsed.cooldownMinutes = 5;
 
-        // Auto-inject env secrets if persisted config has empty credentials
         if (!parsed.limitlessTokenId && DEFAULT_CONFIG.limitlessTokenId) {
           parsed.limitlessTokenId = DEFAULT_CONFIG.limitlessTokenId;
         }
@@ -107,6 +116,11 @@ export function useTradingBot() {
   const [candles, setCandles] = useState<CandleData[]>([]);
   const [metrics, setMetrics] = useState<ZScoreMetric[]>([]);
   const [currentZScore, setCurrentZScore] = useState<number>(0);
+  const [priceDeviation, setPriceDeviation] = useState<{ delta: number; absDelta: number; openPrice: number | null }>({
+    delta: 0,
+    absDelta: 0,
+    openPrice: null,
+  });
   const [crossedUpperThreshold, setCrossedUpperThreshold] = useState<boolean>(false);
   const [crossedLowerThreshold, setCrossedLowerThreshold] = useState<boolean>(false);
   const [lastTradeDirection, setLastTradeDirection] = useState<'SHORT' | 'LONG' | null>(null);
@@ -121,6 +135,9 @@ export function useTradingBot() {
     timestamp: number;
     action?: 'START_BOT' | 'TRIGGER_TRADE';
   } | null>(null);
+
+  const [pendingGtcOrder, setPendingGtcOrder] = useState<PendingGtcOrderState | null>(null);
+  const pendingGtcOrderRef = useRef<PendingGtcOrderState | null>(null);
 
   const [orderbook, setOrderbook] = useState<import('../types/bot').OrderbookUpdate | null>(null);
   const [oracle, setOracle] = useState<import('../types/bot').OraclePriceData | null>(null);
@@ -160,10 +177,10 @@ export function useTradingBot() {
             direction: item?.direction === 'LONG' ? 'LONG' : 'SHORT',
             triggerZScore: Number.isFinite(Number(item?.triggerZScore)) ? Number(item.triggerZScore) : 0,
             totalContracts: Number.isFinite(Number(item?.totalContracts)) ? Number(item.totalContracts) : 0,
-            contractPrice: Number.isFinite(Number(item?.contractPrice)) ? Number(item.contractPrice) : 0.99,
+            contractPrice: Number.isFinite(Number(item?.contractPrice)) ? Number(item.contractPrice) : 0.20,
             totalInvestmentUsd: Number.isFinite(Number(item?.totalInvestmentUsd)) ? Number(item.totalInvestmentUsd) : 0,
             chunks: Array.isArray(item?.chunks) ? item.chunks : [],
-            status: item?.status || 'COMPLETED',
+            status: item?.status || 'ACTIVE_GTC',
           }));
         }
       }
@@ -261,6 +278,7 @@ export function useTradingBot() {
   metricsRef.current = metrics;
   binanceStatusRef.current = binanceStatus;
   oracleRef.current = oracle;
+  pendingGtcOrderRef.current = pendingGtcOrder;
 
   const toggleSound = () => {
     const next = !soundEnabled;
@@ -268,7 +286,6 @@ export function useTradingBot() {
     soundController.enabled = next;
   };
 
-  // Save config
   const updateConfig = (partial: Partial<BotConfig>) => {
     setConfig((prev) => {
       const next = { ...prev, ...partial };
@@ -276,7 +293,7 @@ export function useTradingBot() {
         next.maxRiskPercent = Math.min(Math.max(Number(next.maxRiskPercent) || 0.10, 0.01), 1.0);
       }
       if (next.maxPriceCents !== undefined) {
-        next.maxPriceCents = Math.min(Math.max(Number(next.maxPriceCents) || 0.99, 0.01), 0.99);
+        next.maxPriceCents = Math.min(Math.max(Number(next.maxPriceCents) || 0.20, 0.01), 0.99);
       }
       try {
         localStorage.setItem('limitless_live_bot_config', JSON.stringify(next));
@@ -289,7 +306,7 @@ export function useTradingBot() {
 
   const lastRoundStartMsRef = useRef<number>(0);
 
-  // Build clean chart series anchored to each 5-minute contract's opening price (NO indicators or filters)
+  // Build clean chart series anchored to each 5-minute contract's opening price
   const rebuildMetrics = useCallback((
     candleList: CandleData[],
     cfg: BotConfig
@@ -297,7 +314,6 @@ export function useTradingBot() {
     const result: ZScoreMetric[] = [];
     const closes = candleList.map((c) => c.close);
 
-    // Detect 5-minute round boundary rollover (every 300,000 ms)
     const latestCandle = candleList[candleList.length - 1];
     const latestTimeMs = latestCandle
       ? latestCandle.time > 1e11
@@ -318,7 +334,6 @@ export function useTradingBot() {
     }
     lastRoundStartMsRef.current = currentRoundStartMs;
 
-    // Lookup each 5-minute round's opening price
     const roundOpenBySlot = new Map<number, number>();
     for (let k = 0; k < candleList.length; k++) {
       const cTimeMs = candleList[k].time > 1e11 ? candleList[k].time : candleList[k].time * 1000;
@@ -382,7 +397,6 @@ export function useTradingBot() {
     }
   }, []);
 
-  // Enforce 1 bet per 5m contract
   const checkTradeLock = useCallback((targetSlug?: string, _cTime?: number): { locked: boolean; reason?: string } => {
     const cfg = configRef.current;
     if (!cfg.singleTradePerContract) return { locked: false };
@@ -398,13 +412,39 @@ export function useTradingBot() {
     ) {
       return {
         locked: true,
-        reason: `🔒 تم بالفعل فتح صفقة (10% من رأس المال) على عقد الـ 5 دقائق الحالي (${targetSlug}). سينتقل الروبوت تلقائياً للعقد القادم.`,
+        reason: `🔒 تم بالفعل إرسال أمر صفقة على عقد الـ 5 دقائق الحالي (${targetSlug}). سينتقل الروبوت تلقائياً للعقد القادم.`,
       };
     }
     return { locked: false };
   }, []);
 
-  // Execute LIVE Trade strictly across Limitless (5m Contract, 10% Capital, FAK without Price Cap)
+  // Cancel an active pending GTC order
+  const cancelPendingGtcOrder = useCallback(async (orderId?: string) => {
+    const targetId = orderId || pendingGtcOrderRef.current?.orderId;
+    if (!targetId) return;
+
+    try {
+      const cfg = configRef.current;
+      console.log(`[Auto-Cancel GTC] Cancelling order ${targetId}...`);
+      await limitlessService.cancelOrder(targetId, {
+        privateKey: cfg.privateKey,
+        tokenId: cfg.limitlessTokenId,
+        secret: cfg.limitlessTokenSecret,
+      });
+
+      setPendingGtcOrder((prev) => (prev ? { ...prev, status: 'CANCELLED' } : null));
+      setActiveTrade((prev) => (prev && prev.exchangeOrderId === targetId ? { ...prev, status: 'REJECTED' } : prev));
+      setExecutionNotice({
+        type: 'WARNING',
+        message: `⏰ [إلغاء تلقائي عند الدقيقة الأخيرة] تم إلغاء أمر GTC (المعلق عند 20%) لعدم التنفيذ وبقاء ≤ 1 دقيقة على نهاية العقد.`,
+        timestamp: Date.now(),
+      });
+    } catch (err: any) {
+      console.warn(`[Auto-Cancel GTC Error]`, err?.message || err);
+    }
+  }, []);
+
+  // Execute LIVE Trade across Limitless (5m Contract, GTC Limit Order @ $0.20 / 20%, 10% Capital)
   const executeLiveTrade = useCallback(async (
     triggerZ: number,
     direction: 'SHORT' | 'LONG' = 'LONG',
@@ -424,7 +464,6 @@ export function useTradingBot() {
     const cfg = configRef.current;
     let balance = currentBalanceRef.current;
 
-    // Determine target 5-minute market slug using latest live ref first
     let currentMarket = activeLimitlessMarketRef.current;
     const is5mMarket = (s?: string) => Boolean(s && (/(^|[^0-9])5-min/i.test(s) || /(^|[^0-9])5m/i.test(s)));
 
@@ -449,12 +488,9 @@ export function useTradingBot() {
         ? cfg.limitlessMarketSlug
         : 'btc-up-or-down-5-min';
 
-    // Strict Anti-Duplicate Guard (1 trade per 5m contract)
     const lock = checkTradeLock(resolvedMarketSlug, candleTime);
     if (lock.locked) {
-      if (!isManual) {
-        return;
-      }
+      if (!isManual) return;
       console.warn(`[SAFETY GUARD BLOCKED] Trade rejected: ${lock.reason}`);
       setExecutionNotice({
         type: 'WARNING',
@@ -464,7 +500,6 @@ export function useTradingBot() {
       return;
     }
 
-    // Strict Safety Guard: Only trade 5-minute contracts
     if (/(^|[^0-9])15-min/i.test(resolvedMarketSlug) || /hourly/i.test(resolvedMarketSlug) || /(^|[^0-9])1-hour/i.test(resolvedMarketSlug)) {
       console.error(
         `[SAFETY SHIELD] Contract '${resolvedMarketSlug}' blocked! Trading bot is locked strictly to 5-minute contracts.`
@@ -472,7 +507,6 @@ export function useTradingBot() {
       return;
     }
 
-    // Balance check with on-the-fly live API fetch if balance in memory is 0
     if (balance <= 0 && liveUsdcBalance > 0) {
       balance = liveUsdcBalance;
       currentBalanceRef.current = liveUsdcBalance;
@@ -509,10 +543,10 @@ export function useTradingBot() {
     const isLong = direction === 'LONG';
     const outcome = isLong ? 'UP' : 'DOWN';
 
-    // No Price Cap (0.99 = 99¢ ceiling) for immediate FAK execution at any available price
-    const effectiveContractPrice = 0.99;
+    // Order Type GTC @ 20% ($0.20) as explicitly requested:
+    // "إذا تحرك السعر الى 150 دولار صعودا أو هبوطا من سعر الأساس نضع أمر GTC عند 20% ونلغيه في حال عدم التنفيذ إذا وصل 1 دقيقة على نهاية العقد"
+    const effectiveContractPrice = 0.20; // 20% limit price
 
-    // 10% Capital Allocation per 5m contract
     const maxRiskCap = Math.min(Math.max(cfg.maxRiskPercent || 0.10, 0.01), 1.0);
     const maxBudgetUsd = balance * maxRiskCap;
 
@@ -529,7 +563,6 @@ export function useTradingBot() {
       effectiveContracts = 0.01;
     }
 
-    // Ensure dollar cost strictly never exceeds 10% of bankroll
     if (effectiveContracts * effectiveContractPrice > maxBudgetUsd) {
       effectiveContracts = Math.floor((maxBudgetUsd / effectiveContractPrice) * 100) / 100;
     }
@@ -542,7 +575,7 @@ export function useTradingBot() {
       if (maxBudgetUsd >= (0.01 * effectiveContractPrice)) {
         effectiveContracts = 0.01;
       } else {
-        const minWarning = `⚠️ رصيد المحفظة الحالي ($${balance.toFixed(2)} USDC) والميزانية المخصصة 10% ($${maxBudgetUsd.toFixed(2)}) لا تكفي لشراء عقد.`;
+        const minWarning = `⚠️ رصيد المحفظة الحالي ($${balance.toFixed(2)} USDC) والميزانية المخصصة 10% ($${maxBudgetUsd.toFixed(2)}) لا تكفي لشراء عقد بسعر $${effectiveContractPrice}.`;
         console.warn(minWarning);
         limitlessService.logDirect('SYSTEM', minWarning);
         setExecutionNotice({
@@ -575,26 +608,26 @@ export function useTradingBot() {
       totalInvestmentUsd: effectiveContracts * effectiveContractPrice,
       kellyRiskPct: maxRiskCap,
       chunks: [],
-      status: 'PENDING_WS',
+      status: 'ACTIVE_GTC',
     };
 
     setActiveTrade(initialTrade);
 
     try {
       console.log(
-        `[LIVE DIRECT EXECUTION - ${direction}] Sending unified FAK order (NO PRICE CAP) of ${effectiveContracts} contracts to Limitless (${resolvedMarketSlug} - ${outcome}) [10% Capital]...`
+        `[LIVE GTC EXECUTION - ${direction}] Sending GTC Limit order of ${effectiveContracts} contracts @ $0.20 (20%) on Limitless (${resolvedMarketSlug} - ${outcome})...`
       );
 
       limitlessService.logDirect(
         'OUTGOING',
-        `🚀 [تنفيذ صفقة الدقيقة الأخيرة FAK بدون سقف سعري] إرسال أمر FAK لعدد ${effectiveContracts} عقود ${outcome} (${direction}) إلى عقد 5 دقائق (${resolvedMarketSlug}) بنسبة ${(maxRiskCap * 100).toFixed(0)}% من رأس المال...`
+        `🚀 [تنفيذ أمر GTC عند 20%] إرسال أمر شراء معلق (GTC Limit) لعدد ${effectiveContracts} عقود ${outcome} (${direction}) بسعر $0.20 (20%) إلى عقد 5 دقائق (${resolvedMarketSlug})...`
       );
 
       const executed = await limitlessService.executeChunkedOrder(
         effectiveContracts,
         effectiveContractPrice,
         1,
-        'FAK',
+        'GTC', // GTC order type
         0,
         (updatedChunk) => {
           setCurrentChunks((prev) => {
@@ -614,11 +647,14 @@ export function useTradingBot() {
       );
 
       const serverConfirmedSlug = (executed[0] as any)?.marketSlug || resolvedMarketSlug;
+      const orderIdResolved = (executed[0] as any)?.orderId || `ord_${Date.now()}`;
+
       const completedTrade: TradeOrder = {
         ...initialTrade,
         market: serverConfirmedSlug,
+        exchangeOrderId: orderIdResolved,
         chunks: executed,
-        status: 'EXECUTED' as any,
+        status: 'ACTIVE_GTC' as any,
       };
 
       setActiveTrade(completedTrade);
@@ -630,22 +666,32 @@ export function useTradingBot() {
         return next;
       });
 
+      const orderState: PendingGtcOrderState = {
+        orderId: orderIdResolved,
+        marketSlug: serverConfirmedSlug,
+        placedAt: Date.now(),
+        direction,
+        outcome,
+        price: effectiveContractPrice,
+        contracts: effectiveContracts,
+        status: 'PENDING_FILL',
+      };
+      setPendingGtcOrder(orderState);
+      pendingGtcOrderRef.current = orderState;
+
       const now = Date.now();
       lastExecutedCandleTimeRef.current = candleTime || now;
       lastExecutedMarketSlugRef.current = serverConfirmedSlug;
       lastExecutedTimestampRef.current = now;
       setContractLockInfo({
         isLocked: true,
-        reason: `تم تنفيذ صفقة 10% من رأس المال على عقد الـ 5 دقائق ${serverConfirmedSlug}`,
+        reason: `تم وضع أمر GTC عند 20% على عقد الـ 5 دقائق ${serverConfirmedSlug}`,
         cooldownRemainingMinutes: 5,
         lastTradedSlug: serverConfirmedSlug,
       });
 
       const invested = completedTrade.totalInvestmentUsd;
-      setCurrentBalance((prev) => Math.max(0, prev - invested));
-      currentBalanceRef.current = Math.max(0, currentBalanceRef.current - invested);
-
-      const successNotice = `✅ تم تنفيذ صفقة الدقيقة الأخيرة بنجاح: أمر FAK بدون سقف سعري لشراء العقد المضمون تقريباً ${outcome} (${direction}) لعدد ${effectiveContracts} عقد بقيمة $${invested.toFixed(2)} (10% من رأس المال) على عقد الـ 5 دقائق ${serverConfirmedSlug}`;
+      const successNotice = `✅ تم وضع أمر GTC معلق بنجاح: شراء عقد ${outcome} (${direction}) بسعر 20% ($0.20) لعدد ${effectiveContracts} عقد بقيمة $${invested.toFixed(2)} على عقد الـ 5 دقائق ${serverConfirmedSlug} (سيتم إلغاؤه تلقائياً في حال عدم التنفيذ عند بقاء 1 دقيقة)`;
       limitlessService.logDirect('SYSTEM', successNotice);
       setExecutionNotice({
         type: 'SUCCESS',
@@ -676,9 +722,12 @@ export function useTradingBot() {
 
   executeLiveTradeRef.current = executeLiveTrade;
 
-  // 1-Second Last-Minute Sniper Monitor for 5-Minute BTC Contracts
+  // Real-Time 1-Second Strategy Monitor:
+  // 1. Monitors BTC spot price vs 5-minute contract Open Price (Price to Beat).
+  // 2. When price moves $150 or more (|Spot - OpenPrice| >= $150) -> places GTC BUY order @ 20% ($0.20).
+  // 3. If unexecuted by 1 minute before expiry (<= 60s remaining) -> cancels order automatically.
   useEffect(() => {
-    const sniperTimer = setInterval(() => {
+    const strategyTimer = setInterval(() => {
       const mkt = activeLimitlessMarketRef.current;
       const now = Date.now();
       const expMs = mkt?.expirationTimestamp
@@ -686,82 +735,88 @@ export function useTradingBot() {
         : Math.ceil(now / 300000) * 300000;
       const remainingSec = Math.floor((expMs - now) / 1000);
 
-      // Determine winning ("Almost-Guaranteed") outcome in real time
-      const yesPrice = Number(mkt?.prices?.[0] ?? 0.5);
-      const noPrice = Number(mkt?.prices?.[1] ?? 0.5);
       const latestCandle = candlesRef.current[candlesRef.current.length - 1];
       const spotPrice = Number(oracleRef.current?.value || latestCandle?.close || 0);
       const rawOpen = mkt?.openPrice !== undefined && mkt?.openPrice !== null
         ? Number(String(mkt.openPrice).replace(/[^0-9.-]/g, ''))
         : NaN;
-      const openPrice = Number.isFinite(rawOpen) && rawOpen > 0 ? rawOpen : (latestCandle?.open || spotPrice);
+      const openPrice = Number.isFinite(rawOpen) && rawOpen > 0 ? rawOpen : (latestCandle?.open || null);
 
-      let winningDirection: 'LONG' | 'SHORT' = 'LONG';
-      if (Math.abs(yesPrice - noPrice) >= 0.01) {
-        winningDirection = yesPrice >= noPrice ? 'LONG' : 'SHORT';
-      } else {
-        winningDirection = spotPrice >= openPrice ? 'LONG' : 'SHORT';
-      }
+      if (openPrice && spotPrice > 0) {
+        const delta = spotPrice - openPrice;
+        const absDelta = Math.abs(delta);
+        setPriceDeviation({ delta, absDelta, openPrice });
 
-      const winningOutcome = winningDirection === 'LONG' ? 'UP (صعود)' : 'DOWN (هبوط)';
-      const winningProb = ((winningDirection === 'LONG' ? yesPrice : noPrice) * 100).toFixed(1);
-
-      // Enter strictly in the Last Minute (2s <= remainingSec <= 60s)
-      if (remainingSec >= 2 && remainingSec <= 60) {
-        if (winningDirection === 'LONG') {
+        // Visual threshold triggers
+        if (delta >= 150) {
           crossedLowerThresholdRef.current = true;
           setCrossedLowerThreshold(true);
           crossedUpperThresholdRef.current = false;
           setCrossedUpperThreshold(false);
-        } else {
+        } else if (delta <= -150) {
           crossedUpperThresholdRef.current = true;
           setCrossedUpperThreshold(true);
           crossedLowerThresholdRef.current = false;
           setCrossedLowerThreshold(false);
+        } else {
+          crossedUpperThresholdRef.current = false;
+          setCrossedUpperThreshold(false);
+          crossedLowerThresholdRef.current = false;
+          setCrossedLowerThreshold(false);
         }
 
-        const activeSlug = mkt?.slug;
-        const alreadyLocked =
-          Boolean(activeSlug) &&
-          activeSlug !== 'btc-up-or-down-5-min' &&
-          lastExecutedMarketSlugRef.current === activeSlug &&
-          now - lastExecutedTimestampRef.current < 5 * 60 * 1000;
-
-        if (!alreadyLocked && now - lastEvaluatedEntrySignalTimeRef.current >= 5000) {
-          if (!botActiveRef.current) {
-            lastEvaluatedEntrySignalTimeRef.current = now;
-            const pauseWarn = `⚠️ دخل عقد الـ 5 دقائق في الدقيقة الأخيرة (${remainingSec} ثانية متبقية) والعقد المضمون تقريباً هو ${winningOutcome} باحتمال ${winningProb}%، ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" للدخول التلقائي.`;
-            limitlessService.logDirect('SYSTEM', pauseWarn);
-            setExecutionNotice({
-              type: 'WARNING',
-              message: pauseWarn,
-              timestamp: now,
-              action: 'START_BOT',
-            });
-          } else if (!isExecutingRef.current) {
-            lastEvaluatedEntrySignalTimeRef.current = now;
-            const cTime = latestCandle?.time || now;
-            if (winningDirection === 'LONG') {
-              entryLongCandlesRef.current.add(cTime);
-            } else {
-              entryShortCandlesRef.current.add(cTime);
-            }
-            const trigMsg = `🎯 [قنص الدقيقة الأخيرة - متبقي ${remainingSec} ثانية] العقد المضمون تقريباً هو ${winningOutcome} (احتمال السوق ${winningProb}%) — جاري إرسال أمر FAK فوري بدون سقف سعري وبنسبة 10% من رأس المال!`;
-            console.log(trigMsg);
-            limitlessService.logDirect('SYSTEM', trigMsg);
-            executeLiveTradeRef.current(0, winningDirection, cTime, false);
+        // Rule 1: Auto-cancel GTC order if remaining time reaches 1 minute (<= 60 seconds)
+        const pending = pendingGtcOrderRef.current;
+        if (pending && pending.status === 'PENDING_FILL') {
+          if (remainingSec <= 60 || (mkt?.slug && pending.marketSlug !== mkt.slug)) {
+            cancelPendingGtcOrder(pending.orderId);
           }
         }
-      } else {
-        crossedUpperThresholdRef.current = false;
-        setCrossedUpperThreshold(false);
-        crossedLowerThresholdRef.current = false;
-        setCrossedLowerThreshold(false);
+
+        // Rule 2: Trigger GTC order at 20% if price moves >= $150 and more than 60s remaining
+        if (absDelta >= 150 && remainingSec > 60) {
+          const isUp = delta >= 150;
+          const targetDirection: 'LONG' | 'SHORT' = isUp ? 'LONG' : 'SHORT';
+          const targetOutcome = isUp ? 'UP (صعود)' : 'DOWN (هبوط)';
+
+          const activeSlug = mkt?.slug;
+          const alreadyLocked =
+            Boolean(activeSlug) &&
+            activeSlug !== 'btc-up-or-down-5-min' &&
+            lastExecutedMarketSlugRef.current === activeSlug &&
+            now - lastExecutedTimestampRef.current < 5 * 60 * 1000;
+
+          if (!alreadyLocked && now - lastEvaluatedEntrySignalTimeRef.current >= 4000) {
+            if (!botActiveRef.current) {
+              lastEvaluatedEntrySignalTimeRef.current = now;
+              const pauseWarn = `⚠️ تحرك السعر $${absDelta.toFixed(1)} من سعر الأساس (≥ $150)! إشارة دخول ${targetOutcome} بأمر GTC عند 20%، ولكن الروبوت متوقف حالياً! اضغط "تشغيل الروبوت" لتفعيل الصفقات التلقائية.`;
+              limitlessService.logDirect('SYSTEM', pauseWarn);
+              setExecutionNotice({
+                type: 'WARNING',
+                message: pauseWarn,
+                timestamp: now,
+                action: 'START_BOT',
+              });
+            } else if (!isExecutingRef.current) {
+              lastEvaluatedEntrySignalTimeRef.current = now;
+              const cTime = latestCandle?.time || now;
+              if (targetDirection === 'LONG') {
+                entryLongCandlesRef.current.add(cTime);
+              } else {
+                entryShortCandlesRef.current.add(cTime);
+              }
+              const trigMsg = `🎯 [تحرك السعر ${delta > 0 ? '+' : ''}$${delta.toFixed(1)} ≥ 150$] جاري وضع أمر GTC عند 20% ($0.20) لعقد ${targetOutcome} (سيتم إلغاؤه تلقائياً في حال عدم التنفيذ عند بقاء 1 دقيقة).`;
+              console.log(trigMsg);
+              limitlessService.logDirect('SYSTEM', trigMsg);
+              executeLiveTradeRef.current(0, targetDirection, cTime, false);
+            }
+          }
+        }
       }
     }, 1000);
 
-    return () => clearInterval(sniperTimer);
-  }, []);
+    return () => clearInterval(strategyTimer);
+  }, [cancelPendingGtcOrder]);
 
   const clearTradeLock = useCallback(() => {
     lastExecutedMarketSlugRef.current = '';
@@ -772,7 +827,7 @@ export function useTradingBot() {
     } catch {}
     limitlessService.clearTradeGuardOnVm().catch(() => {});
     setContractLockInfo({ isLocked: false });
-    const unMsg = '🔓 تم إلغاء قفل عقد الـ 5 دقائق يدوياً. الروبوت مستعد لفتح صفقة جديدة.';
+    const unMsg = '🔓 تم إلغاء قفل العقد يدوياً. الروبوت مستعد لفتح صفقة جديدة.';
     console.log(unMsg);
     limitlessService.logDirect('SYSTEM', unMsg);
     setExecutionNotice({
@@ -837,6 +892,8 @@ export function useTradingBot() {
           setCrossedLowerThreshold(false);
           setIsEntrySignal(false);
           setActiveSignal(null);
+          setPendingGtcOrder(null);
+          pendingGtcOrderRef.current = null;
         }
 
         if (lastExecutedMarketSlugRef.current && lastExecutedMarketSlugRef.current !== newMarket.slug) {
@@ -862,7 +919,7 @@ export function useTradingBot() {
         lastExecutedCandleTimeRef.current = Number(serverGuard.candleTime) || 0;
         setContractLockInfo({
           isLocked: true,
-          reason: `تم تنفيذ صفقة 10% على عقد الـ 5 دقائق ${serverGuard.marketSlug}`,
+          reason: `تم تنفيذ أمر على عقد ${serverGuard.marketSlug}`,
           cooldownRemainingMinutes: 5,
           lastTradedSlug: serverGuard.marketSlug,
         });
@@ -914,7 +971,6 @@ export function useTradingBot() {
   const rebuildMetricsRef = useRef(rebuildMetrics);
   rebuildMetricsRef.current = rebuildMetrics;
 
-  // Load real Binance Historical Data & Live WebSocket (1m)
   useEffect(() => {
     let isCancelled = false;
 
@@ -1035,6 +1091,8 @@ export function useTradingBot() {
             setCrossedLowerThreshold(false);
             setIsEntrySignal(false);
             setActiveSignal(null);
+            setPendingGtcOrder(null);
+            pendingGtcOrderRef.current = null;
           }
 
           if (lastExecutedMarketSlugRef.current && lastExecutedMarketSlugRef.current !== data.slug) {
@@ -1184,7 +1242,7 @@ export function useTradingBot() {
   );
 
   const kelly = calculateKellySizing(currentBalance, {
-    maxPriceCents: 0.99,
+    maxPriceCents: 0.20,
     winProbability: config.winProbability,
     maxRiskPercent: config.maxRiskPercent || 0.10,
     fractionChunks: 1,
@@ -1199,6 +1257,7 @@ export function useTradingBot() {
     metrics,
     latestMetric: latestConfirmedMetric,
     currentZScore,
+    priceDeviation,
     crossedUpperThreshold,
     crossedLowerThreshold,
     lastTradeDirection,
@@ -1210,6 +1269,8 @@ export function useTradingBot() {
     advancedFiltersStatus,
     executionNotice,
     setExecutionNotice,
+    pendingGtcOrder,
+    cancelPendingGtcOrder,
     isLiveBalance,
     liveWallet,
     isFetchingBalance,

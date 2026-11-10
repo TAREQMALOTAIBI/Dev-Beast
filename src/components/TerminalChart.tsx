@@ -22,17 +22,17 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
 }) => {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
-  // Display last 45 1-minute candles cleanly without any indicators
+  // Display last 45 1-minute candles cleanly with base price and $150 breakout bands
   const displayCount = Math.min(candles.length, 45);
   const visibleCandles = useMemo(() => candles.slice(-displayCount), [candles, displayCount]);
   const visibleMetrics = useMemo(() => metrics.slice(-displayCount), [metrics, displayCount]);
 
-  // Dimensions (Single clean Price & 5m Open Price pane - Z-Score pane removed)
+  // Dimensions
   const width = 860;
   const candleHeight = 320;
-  const padding = { top: 24, right: 75, bottom: 28, left: 16 };
+  const padding = { top: 24, right: 80, bottom: 28, left: 16 };
 
-  // Price Extents
+  // Price Extents with buffer for +150$ and -150$ bands
   const { minPrice, maxPrice } = useMemo(() => {
     if (visibleCandles.length === 0) return { minPrice: 0, maxPrice: 100 };
     let min = Infinity;
@@ -45,12 +45,12 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
 
     visibleMetrics.forEach((m) => {
       if (m.mean > 0) {
-        if (m.mean > max) max = m.mean;
-        if (m.mean < min) min = m.mean;
+        if (m.mean + 160 > max) max = m.mean + 160;
+        if (m.mean - 160 < min) min = m.mean - 160;
       }
     });
 
-    const buffer = (max - min) * 0.1 || 1;
+    const buffer = (max - min) * 0.05 || 10;
     return { minPrice: min - buffer, maxPrice: max + buffer };
   }, [visibleCandles, visibleMetrics]);
 
@@ -70,12 +70,34 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
     return Number.isFinite(x) ? x : padding.left;
   };
 
-  // SVG Path for 5-Minute Contract Open Price (Price to Beat)
+  // Base price (Open price) path
   const openPricePath = useMemo(() => {
     return visibleMetrics
       .map((m, i) => {
         const x = candleX(i);
         const y = candleY(m.mean);
+        return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
+      })
+      .join(' ');
+  }, [visibleMetrics, candleX, candleY]);
+
+  // +150$ Movement Trigger line (Upper)
+  const upper150Path = useMemo(() => {
+    return visibleMetrics
+      .map((m, i) => {
+        const x = candleX(i);
+        const y = candleY(m.mean + 150);
+        return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
+      })
+      .join(' ');
+  }, [visibleMetrics, candleX, candleY]);
+
+  // -150$ Movement Trigger line (Lower)
+  const lower150Path = useMemo(() => {
+    return visibleMetrics
+      .map((m, i) => {
+        const x = candleX(i);
+        const y = candleY(m.mean - 150);
         return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
       })
       .join(' ');
@@ -92,12 +114,12 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
           <div className="flex items-center gap-2">
             <span className="font-bold text-slate-100 text-sm tracking-wide">{symbol}</span>
             <span className="text-sky-400 font-mono bg-sky-950/70 border border-sky-500/40 px-1.5 py-0.5 rounded text-[11px] font-semibold">
-              {timeframe} Live Price
+              {timeframe} Live Radar
             </span>
           </div>
           <span className="text-slate-600">·</span>
           <span className="text-emerald-400 text-[11px] font-medium hidden sm:inline">
-            → حركة سعر البيتكوين المباشرة مقابل سعر افتتاح عقد الـ 5 دقائق (بدون مؤشرات)
+            → عتبات تحرك السعر ±150$ من سعر الأساس (وضع أمر GTC عند 20%)
           </span>
         </div>
 
@@ -121,7 +143,7 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
             </span>
             {hoveredMetric && hoveredMetric.mean > 0 && (
               <span className="text-amber-300 bg-amber-950/60 border border-amber-600/40 px-2 py-0.5 rounded">
-                5m Open: <span className="font-bold">{formatPrice(hoveredMetric.mean)}</span>
+                Base: <span className="font-bold">{formatPrice(hoveredMetric.mean)}</span>
               </span>
             )}
           </div>
@@ -141,7 +163,6 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
             </pattern>
           </defs>
 
-          {/* Background Grid */}
           <rect width={width} height={candleHeight} fill="url(#grid)" />
 
           {/* Price Horizontal Grid & Labels */}
@@ -158,16 +179,67 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
             );
           })}
 
-          {/* 5-Minute Contract Open Price Line (Price to Beat) */}
+          {/* +150$ Movement Trigger Line (Green dashed) */}
+          {upper150Path && (
+            <g>
+              <path
+                d={upper150Path}
+                fill="none"
+                stroke="#10b981"
+                strokeWidth="1.2"
+                strokeDasharray="4 3"
+                opacity="0.8"
+              />
+              {visibleMetrics.length > 0 && (
+                <text
+                  x={width - padding.right + 6}
+                  y={candleY(visibleMetrics[visibleMetrics.length - 1].mean + 150) + 3}
+                  fill="#10b981"
+                  fontSize="9"
+                  fontFamily="JetBrains Mono, monospace"
+                  fontWeight="bold"
+                >
+                  +150$ (UP)
+                </text>
+              )}
+            </g>
+          )}
+
+          {/* Base Price Line (Yellow line) */}
           {openPricePath && (
             <path
               d={openPricePath}
               fill="none"
               stroke="#fbbf24"
               strokeWidth="1.6"
-              strokeDasharray="4 3"
               opacity="0.9"
             />
+          )}
+
+          {/* -150$ Movement Trigger Line (Rose dashed) */}
+          {lower150Path && (
+            <g>
+              <path
+                d={lower150Path}
+                fill="none"
+                stroke="#f43f5e"
+                strokeWidth="1.2"
+                strokeDasharray="4 3"
+                opacity="0.8"
+              />
+              {visibleMetrics.length > 0 && (
+                <text
+                  x={width - padding.right + 6}
+                  y={candleY(visibleMetrics[visibleMetrics.length - 1].mean - 150) + 3}
+                  fill="#f43f5e"
+                  fontSize="9"
+                  fontFamily="JetBrains Mono, monospace"
+                  fontWeight="bold"
+                >
+                  -150$ (DOWN)
+                </text>
+              )}
+            </g>
           )}
 
           {/* Candlesticks */}
@@ -206,22 +278,21 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
                   rx="1"
                 />
 
-                {/* Short / Down Entry Signal Marker */}
+                {/* Entry Signal Markers */}
                 {isShortEntry && (
                   <g>
                     <polygon points={`${x},${yHigh - 6} ${x - 5},${yHigh - 15} ${x + 5},${yHigh - 15}`} fill="#f43f5e" />
                     <text x={x} y={yHigh - 18} fill="#f43f5e" fontSize="8.5" fontWeight="bold" textAnchor="middle" fontFamily="sans-serif">
-                      DOWN (▼)
+                      GTC DOWN (20%)
                     </text>
                   </g>
                 )}
 
-                {/* Long / Up Entry Signal Marker */}
                 {isLongEntry && (
                   <g>
                     <polygon points={`${x},${yLow + 6} ${x - 5},${yLow + 15} ${x + 5},${yLow + 15}`} fill="#10b981" />
                     <text x={x} y={yLow + 25} fill="#10b981" fontSize="8.5" fontWeight="bold" textAnchor="middle" fontFamily="sans-serif">
-                      UP (▲)
+                      GTC UP (20%)
                     </text>
                   </g>
                 )}
@@ -249,20 +320,20 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
       <div className="flex flex-wrap items-center justify-between px-4 py-2.5 bg-slate-950/70 border-t border-slate-800 text-[11px] text-slate-400 gap-2">
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-1.5">
-            <span className="w-3 h-0.5 bg-amber-400 inline-block border-b border-dashed border-amber-400"></span>
-            <span>سعر افتتاح عقد الـ 5 دقائق (5m Open Price / Price to Beat)</span>
+            <span className="w-3 h-0.5 bg-amber-400 inline-block"></span>
+            <span>سعر الأساس (Open Price)</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500 inline-block"></span>
-            <span>شمعة صاعدة (أعلى من الافتتاح = UP)</span>
+            <span className="w-3 h-0.5 bg-emerald-500 inline-block border-b border-dashed border-emerald-500"></span>
+            <span>+150$ صعود (تفعيل أمر GTC صعود عند 20%)</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-xs bg-rose-500 inline-block"></span>
-            <span>شمعة هابطة (أدنى من الافتتاح = DOWN)</span>
+            <span className="w-3 h-0.5 bg-rose-500 inline-block border-b border-dashed border-rose-500"></span>
+            <span>-150$ هبوط (تفعيل أمر GTC هبوط عند 20%)</span>
           </div>
         </div>
-        <div className="text-emerald-400 font-mono font-semibold">
-          ⚡ قنص الدقيقة الأخيرة (≤ 60s) · أمر FAK بدون سقف سعري · 10% من رأس المال
+        <div className="text-sky-300 font-mono font-semibold">
+          ⚡ أمر معلق GTC @ 20% · إلغاء تلقائي عند بقاء 1 دقيقة
         </div>
       </div>
     </div>

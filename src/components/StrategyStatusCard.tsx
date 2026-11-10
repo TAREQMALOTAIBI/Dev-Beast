@@ -11,6 +11,7 @@ import {
   TrendingDown,
   Clock,
   ShieldCheck,
+  XCircle,
 } from 'lucide-react';
 
 interface StrategyStatusCardProps {
@@ -46,6 +47,13 @@ interface StrategyStatusCardProps {
   };
   onClearTradeLock?: () => void;
   recentChartSignal?: any;
+  priceDeviation?: {
+    delta: number;
+    absDelta: number;
+    openPrice: number | null;
+  };
+  pendingGtcOrder?: any;
+  onCancelPendingOrder?: () => void;
 }
 
 export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
@@ -60,22 +68,24 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
   isExecuting = false,
   soundEnabled,
   onToggleSound,
-  config,
   lang,
   metric,
   executionNotice,
   onClearNotice,
   contractLockInfo,
   onClearTradeLock,
+  priceDeviation,
+  pendingGtcOrder,
+  onCancelPendingOrder,
 }) => {
   const isAr = lang === 'ar';
 
   const currentPrice = Number(metric?.price || 0);
-  const openPrice = Number(metric?.mean || 0);
-  const priceDiff = currentPrice && openPrice ? currentPrice - openPrice : 0;
-  const isLeadingUp = priceDiff >= 0;
-
-  const isInLastMinuteWindow = crossedUpperThreshold || crossedLowerThreshold;
+  const openPrice = Number(metric?.mean || priceDeviation?.openPrice || 0);
+  const priceDiff = priceDeviation?.delta ?? (currentPrice && openPrice ? currentPrice - openPrice : 0);
+  const absPriceDiff = Math.abs(priceDiff);
+  const isMove150Reached = absPriceDiff >= 150;
+  const isUpLeading = priceDiff >= 0;
 
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900/90 backdrop-blur-sm p-4 flex flex-col gap-3.5 shadow-lg">
@@ -86,15 +96,15 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
           <h3 className="font-bold text-slate-100 text-xs tracking-wider uppercase flex items-center gap-1.5">
             <span>
               {isAr
-                ? 'استراتيجية قنص الدقيقة الأخيرة (عقود 5 دقائق · بدون مؤشرات أو فلاتر)'
-                : 'Last-Minute 5m Sniper Strategy (No Indicators / No Filters)'}
+                ? 'استراتيجية تحرك 150$ · أمر GTC عند 20% · إلغاء عند بقاء 1 دقيقة'
+                : '$150 Movement Strategy · GTC @ 20% · Cancel @ 1m'}
             </span>
           </h3>
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-700/60">
-            {isAr ? '⚡ عقد 5 دقائق (5m)' : '⚡ 5m Contract'}
+          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-sky-950 text-sky-300 border border-sky-700/60">
+            {isAr ? 'أمر GTC @ 20%' : 'GTC @ 20%'}
           </span>
 
           <button
@@ -148,6 +158,37 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
         </div>
       )}
 
+      {/* Active Pending GTC Order Banner */}
+      {pendingGtcOrder && pendingGtcOrder.status === 'PENDING_FILL' && (
+        <div className="p-3 rounded-xl bg-sky-950/60 border border-sky-500/60 flex items-center justify-between gap-3 text-xs text-sky-200 shadow-md">
+          <div className="flex items-center gap-2.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-sky-400 animate-ping"></span>
+            <div>
+              <div className="font-bold text-sky-300 flex items-center gap-2">
+                <span>🎯 {isAr ? `يوجد أمر GTC معلق عند 20% ($0.20)` : `Pending GTC Order @ 20% ($0.20)`}</span>
+                <span className="text-[10px] bg-sky-900 text-sky-200 px-1.5 py-0.5 rounded font-mono">
+                  {pendingGtcOrder.outcome}
+                </span>
+              </div>
+              <div className="text-[10px] text-slate-300 mt-0.5">
+                {isAr
+                  ? `أمر الشراء ينتظر التنفيذ في دفتر الأوامر. سيتم إلغاؤه تلقائياً في حال عدم التنفيذ عند بقاء دقيقة واحدة (≤ 60 ثانية).`
+                  : `Waiting for fill on CLOB. Auto-cancels if unfilled when 1 minute remains.`}
+              </div>
+            </div>
+          </div>
+          {onCancelPendingOrder && (
+            <button
+              onClick={onCancelPendingOrder}
+              className="px-2.5 py-1 text-[11px] font-bold bg-rose-600 hover:bg-rose-500 text-white rounded-lg flex items-center gap-1 cursor-pointer shrink-0"
+            >
+              <XCircle className="w-3 h-3" />
+              <span>{isAr ? 'إلغاء الأمر الآن' : 'Cancel Now'}</span>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Warning Notice when Bot is Paused */}
       {!botActive && (
         <div className="p-2.5 rounded-lg bg-amber-950/30 border border-amber-600/40 text-[11px] text-amber-300 flex items-center justify-between gap-2">
@@ -155,8 +196,8 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
             <span>
               {isAr
-                ? '⚠️ تنبيه: الروبوت متوقف حالياً. اضغط "تشغيل الآن" ليقوم بالدخول التلقائي في آخر دقيقة من عقد الـ 5 دقائق.'
-                : '⚠️ Notice: Bot is currently paused. Click Start Now to enable automatic last-minute 5m entries.'}
+                ? '⚠️ تنبيه: الروبوت متوقف حالياً. اضغط "تشغيل الآن" ليقوم بوضع أمر GTC عند 20% تلقائياً عند تحرك السعر 150$.'
+                : '⚠️ Notice: Bot is paused. Click Start Now to enable automatic GTC orders upon $150 price movement.'}
             </span>
           </div>
           <button
@@ -184,7 +225,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
               }`}
             />
             <span className="font-bold text-xs text-slate-200">
-              {isAr ? 'حالة محرك قنص الدقيقة الأخيرة:' : 'Last-Minute Sniper Engine:'}
+              {isAr ? 'حالة محرك التداول التلقائي:' : 'Trading Engine Status:'}
             </span>
           </div>
 
@@ -195,11 +236,11 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
                 : 'bg-slate-800 text-slate-400 border border-slate-700'
             }`}
           >
-            {isAr ? (botActive ? '● نشط ويعمل تلقائياً (عقود 5 دقائق)' : '○ متوقف حالياً') : (botActive ? '● AUTO RUNNING (5m CONTRACTS)' : '○ PAUSED')}
+            {isAr ? (botActive ? '● نشط ويعمل تلقائياً (استراتيجية 150$)' : '○ متوقف حالياً') : (botActive ? '● AUTO RUNNING ($150 STRATEGY)' : '○ PAUSED')}
           </span>
         </div>
 
-        {/* Primary Big Full-Width Action Button */}
+        {/* Primary Action Button */}
         <button
           onClick={onToggleBot}
           className={`w-full py-2.5 px-4 rounded-xl font-bold text-xs transition-all shadow-md cursor-pointer flex items-center justify-center gap-2 select-none ${
@@ -216,24 +257,24 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
           ) : (
             <>
               <Power className="w-4 h-4 text-white" />
-              <span>{isAr ? 'تشغيل الروبوت الآن (دخول آخر دقيقة تلقائياً)' : 'Start Trading Bot (Auto Last-Minute Entry)'}</span>
+              <span>{isAr ? 'تشغيل الروبوت الآن' : 'Start Trading Bot'}</span>
             </>
           )}
         </button>
 
-        {/* Anti-Duplicate Contract Lock Status (Auto-transitions every 5 minutes) */}
+        {/* Anti-Duplicate Contract Lock Status */}
         {contractLockInfo?.isLocked ? (
           <div className="mt-2.5 p-2.5 rounded-lg bg-sky-950/40 border border-sky-600/40 flex items-center justify-between gap-2 text-xs text-sky-200">
             <div className="flex items-center gap-2 min-w-0">
               <span className="w-2 h-2 rounded-full bg-sky-400 shrink-0 animate-pulse"></span>
               <div className="min-w-0">
                 <div className="font-bold text-sky-300 flex items-center gap-1.5 flex-wrap">
-                  <span>🔒 {isAr ? 'تم تنفيذ صفقة عقد الـ 5 دقائق الحالي (10% من الرصيد)' : '5m Contract Trade Completed (10% Capital)'}</span>
+                  <span>🔒 {isAr ? 'تم إرسال أمر العقد الحالي (قفل حماية)' : 'Contract Order Active'}</span>
                 </div>
                 <div className="text-[10px] text-slate-300 mt-0.5 truncate">
                   {isAr
-                    ? 'يفتح الروبوت صفقة واحدة بنسبة 10% لكل عقد 5 دقائق، وينتقل تلقائياً للعقد الجديد فور بدايته.'
-                    : 'Bot opens 1 trade (10% capital) per 5m contract, then auto-transitions to the next 5m contract.'}
+                    ? 'يفتح الروبوت أمر GTC واحد لكل عقد 5 دقائق عند تحرك السعر 150$، وينتقل للعقد الجديد فور بدئه.'
+                    : 'Bot places 1 GTC order per 5m contract when price moves $150, then auto-transitions.'}
                 </div>
               </div>
             </div>
@@ -252,10 +293,10 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             <span>
               {isAr
                 ? (botActive
-                    ? '⚡ يراقب الروبوت عقد الـ 5 دقائق وسيقوم بالدخول تلقائياً في آخر 60 ثانية في العقد المضمون تقريباً بأمر FAK وبدون سقف سعري (10% من الرصيد).'
+                    ? '⚡ الروبوت يراقب حركة السعر: عند وصول الفارق إلى ≥ 150$ صعوداً أو هبوطاً يضع أمر GTC عند 20%، ويلغيه تلقائياً إذا بقي دقيقة واحدة دون تنفيذ.'
                     : 'التنفيذ التلقائي متوقف حالياً. اضغط الزر أعلاه لتشغيل الروبوت.')
                 : (botActive
-                    ? '⚡ Monitoring 5m BTC contract: Auto-entering in the final 60s on the winning contract via FAK with no price cap (10% capital).'
+                    ? '⚡ Bot is monitoring: When price moves ≥ $150 up/down, places GTC @ 20% and cancels at 1 min remaining if unfilled.'
                     : 'Automated execution is paused. Click above to start.')}
             </span>
           </div>
@@ -267,9 +308,9 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             <div className="text-[11px] text-slate-300 font-semibold mb-2 flex items-center justify-between">
               <span className="flex items-center gap-1.5">
                 <Zap className="w-3.5 h-3.5 text-amber-400" />
-                <span>{isAr ? 'تنفيذ يدوي فوري (أمر FAK بدون سقف سعري وبحجم 10% من الرصيد):' : 'Instant Manual Execution (FAK No Price Cap, 10% Capital):'}</span>
+                <span>{isAr ? 'تجربة إرسال أمر GTC فوري عند 20% (0.20$):' : 'Test Instant GTC Order @ 20% ($0.20):'}</span>
               </span>
-              <span className="text-[10px] text-emerald-400 font-mono">5m CLOB</span>
+              <span className="text-[10px] text-sky-400 font-mono">GTC Limit</span>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -278,7 +319,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
                 className="py-2 px-3 rounded-lg font-bold text-xs bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <TrendingUp className="w-3.5 h-3.5" />
-                <span>{isAr ? 'شراء UP (صعود) فوري FAK' : 'Buy UP (Long) FAK'}</span>
+                <span>{isAr ? 'أمر GTC صعود (UP @ 20%)' : 'GTC BUY UP @ 20%'}</span>
               </button>
               <button
                 onClick={() => onTriggerManualTrade('SHORT')}
@@ -286,91 +327,74 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
                 className="py-2 px-3 rounded-lg font-bold text-xs bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <TrendingDown className="w-3.5 h-3.5" />
-                <span>{isAr ? 'شراء DOWN (هبوط) فوري FAK' : 'Buy DOWN (Short) FAK'}</span>
+                <span>{isAr ? 'أمر GTC هبوط (DOWN @ 20%)' : 'GTC BUY DOWN @ 20%'}</span>
               </button>
             </div>
           </div>
         )}
       </div>
 
-      {/* Strategy Rules Summary Card (Clean - No Indicators or Filters) */}
+      {/* Strategy Conditions & Deviation Monitor */}
       <div className="p-3.5 rounded-xl border border-slate-800 bg-slate-950/70 space-y-3">
         <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
           <span className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
             <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            <span>{isAr ? 'قواعد استراتيجية قنص الدقيقة الأخيرة المعتمدة:' : 'Active Last-Minute 5m Sniper Rules:'}</span>
+            <span>{isAr ? 'مؤشر مراقبة تحرك الـ 150 دولار عن سعر الأساس:' : '$150 Price Deviation Status:'}</span>
           </span>
           <span
             className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
-              isInLastMinuteWindow
+              isMove150Reached
                 ? 'bg-emerald-500 text-slate-950 animate-pulse'
                 : 'bg-slate-800 text-slate-300'
             }`}
           >
-            {isInLastMinuteWindow
-              ? (isAr ? '🎯 داخل الدقيقة الأخيرة الآن!' : '🎯 IN LAST MINUTE NOW!')
-              : (isAr ? '⏳ بانتظار الدقيقة الأخيرة (≤ 60ث)' : '⏳ Waiting for Last Minute (≤ 60s)')}
+            {isMove150Reached
+              ? (isAr ? `✓ تم الوصول إلى 150$ (${absPriceDiff.toFixed(1)}$)` : `✓ Reached $150 ($${absPriceDiff.toFixed(1)})`)
+              : (isAr ? `بانتظار 150$ (${absPriceDiff.toFixed(1)}$ / 150$)` : `Waiting for $150 ($${absPriceDiff.toFixed(1)} / $150)`)}
           </span>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
-          <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col gap-0.5">
-            <span className="text-slate-400 text-[10px]">{isAr ? 'العقد المستهدف:' : 'Target Market:'}</span>
-            <span className="text-emerald-400 font-bold">{isAr ? 'بيتكوين 5 دقائق (5m)' : 'BTC 5-Minute (5m)'}</span>
-          </div>
-          <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col gap-0.5">
-            <span className="text-slate-400 text-[10px]">{isAr ? 'توقيت الدخول:' : 'Entry Timing:'}</span>
-            <span className="text-amber-400 font-bold flex items-center gap-1">
-              <Clock className="w-3 h-3" />
-              <span>{isAr ? 'آخر دقيقة (≤ 60 ثانية)' : 'Last Minute (≤ 60s)'}</span>
+        {/* Progress meter to $150 */}
+        <div className="space-y-1">
+          <div className="flex justify-between text-[11px] font-mono text-slate-400">
+            <span>{isAr ? 'التحرك الحالي من سعر الأساس:' : 'Current Deviation:'}</span>
+            <span className={`font-bold ${isMove150Reached ? 'text-emerald-400' : 'text-amber-400'}`}>
+              {priceDiff >= 0 ? '+' : ''}${priceDiff.toFixed(1)} {isMove150Reached ? '✓' : ''}
             </span>
           </div>
-          <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col gap-0.5">
-            <span className="text-slate-400 text-[10px]">{isAr ? 'نوع الأمر والسقف:' : 'Order & Price Cap:'}</span>
-            <span className="text-sky-300 font-bold">{isAr ? 'FAK · بدون سقف سعري' : 'FAK · No Price Cap'}</span>
-          </div>
-          <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col gap-0.5">
-            <span className="text-slate-400 text-[10px]">{isAr ? 'نسبة الدخول من الرصيد:' : 'Capital Allocation:'}</span>
-            <span className="text-white font-bold">
-              {((config.maxRiskPercent || 0.10) * 100).toFixed(0)}% {isAr ? 'من رأس المال' : 'of Capital'}
-            </span>
+          <div className="w-full bg-slate-900 border border-slate-800 rounded-full h-2.5 overflow-hidden">
+            <div
+              className={`h-2.5 rounded-full transition-all duration-500 ${
+                isMove150Reached
+                  ? 'bg-emerald-400 shadow-md shadow-emerald-500/50'
+                  : 'bg-amber-400'
+              }`}
+              style={{ width: `${Math.min(100, Math.max(0, (absPriceDiff / 150) * 100))}%` }}
+            ></div>
           </div>
         </div>
 
-        {/* Live Winning Outcome Box */}
-        <div
-          className={`p-3 rounded-xl border flex items-center justify-between ${
-            isEntrySignal && (activeSignal === 'ENTRY_LONG' || lastTradeDirection === 'LONG')
-              ? 'bg-emerald-950/60 border-emerald-400'
-              : isEntrySignal && (activeSignal === 'ENTRY_SHORT' || lastTradeDirection === 'SHORT')
-              ? 'bg-rose-950/60 border-rose-400'
-              : isLeadingUp
-              ? 'bg-emerald-950/30 border-emerald-600/40'
-              : 'bg-rose-950/30 border-rose-600/40'
-          }`}
-        >
-          <div>
-            <div className="text-[10px] text-slate-400">
-              {isAr ? 'العقد المضمون تقريباً حسب السعر الحالي مقابل الافتتاح:' : 'Almost-Guaranteed Winning Contract Now:'}
-            </div>
-            <div className={`text-xs font-extrabold mt-0.5 flex items-center gap-1.5 ${isLeadingUp ? 'text-emerald-300' : 'text-rose-300'}`}>
-              {isLeadingUp ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-              <span>
-                {isLeadingUp
-                  ? (isAr ? 'عقد صعود (UP / LONG)' : 'UP / LONG Contract')
-                  : (isAr ? 'عقد هبوط (DOWN / SHORT)' : 'DOWN / SHORT Contract')}
-              </span>
-            </div>
+        {/* Live Deviation Breakdown Grid */}
+        <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
+          <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col gap-0.5">
+            <span className="text-slate-400 text-[10px]">{isAr ? 'سعر الأساس (Open Price):' : 'Base Price (Open):'}</span>
+            <span className="text-amber-300 font-bold">${openPrice ? openPrice.toFixed(2) : '---'}</span>
           </div>
-
-          {currentPrice > 0 && openPrice > 0 && (
-            <div className="text-right font-mono text-[11px]">
-              <div className="text-slate-400">{isAr ? 'الفارق عن سعر البداية:' : 'Spread vs Open:'}</div>
-              <div className={`font-bold ${priceDiff >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {priceDiff >= 0 ? '+' : ''}${priceDiff.toFixed(2)}
-              </div>
-            </div>
-          )}
+          <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col gap-0.5">
+            <span className="text-slate-400 text-[10px]">{isAr ? 'السعر اللحظي (Spot):' : 'Live Spot Price:'}</span>
+            <span className="text-slate-100 font-bold">${currentPrice ? currentPrice.toFixed(2) : '---'}</span>
+          </div>
+          <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col gap-0.5">
+            <span className="text-slate-400 text-[10px]">{isAr ? 'نوع الأمر وسعر التنفيذ:' : 'Order Type & Price:'}</span>
+            <span className="text-sky-300 font-bold">GTC @ 20% ($0.20)</span>
+          </div>
+          <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col gap-0.5">
+            <span className="text-slate-400 text-[10px]">{isAr ? 'شرط الإلغاء:' : 'Cancel Condition:'}</span>
+            <span className="text-rose-400 font-bold flex items-center gap-1">
+              <Clock className="w-3 h-3" />
+              <span>{isAr ? 'إلغاء عند بقاء 1 دقيقة' : 'Cancel at 1m left'}</span>
+            </span>
+          </div>
         </div>
       </div>
     </div>

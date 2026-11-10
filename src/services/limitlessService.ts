@@ -633,7 +633,7 @@ export class LimitlessService {
       onChunkUpdate({ ...chunkState });
       soundController.playChunkExecuted(0);
       console.log(
-        `🚀 Live Direct 5m Order transmitted to Limitless: ${contractsToBuy} contracts @ $${priceCents} (${orderType}) [10% Capital - No Price Cap]`
+        `🚀 Live Direct Order transmitted to Limitless: ${contractsToBuy} contracts @ $${priceCents} (${orderType}) [Order ID: ${orderResult?.orderId}]`
       );
     } catch (err: any) {
       chunkState.status = 'FAILED';
@@ -644,6 +644,36 @@ export class LimitlessService {
     }
 
     return executedChunks;
+  }
+
+  public async cancelOrder(
+    orderId: string,
+    credentials?: { privateKey?: string; tokenId?: string; secret?: string }
+  ): Promise<any> {
+    try {
+      this.log('OUTGOING', `Cancelling order ${orderId}...`);
+      const res = await fetch('/api/limitless/cancel-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId,
+          privateKey: credentials?.privateKey,
+          tokenId: credentials?.tokenId,
+          secret: credentials?.secret,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || (data && data.success === false)) {
+        const errMsg = data?.error || `HTTP ${res.status}: Failed to cancel order`;
+        this.log('SYSTEM', `❌ فشل إلغاء الأمر ${orderId}: ${errMsg}`);
+        throw new Error(errMsg);
+      }
+      this.log('SYSTEM', `✅ تم إلغاء الأمر ${orderId} بنجاح.`);
+      return data;
+    } catch (err: any) {
+      this.log('SYSTEM', `❌ خطأ إلغاء الأمر: ${err?.message || err}`);
+      throw err;
+    }
   }
 }
 

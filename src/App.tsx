@@ -31,6 +31,7 @@ export default function App() {
     metrics,
     latestMetric,
     currentZScore,
+    priceDeviation,
     crossedUpperThreshold,
     crossedLowerThreshold,
     lastTradeDirection,
@@ -41,6 +42,8 @@ export default function App() {
     advancedFiltersStatus,
     executionNotice,
     setExecutionNotice,
+    pendingGtcOrder,
+    cancelPendingGtcOrder,
     isLiveBalance,
     liveWallet,
     isFetchingBalance,
@@ -84,7 +87,7 @@ export default function App() {
           <div className="flex items-center gap-3 shrink-0">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
             <span className="text-base md:text-lg font-extrabold tracking-tight text-white whitespace-nowrap">
-              {isAr ? 'منصة التداول الحي المباشر · Limitless (عقود 5 دقائق)' : 'Limitless Live 5m Trading Terminal'}
+              {isAr ? 'منصة التداول الحي المباشر · Limitless (استراتيجية 150$)' : 'Limitless Live $150 Strategy Terminal'}
             </span>
           </div>
 
@@ -107,7 +110,7 @@ export default function App() {
                   : 'border-transparent'
               }`}
             >
-              {isAr ? 'إدارة رأس المال وحجم العقود (10%)' : 'Capital & Sizing (10%)'}
+              {isAr ? 'إدارة رأس المال وحجم العقود (GTC @ 20%)' : 'Capital & Sizing (GTC @ 20%)'}
             </button>
             <button
               onClick={() => setActiveTab('code')}
@@ -260,15 +263,17 @@ export default function App() {
               </span>
             </div>
             <span className="text-slate-700">·</span>
-            <div className="text-slate-300">
-              {isAr ? 'حجم الصفقة (10% من رأس المال):' : '10% Capital Size:'}{' '}
-              <span className="text-emerald-400 font-bold">{formatUsd(kelly.positionSizeUsd)}</span>
+            <div className="flex items-center gap-1">
+              <span className="text-slate-400">{isAr ? 'نوع الأمر المستهدف:' : 'Order:'}</span>
+              <span className="text-sky-300 font-bold bg-sky-950/70 px-1.5 py-0.5 rounded border border-sky-600/50">
+                GTC @ 20% ($0.20)
+              </span>
             </div>
             <span className="text-slate-700">·</span>
             <div className="flex items-center gap-1">
-              <span className="text-slate-400">{isAr ? 'نوع الأمر:' : 'Order:'}</span>
-              <span className="text-emerald-300 font-bold bg-emerald-950/70 px-1.5 py-0.5 rounded border border-emerald-600/50">
-                {isAr ? 'FAK (بدون سقف سعري)' : 'FAK (No Price Cap)'}
+              <span className="text-slate-400">{isAr ? 'شرط الدخول:' : 'Condition:'}</span>
+              <span className="text-amber-300 font-bold bg-amber-950/70 px-1.5 py-0.5 rounded border border-amber-600/50">
+                |Δ| ≥ $150
               </span>
             </div>
             {hasEnvCredentials && (
@@ -335,13 +340,16 @@ export default function App() {
                   contractLockInfo={contractLockInfo}
                   onClearTradeLock={clearTradeLock}
                   recentChartSignal={recentChartSignal}
+                  priceDeviation={priceDeviation}
+                  pendingGtcOrder={pendingGtcOrder}
+                  onCancelPendingOrder={cancelPendingGtcOrder}
                 />
 
                 {/* Sizing & Position Allocation Card */}
                 <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/90 text-xs flex flex-col gap-3">
                   <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                     <span className="font-semibold text-slate-200">
-                      {isAr ? 'حجم الصفقة المحسوب (10% من رأس المال لكل عقد 5 دقائق)' : 'Calculated Live Allocation (10% Capital per 5m Contract)'}
+                      {isAr ? 'حجم الصفقة وأمر GTC عند 20% ($0.20)' : 'Order Sizing (GTC Limit @ 20%)'}
                     </span>
                     <button
                       onClick={() => setActiveTab('kelly')}
@@ -352,9 +360,15 @@ export default function App() {
                   </div>
                   <div className="space-y-2 font-mono">
                     <div className="flex justify-between text-slate-400">
-                      <span>{isAr ? 'نسبة الدخول المعتمدة:' : 'Applied Capital Ratio:'}</span>
-                      <span className="text-emerald-400 font-bold">
-                        {((config.maxRiskPercent || 0.10) * 100).toFixed(0)}% ({isAr ? 'من رأس المال' : 'of Capital'})
+                      <span>{isAr ? 'شرط وضع الأمر:' : 'Trigger Movement:'}</span>
+                      <span className="text-amber-400 font-bold">
+                        {isAr ? 'تحرك السعر ≥ 150 دولار صعوداً أو هبوطاً' : '≥ $150 Move Up or Down'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-slate-400">
+                      <span>{isAr ? 'نوع الأمر وسعر التنفيذ:' : 'Order Type & Price:'}</span>
+                      <span className="text-sky-300 font-bold">
+                        GTC @ 20% ($0.20)
                       </span>
                     </div>
                     <div className="flex justify-between text-slate-400">
@@ -364,15 +378,9 @@ export default function App() {
                       </span>
                     </div>
                     <div className="flex justify-between text-slate-400">
-                      <span>{isAr ? 'نوع الأمر وسقف الدخول:' : 'Order Type & Price Cap:'}</span>
-                      <span className="text-sky-400 font-bold">
-                        {isAr ? 'FAK · بدون سقف سعري (تنفيذ فوري)' : 'FAK · No Price Cap (Instant Fill)'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-slate-400">
-                      <span>{isAr ? 'توقيت وقفل الدخول:' : 'Entry Timing & Lock:'}</span>
-                      <span className="text-amber-400 font-bold">
-                        {isAr ? 'آخر دقيقة (≤ 60ث) · صفقة واحدة لكل عقد 5m' : 'Last Minute (≤ 60s) · 1 Trade / 5m'}
+                      <span>{isAr ? 'شرط الإلغاء التلقائي:' : 'Auto-Cancellation:'}</span>
+                      <span className="text-rose-400 font-bold">
+                        {isAr ? 'إلغاء عند بقاء 1 دقيقة على نهاية العقد' : 'Auto-Cancel at 1m remaining'}
                       </span>
                     </div>
                   </div>
@@ -426,11 +434,11 @@ export default function App() {
       <footer className="border-t border-slate-800/80 bg-slate-950/80 py-4 px-4 md:px-8 mt-auto text-xs text-slate-500">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-2">
-            <span>{isAr ? 'نظام التداول المباشر لعقود 5 دقائق' : 'Live 5m BTC Sniper System'}</span>
+            <span>{isAr ? 'استراتيجية تحرك 150$' : '$150 Movement Strategy'}</span>
             <span>·</span>
-            <span>{isAr ? 'الدخول في آخر دقيقة (≤ 60 ثانية) في العقد المضمون تقريباً' : 'Last-Minute Entry (≤ 60s) on Winning Contract'}</span>
+            <span>{isAr ? 'أمر شراء معلق GTC عند 20% (0.20$)' : 'GTC Buy Limit Order @ 20% ($0.20)'}</span>
             <span>·</span>
-            <span>{isAr ? 'أمر FAK بدون سقف سعري · 10% من رأس المال' : 'FAK No Price Cap · 10% Capital'}</span>
+            <span>{isAr ? 'إلغاء تلقائي في حال عدم التنفيذ عند بقاء 1 دقيقة' : 'Auto-Cancel at 1 Min Remaining'}</span>
           </div>
           <div className="font-mono text-[11px] text-slate-500">
             Node.js / TypeScript WebSocket Architecture

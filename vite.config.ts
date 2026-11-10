@@ -1140,6 +1140,7 @@ function setupApiMiddlewares(middlewares: any) {
           success: true,
           mode: 'LIVE_EIP712_EXECUTED',
           orderId: orderIdResolved,
+          orderType: isGtc ? 'GTC' : 'FAK',
           marketSlug: activeMarketSlug,
           direction: isLong ? 'LONG' : 'SHORT',
           outcome: isLong ? 'UP' : 'DOWN',
@@ -1157,6 +1158,77 @@ function setupApiMiddlewares(middlewares: any) {
         res.end(JSON.stringify({ success: false, error: errorDetail }));
       } finally {
         isServerExecutingOrder = false;
+      }
+    });
+  });
+
+  middlewares.use('/api/limitless/cancel-order', async (req: any, res: any) => {
+    res.setHeader('Content-Type', 'application/json');
+    if (req.method !== 'POST') {
+      res.statusCode = 405;
+      return res.end(JSON.stringify({ error: 'Method not allowed' }));
+    }
+
+    let rawBody = '';
+    req.on('data', (chunk: any) => { rawBody += chunk; });
+    req.on('end', async () => {
+      try {
+        const body = rawBody ? JSON.parse(rawBody) : {};
+        const { orderId, privateKey, tokenId: bodyTokenId, secret: bodySecret } = body;
+        const pk = (privateKey || process.env.PRIVATE_KEY || '').trim();
+        const tokenId = (bodyTokenId || process.env.LMTS_TOKEN_ID || '').trim();
+        const secret = (bodySecret || process.env.LMTS_TOKEN_SECRET || '').trim();
+
+        if (!orderId) {
+          res.statusCode = 400;
+          return res.end(JSON.stringify({ success: false, error: 'Order ID is required to cancel order' }));
+        }
+
+        if (!pk || !tokenId || !secret) {
+          res.statusCode = 400;
+          return res.end(JSON.stringify({ success: false, error: 'Live credentials required to cancel order' }));
+        }
+
+        const { ethers } = await import('ethers');
+        const sdk = await import('@limitless-exchange/sdk');
+        const formattedPk = pk.startsWith('0x') ? pk : `0x${pk}`;
+        const wallet = new ethers.Wallet(formattedPk);
+
+        const httpClient = new sdk.HttpClient({
+          baseURL: sdk.DEFAULT_API_URL,
+          hmacCredentials: { tokenId, secret },
+        });
+
+        const orderClient = new sdk.OrderClient({
+          httpClient,
+          wallet,
+          logger: new sdk.ConsoleLogger(),
+        });
+
+        console.log(`[Limitless Cancel Order] Cancelling GTC order ${orderId}...`);
+        const cancelResult: any = await (orderClient as any).cancelOrder?.(orderId).catch(async (e: any) => {
+          // Fallback via direct HTTP DELETE if SDK method signature differs
+          try {
+            const axiosClient = (httpClient as any).http?.client;
+            if (axiosClient && typeof axiosClient.delete === 'function') {
+              const r = await axiosClient.delete(`/orders/${encodeURIComponent(orderId)}`);
+              return r?.data;
+            }
+          } catch {}
+          throw e;
+        });
+
+        return res.end(JSON.stringify({
+          success: true,
+          orderId,
+          result: cancelResult,
+          message: `Order ${orderId} cancelled successfully`,
+        }));
+      } catch (err: any) {
+        const errMsg = err?.response?.data?.message || err?.message || String(err);
+        console.warn('[Limitless Cancel Order Error]', errMsg);
+        res.statusCode = 500;
+        return res.end(JSON.stringify({ success: false, error: errMsg }));
       }
     });
   });
