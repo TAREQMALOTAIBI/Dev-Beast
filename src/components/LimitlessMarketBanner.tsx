@@ -11,8 +11,6 @@ import {
   Zap,
   ShieldCheck,
   CheckCircle2,
-  AlertCircle,
-  HelpCircle,
 } from 'lucide-react';
 
 interface LimitlessMarketBannerProps {
@@ -28,7 +26,6 @@ interface LimitlessMarketBannerProps {
 
 export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
   market,
-  limitlessStatus,
   currentBinancePrice,
   orderbook,
   oracle,
@@ -44,19 +41,19 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
     percent: 0,
   });
 
-  // Calculate live countdown to the 15-minute expiration
+  // Calculate live countdown to the 5-minute expiration
   useEffect(() => {
     const updateCountdown = () => {
       const exp = market?.expirationTimestamp;
       if (!exp) {
-        // Fallback: Calculate remaining in 15-minute clock cycle
+        // Fallback: Calculate remaining in 5-minute clock cycle (300 seconds)
         const now = Date.now();
-        const next15Min = Math.ceil(now / (15 * 60 * 1000)) * (15 * 60 * 1000);
-        const diffMs = Math.max(0, next15Min - now);
+        const next5Min = Math.ceil(now / (5 * 60 * 1000)) * (5 * 60 * 1000);
+        const diffMs = Math.max(0, next5Min - now);
         const totalSec = Math.floor(diffMs / 1000);
         const mins = Math.floor(totalSec / 60);
         const secs = totalSec % 60;
-        const pct = Math.min(100, Math.max(0, ((900 - totalSec) / 900) * 100));
+        const pct = Math.min(100, Math.max(0, ((300 - totalSec) / 300) * 100));
         setTimeLeft({ minutes: mins, seconds: secs, totalSeconds: totalSec, percent: pct });
         return;
       }
@@ -71,7 +68,7 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
         onRefresh();
       }
 
-      const start = market?.startAt ? new Date(market.startAt).getTime() : exp - 15 * 60 * 1000;
+      const start = market?.startAt ? new Date(market.startAt).getTime() : exp - 5 * 60 * 1000;
       const totalDuration = Math.max(1, exp - start);
       const elapsed = Math.max(0, now - start);
       const pct = Math.min(100, Math.max(0, (elapsed / totalDuration) * 100));
@@ -82,35 +79,29 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
     updateCountdown();
     const interval = setInterval(updateCountdown, 1000);
     return () => clearInterval(interval);
-  }, [market?.expirationTimestamp, market?.startAt]);
+  }, [market?.expirationTimestamp, market?.startAt, onRefresh]);
 
-  // Auto-refresh active market prices every 2.5 seconds to guarantee zero price staleness
+  // Auto-refresh active market prices every 2 seconds
   useEffect(() => {
     const timer = setInterval(() => {
       onRefresh();
-    }, 2500);
+    }, 2000);
     return () => clearInterval(timer);
   }, [onRefresh]);
 
-  const slug = market?.slug || 'btc-up-or-down-15-min';
-  const title = market?.title || (isAr ? 'سوق البيتكوين صعود أم هبوط - عقد 15 دقيقة' : 'BTC Up or Down 15-Minute');
+  const slug = market?.slug || 'btc-up-or-down-5-min';
+  const title = market?.title || (isAr ? 'سوق البيتكوين صعود أم هبوط - عقد 5 دقائق' : 'BTC Up or Down - 5 Min');
   const marketUrl = `https://limitless.exchange/markets/${encodeURIComponent(slug)}`;
 
-  // Real best bid / ask from orderbook
   const bestBid = orderbook?.orderbook?.bids?.[0];
   const bestAsk = orderbook?.orderbook?.asks?.[0];
 
-  // Orderbook midpoint
   const bookMidpoint = orderbook?.orderbook?.adjustedMidpoint && orderbook.orderbook.adjustedMidpoint > 0
     ? orderbook.orderbook.adjustedMidpoint
     : (bestBid && bestAsk && bestBid.price > 0 && bestAsk.price > 0)
       ? (bestBid.price + bestAsk.price) / 2
       : null;
 
-  // Dynamic live contract price:
-  // 1. Prioritize real-time live orderbook midpoint (adjustedMidpoint / best bid-ask)
-  // 2. Then official live market prices from Limitless Exchange
-  // 3. Or market ask price from tradePrices
   const liveMarketYes = (bookMidpoint !== null && bookMidpoint > 0 && bookMidpoint < 1)
     ? bookMidpoint
     : (market?.prices?.[0] !== undefined && market.prices[0] > 0 && market.prices[0] < 1)
@@ -153,36 +144,39 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
   const yesPayoutMultiplier = yesPrice > 0 ? (1 / yesPrice).toFixed(2) : '1.00';
   const noPayoutMultiplier = noPrice > 0 ? (1 / noPrice).toFixed(2) : '1.00';
 
-  // Parse Open Price (Price to Beat)
   const rawOpenPrice = market?.openPrice;
   const parsedBeat = rawOpenPrice !== undefined && rawOpenPrice !== null
     ? Number(String(rawOpenPrice).replace(/[^0-9.-]/g, ''))
     : NaN;
   const priceToBeat = Number.isFinite(parsedBeat) && parsedBeat > 0 ? parsedBeat : null;
 
-  // Comparison between current spot/oracle price and price to beat
   const rawActivePrice = Number(oracle?.value || currentBinancePrice || 0);
   const activeCurrentPrice = Number.isFinite(rawActivePrice) && rawActivePrice > 0 ? rawActivePrice : 0;
   const priceDifference = priceToBeat && activeCurrentPrice ? activeCurrentPrice - priceToBeat : null;
   const priceDifferencePct = priceToBeat && priceDifference !== null ? (priceDifference / priceToBeat) * 100 : null;
-  const isCurrentlyUp = priceDifference !== null ? priceDifference >= 0 : true;
+  const isCurrentlyUp = priceDifference !== null ? priceDifference >= 0 : yesPrice >= noPrice;
+  const isInLastMinute = timeLeft.totalSeconds > 0 && timeLeft.totalSeconds <= 60;
 
   return (
     <div className="rounded-2xl border border-emerald-500/30 bg-gradient-to-b from-slate-900 via-slate-900/95 to-[#0b1120] shadow-xl shadow-emerald-950/20 overflow-hidden mb-6">
       {/* Top Header Bar */}
       <div className="flex flex-wrap items-center justify-between px-4 sm:px-6 py-3 border-b border-slate-800/80 bg-slate-950/70 gap-3">
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="relative flex h-3 w-3">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
             </span>
             <span className="text-xs font-extrabold uppercase tracking-wider text-emerald-400 bg-emerald-950/80 px-2.5 py-0.5 rounded-full border border-emerald-500/40">
-              {isAr ? 'عقد Limitless الحصري (15 دقيقة 15m)' : 'Exclusive Limitless Market (15-Minute)'}
+              {isAr ? 'عقد Limitless البيتكوين (5 دقائق 5m)' : 'Limitless BTC Market (5-Minute 5m)'}
             </span>
-            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-300 bg-emerald-950/90 px-2 py-0.5 rounded-full border border-emerald-500/50">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-              <span>{isAr ? '3-5% ربع-كيلي · أمر FAK ≤ 46¢ · قفل دخول واحد لكل عقد 15m' : '3-5% Quarter-Kelly · FAK ≤ 46¢ · Single-Entry Lock / 15m'}</span>
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-300 bg-amber-950/90 px-2 py-0.5 rounded-full border border-amber-500/50">
+              <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+              <span>
+                {isAr
+                  ? 'دخول آخر دقيقة (≤ 60ث) · العقد المضمون تقريباً · أمر FAK بدون سقف سعري · 10% من رأس المال'
+                  : 'Last Minute Entry (≤ 60s) · Winning Outcome · FAK No Price Cap · 10% Capital'}
+              </span>
             </span>
           </div>
 
@@ -201,7 +195,6 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-all shadow-md shadow-emerald-900/40 hover:scale-[1.02] cursor-pointer"
-            title={isAr ? 'فتح هذا السوق مباشرة على منصة Limitless الرسمية' : 'Open this market on official Limitless Exchange'}
           >
             <span>{isAr ? 'عرض في منصة Limitless' : 'Open on Limitless'}</span>
             <ExternalLink className="w-3.5 h-3.5" />
@@ -211,7 +204,6 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
             onClick={onRefresh}
             disabled={isRefreshing}
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors cursor-pointer"
-            title={isAr ? 'تحديث بيانات السوق والتأكد من أحدث عقد 15 دقيقة' : 'Refresh market details'}
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-emerald-400' : ''}`} />
             <span className="hidden sm:inline text-[11px]">{isAr ? 'مزامنة' : 'Sync'}</span>
@@ -221,7 +213,6 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
 
       {/* Main Market Insights Grid */}
       <div className="p-4 sm:p-6 grid grid-cols-1 md:grid-cols-12 gap-4 lg:gap-6 items-center">
-        
         {/* Column 1: Price to Beat & Resolution Condition (4 cols) */}
         <div className="md:col-span-4 bg-slate-950/60 p-4 rounded-xl border border-slate-800/80 flex flex-col justify-between space-y-3">
           <div className="flex items-center justify-between text-xs text-slate-400">
@@ -236,10 +227,10 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
 
           <div className="flex items-baseline justify-between">
             <span className="text-xl md:text-2xl font-black font-mono text-slate-100">
-              {priceToBeat ? `$${priceToBeat.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '$80,553.85'}
+              {priceToBeat ? `$${priceToBeat.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : (activeCurrentPrice ? `$${activeCurrentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '$74,650.00')}
             </span>
             <span className="text-xs text-slate-400">
-              {isAr ? 'سعر بداية الـ 15 دقيقة' : '15-Minute Open Price'}
+              {isAr ? 'سعر بداية الـ 5 دقائق' : '5-Minute Open Price'}
             </span>
           </div>
 
@@ -248,7 +239,7 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
             <span className="text-slate-400">{isAr ? 'السعر اللحظي الحالي:' : 'Current Spot:'}</span>
             <div className="flex items-center gap-1.5 font-mono">
               <span className="font-bold text-slate-200">
-                ${activeCurrentPrice ? activeCurrentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '80,684.00'}
+                ${activeCurrentPrice ? activeCurrentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '74,650.00'}
               </span>
               {priceDifference !== null && (
                 <span
@@ -264,9 +255,9 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
             </div>
           </div>
 
-          {/* Current Projected Outcome Indicator */}
+          {/* Current Winning Outcome Indicator */}
           <div className="flex items-center gap-2 text-xs pt-1">
-            <span className="text-slate-400">{isAr ? 'النتيجة المرجحة حالياً:' : 'Current Direction:'}</span>
+            <span className="text-slate-400">{isAr ? 'العقد المضمون تقريباً الآن:' : 'Leading Contract Now:'}</span>
             {isCurrentlyUp ? (
               <span className="text-emerald-400 font-bold flex items-center gap-1">
                 <TrendingUp className="w-3.5 h-3.5" />
@@ -283,14 +274,13 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
 
         {/* Column 2: UP (YES) & DOWN (NO) Contracts Cards (5 cols) */}
         <div className="md:col-span-5 flex flex-col justify-between space-y-2">
-          {/* Live Streaming Price Header */}
           <div className="flex items-center justify-between text-[11px] px-1">
             <span className="flex items-center gap-1.5 text-slate-300 font-semibold">
               <span className="relative flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
-              <span>{isAr ? 'أسعار العقود اللحظية (بث مباشر CLOB)' : 'Live Contract Prices (CLOB Stream)'}</span>
+              <span>{isAr ? 'أسعار عقود الـ 5 دقائق اللحظية (بث مباشر CLOB)' : 'Live 5m Contract Prices (CLOB Stream)'}</span>
             </span>
             {lastTick.direction ? (
               <span
@@ -314,10 +304,8 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
             {/* Card: UP / YES Contract */}
             <div
               className={`p-3.5 rounded-xl border transition-all duration-300 ${
-                lastTick.direction === 'up'
-                  ? 'bg-emerald-950/60 border-emerald-400 ring-2 ring-emerald-400/50 shadow-lg shadow-emerald-500/20'
-                  : isCurrentlyUp
-                  ? 'bg-emerald-950/40 border-emerald-500/60 ring-1 ring-emerald-500/30'
+                yesPrice >= noPrice
+                  ? 'bg-emerald-950/50 border-emerald-400 ring-2 ring-emerald-400/40 shadow-lg shadow-emerald-500/15'
                   : 'bg-slate-950/50 border-slate-800'
               }`}
             >
@@ -348,7 +336,7 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
               </div>
 
               <div className="text-[10px] text-slate-400 flex justify-between">
-                <span>{isAr ? 'احتمال السوق:' : 'Market Implied:'}</span>
+                <span>{isAr ? 'احتمال الفوز:' : 'Win Prob:'}</span>
                 <span className="font-bold text-emerald-400 font-mono">{(yesPrice * 100).toFixed(1)}%</span>
               </div>
             </div>
@@ -356,10 +344,8 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
             {/* Card: DOWN / NO Contract */}
             <div
               className={`p-3.5 rounded-xl border transition-all duration-300 ${
-                lastTick.direction === 'down'
-                  ? 'bg-rose-950/60 border-rose-400 ring-2 ring-rose-400/50 shadow-lg shadow-rose-500/20'
-                  : !isCurrentlyUp
-                  ? 'bg-rose-950/40 border-rose-500/60 ring-1 ring-rose-500/30'
+                noPrice > yesPrice
+                  ? 'bg-rose-950/50 border-rose-400 ring-2 ring-rose-400/40 shadow-lg shadow-rose-500/15'
                   : 'bg-slate-950/50 border-slate-800'
               }`}
             >
@@ -390,25 +376,43 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
               </div>
 
               <div className="text-[10px] text-slate-400 flex justify-between">
-                <span>{isAr ? 'احتمال السوق:' : 'Market Implied:'}</span>
+                <span>{isAr ? 'احتمال الفوز:' : 'Win Prob:'}</span>
                 <span className="font-bold text-rose-400 font-mono">{(noPrice * 100).toFixed(1)}%</span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Column 3: 15-Minute Expiration Countdown & CLOB Health (3 cols) */}
-        <div className="md:col-span-3 bg-slate-950/60 p-4 rounded-xl border border-slate-800/80 flex flex-col justify-between space-y-3">
+        {/* Column 3: 5-Minute Expiration Countdown & Last Minute Sniper Alert (3 cols) */}
+        <div
+          className={`md:col-span-3 p-4 rounded-xl border flex flex-col justify-between space-y-3 transition-all ${
+            isInLastMinute
+              ? 'bg-emerald-950/50 border-emerald-400 ring-2 ring-emerald-500/50 shadow-lg shadow-emerald-950/40'
+              : 'bg-slate-950/60 border-slate-800/80'
+          }`}
+        >
           <div className="flex items-center justify-between text-xs text-slate-400">
             <span className="flex items-center gap-1.5 font-medium">
-              <Clock className="w-3.5 h-3.5 text-amber-400" />
-              <span>{isAr ? 'نهاية عقد الـ 15 دقيقة:' : '15-Minute Expiration:'}</span>
+              <Clock className={`w-3.5 h-3.5 ${isInLastMinute ? 'text-emerald-400 animate-spin' : 'text-amber-400'}`} />
+              <span>{isAr ? 'نهاية عقد الـ 5 دقائق:' : '5-Minute Expiration:'}</span>
             </span>
-            <span className="text-[10px] text-slate-500 font-mono">Auto-Roll</span>
+            <span
+              className={`text-[10px] font-mono px-1.5 py-0.5 rounded font-bold ${
+                isInLastMinute
+                  ? 'bg-emerald-500 text-slate-950 animate-pulse'
+                  : 'text-slate-500'
+              }`}
+            >
+              {isInLastMinute ? (isAr ? '🎯 نافذة القنص (آخر دقيقة)' : '🎯 LAST MINUTE WINDOW') : 'Auto-Roll 5m'}
+            </span>
           </div>
 
           <div className="flex items-baseline justify-between">
-            <span className="text-2xl md:text-3xl font-black font-mono text-amber-400 tracking-wider">
+            <span
+              className={`text-2xl md:text-3xl font-black font-mono tracking-wider ${
+                isInLastMinute ? 'text-emerald-300' : 'text-amber-400'
+              }`}
+            >
               {String(timeLeft.minutes).padStart(2, '0')}:{String(timeLeft.seconds).padStart(2, '0')}
             </span>
             <span className="text-xs text-slate-400">
@@ -416,7 +420,7 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
             </span>
           </div>
 
-          {/* Progress bar of current 15 minute interval */}
+          {/* Progress bar of current 5 minute interval */}
           <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
             <div
               className="bg-gradient-to-r from-emerald-500 via-amber-500 to-rose-500 h-2 rounded-full transition-all duration-1000"
@@ -433,26 +437,25 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
               </span>
               <span className="text-slate-600">/</span>
               <span className="text-rose-400">
-                Ask: {bestAsk && bestAsk.price !== undefined ? `$${Number(bestAsk.price).toFixed(3)}` : `${(yesPrice + 0.03).toFixed(2)}`}
+                Ask: {bestAsk && bestAsk.price !== undefined ? `$${Number(bestAsk.price).toFixed(3)}` : `${Math.min(0.99, yesPrice + 0.02).toFixed(2)}`}
               </span>
             </div>
           </div>
         </div>
-
       </div>
 
-      {/* Explanatory Footer: How Binance + Limitless work together */}
+      {/* Explanatory Footer */}
       <div className="px-4 sm:px-6 py-2.5 bg-slate-950/90 border-t border-slate-800/70 flex flex-wrap items-center justify-between text-xs text-slate-400 gap-2">
         <div className="flex items-center gap-2">
           <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />
           <span>
             {isAr ? (
               <>
-                <strong className="text-slate-200">النموذج الكمي المعتمد:</strong> حساب الإشارات <strong className="text-sky-400">عند إغلاق شمعة 1m (45 شمعة لقيمة σ)</strong> بعتبات متماثلة (<strong className="text-emerald-400">Short: +2.00σ / Long: -2.00σ</strong> مقاسة من سعر بداية الجولة)، مع فلاتر <strong className="text-sky-300">التقلب (9-25 bp)</strong> و<strong className="text-sky-300">الاتجاه (ADX &lt; 20)</strong>، ونافذة <strong className="text-amber-400">الدقيقة 3 إلى 10</strong>، وتنفيذ أمر <strong className="text-amber-400">FAK بسقف صلب 46¢</strong> وحجم <strong className="text-white">ربع-كيلي (3-5%)</strong>!
+                <strong className="text-slate-200">استراتيجية قنص الدقيقة الأخيرة (بدون مؤشرات أو فلاتر):</strong> الدخول حصرياً في <strong className="text-emerald-400">عقود بيتكوين 5 دقائق (5m)</strong> خلال <strong className="text-amber-400">آخر دقيقة (≤ 60 ثانية قبل الإغلاق)</strong> في <strong className="text-sky-400">العقد المضمون تقريباً (الأعلى احتمالاً للفوز UP أو DOWN)</strong> بنوع أمر <strong className="text-amber-300">FAK بدون سقف سعري</strong> وبنسبة <strong className="text-white">10% من رأس المال</strong>!
               </>
             ) : (
               <>
-                <strong className="text-slate-200">Approved Quant Model:</strong> Signal calculated <strong className="text-sky-400">On 1m Candle Close (45 Candles for σ)</strong> with Z (<strong className="text-emerald-400">Short: +2.00σ / Long: -2.00σ</strong> vs Contract Open Price), guarded by <strong className="text-sky-300">RV (9-25 bp)</strong> & <strong className="text-sky-300">ADX &lt; 20</strong>, within <strong className="text-amber-400">Minutes 3 to 10</strong>, executing <strong className="text-amber-400">FAK @ Hard Cap 46¢</strong> with <strong className="text-white">0.25×Kelly (3-5%)</strong>!
+                <strong className="text-slate-200">Last-Minute 5m Sniper (Zero Indicators / Zero Filters):</strong> Enters <strong className="text-emerald-400">5-Minute BTC Contracts</strong> strictly in the <strong className="text-amber-400">Final Minute (≤ 60s remaining)</strong> on the <strong className="text-sky-400">Almost-Guaranteed Winning Contract (UP or DOWN)</strong> via <strong className="text-amber-300">FAK with No Price Cap</strong> and <strong className="text-white">10% of Capital</strong>!
               </>
             )}
           </span>

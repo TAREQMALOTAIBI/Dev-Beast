@@ -7,9 +7,9 @@ interface TerminalChartProps {
   metrics: ZScoreMetric[];
   symbol: string;
   timeframe: string;
-  periods: number;
-  upperThreshold: number;
-  entryThreshold: number;
+  periods?: number;
+  upperThreshold?: number;
+  entryThreshold?: number;
   lowerThreshold?: number;
   lowerEntryThreshold?: number;
 }
@@ -19,24 +19,18 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
   metrics,
   symbol,
   timeframe,
-  periods,
-  upperThreshold = 2.4,
-  entryThreshold = 2.4,
-  lowerThreshold = -2.2,
-  lowerEntryThreshold = -2.2,
 }) => {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
-  // Compute slice to render (show last 40-50 candles for clean density)
+  // Display last 45 1-minute candles cleanly without any indicators
   const displayCount = Math.min(candles.length, 45);
   const visibleCandles = useMemo(() => candles.slice(-displayCount), [candles, displayCount]);
   const visibleMetrics = useMemo(() => metrics.slice(-displayCount), [metrics, displayCount]);
 
-  // Dimensions
+  // Dimensions (Single clean Price & 5m Open Price pane - Z-Score pane removed)
   const width = 860;
-  const candleHeight = 260;
-  const zScoreHeight = 130;
-  const padding = { top: 20, right: 70, bottom: 25, left: 16 };
+  const candleHeight = 320;
+  const padding = { top: 24, right: 75, bottom: 28, left: 16 };
 
   // Price Extents
   const { minPrice, maxPrice } = useMemo(() => {
@@ -50,18 +44,15 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
     });
 
     visibleMetrics.forEach((m) => {
-      if (m.upperBand > max) max = m.upperBand;
-      if (m.lowerBand < min) min = m.lowerBand;
+      if (m.mean > 0) {
+        if (m.mean > max) max = m.mean;
+        if (m.mean < min) min = m.mean;
+      }
     });
 
-    const buffer = (max - min) * 0.08 || 1;
+    const buffer = (max - min) * 0.1 || 1;
     return { minPrice: min - buffer, maxPrice: max + buffer };
   }, [visibleCandles, visibleMetrics]);
-
-  const safeUpper = Number.isFinite(Number(upperThreshold)) ? Number(upperThreshold) : 2.4;
-  const safeEntry = Number.isFinite(Number(entryThreshold)) ? Number(entryThreshold) : 2.4;
-  const safeLower = Number.isFinite(Number(lowerThreshold)) ? Number(lowerThreshold) : -2.2;
-  const safeLowerEntry = Number.isFinite(Number(lowerEntryThreshold)) ? Number(lowerEntryThreshold) : -2.2;
 
   // Coordinate scales
   const chartWidth = width - padding.left - padding.right;
@@ -79,18 +70,8 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
     return Number.isFinite(x) ? x : padding.left;
   };
 
-  // Z-Score scale (-3.2 to +3.2)
-  const zMin = -3.2;
-  const zMax = 3.2;
-  const zY = (val: number) => {
-    const safeVal = Number.isFinite(val) ? val : 0;
-    const clamped = Math.max(zMin, Math.min(zMax, safeVal));
-    const y = zScoreHeight - 20 - ((clamped - zMin) / (zMax - zMin)) * (zScoreHeight - 35);
-    return Number.isFinite(y) ? y : zScoreHeight / 2;
-  };
-
-  // SVG Paths for Mean, Upper Band, Entry Band, Lower Entry Band, and Lower Band
-  const meanPath = useMemo(() => {
+  // SVG Path for 5-Minute Contract Open Price (Price to Beat)
+  const openPricePath = useMemo(() => {
     return visibleMetrics
       .map((m, i) => {
         const x = candleX(i);
@@ -99,57 +80,6 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
       })
       .join(' ');
   }, [visibleMetrics, candleX, candleY]);
-
-  const upperBandPath = useMemo(() => {
-    return visibleMetrics
-      .map((m, i) => {
-        const x = candleX(i);
-        const y = candleY(m.upperBand);
-        return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
-      })
-      .join(' ');
-  }, [visibleMetrics, candleX, candleY]);
-
-  const entryBandPath = useMemo(() => {
-    return visibleMetrics
-      .map((m, i) => {
-        const x = candleX(i);
-        const y = candleY(m.entryBand);
-        return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
-      })
-      .join(' ');
-  }, [visibleMetrics, candleX, candleY]);
-
-  const lowerEntryBandPath = useMemo(() => {
-    return visibleMetrics
-      .map((m, i) => {
-        const x = candleX(i);
-        const y = candleY(m.lowerEntryBand ?? (m.mean + lowerEntryThreshold * m.stdDev));
-        return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
-      })
-      .join(' ');
-  }, [visibleMetrics, candleX, candleY, lowerEntryThreshold]);
-
-  const lowerBandPath = useMemo(() => {
-    return visibleMetrics
-      .map((m, i) => {
-        const x = candleX(i);
-        const y = candleY(m.lowerBand);
-        return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
-      })
-      .join(' ');
-  }, [visibleMetrics, candleX, candleY]);
-
-  // Z-Score line
-  const zScorePath = useMemo(() => {
-    return visibleMetrics
-      .map((m, i) => {
-        const x = candleX(i);
-        const y = zY(m.zScore);
-        return `${i === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
-      })
-      .join(' ');
-  }, [visibleMetrics, candleX, zY]);
 
   const hoveredCandle = hoverIndex !== null ? visibleCandles[hoverIndex] : visibleCandles[visibleCandles.length - 1];
   const hoveredMetric = hoverIndex !== null ? visibleMetrics[hoverIndex] : visibleMetrics[visibleMetrics.length - 1];
@@ -161,16 +91,14 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             <span className="font-bold text-slate-100 text-sm tracking-wide">{symbol}</span>
-            <span className="text-sky-400 font-mono bg-sky-950/70 border border-sky-500/40 px-1.5 py-0.5 rounded text-[11px] font-semibold">{timeframe} Spot Radar</span>
+            <span className="text-sky-400 font-mono bg-sky-950/70 border border-sky-500/40 px-1.5 py-0.5 rounded text-[11px] font-semibold">
+              {timeframe} Live Price
+            </span>
           </div>
           <span className="text-slate-600">·</span>
           <span className="text-emerald-400 text-[11px] font-medium hidden sm:inline">
-            → إشارات التداول الفورية لعقد Limitless (15 Min)
+            → حركة سعر البيتكوين المباشرة مقابل سعر افتتاح عقد الـ 5 دقائق (بدون مؤشرات)
           </span>
-          <span className="text-slate-600 hidden sm:inline">·</span>
-          <div className="text-slate-400">
-            Z-Score Window: <span className="font-mono text-slate-200">{periods} Periods</span>
-          </div>
         </div>
 
         {/* Hover Readouts */}
@@ -187,13 +115,13 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
             </span>
             <span className="text-slate-400">
               C:{' '}
-              <span className={hoveredCandle.close >= hoveredCandle.open ? 'text-emerald-400' : 'text-rose-400'}>
+              <span className={hoveredCandle.close >= hoveredCandle.open ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
                 {formatPrice(hoveredCandle.close)}
               </span>
             </span>
-            {hoveredMetric && (
-              <span className="text-slate-300 bg-slate-800/80 px-2 py-0.5 rounded">
-                Z: <span className="text-sky-300 font-bold">{Number(hoveredMetric.zScore || 0).toFixed(2)}σ</span>
+            {hoveredMetric && hoveredMetric.mean > 0 && (
+              <span className="text-amber-300 bg-amber-950/60 border border-amber-600/40 px-2 py-0.5 rounded">
+                5m Open: <span className="font-bold">{formatPrice(hoveredMetric.mean)}</span>
               </span>
             )}
           </div>
@@ -203,28 +131,21 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
       {/* SVG Canvas Area */}
       <div className="relative w-full overflow-x-auto select-none bg-slate-950/60 p-2">
         <svg
-          viewBox={`0 0 ${width} ${candleHeight + zScoreHeight}`}
+          viewBox={`0 0 ${width} ${candleHeight}`}
           className="w-full h-auto block"
           onMouseLeave={() => setHoverIndex(null)}
         >
           <defs>
-            {/* Grid Line Pattern */}
             <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(255,255,255,0.02)" strokeWidth="1" />
+              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(255,255,255,0.025)" strokeWidth="1" />
             </pattern>
-            {/* Gradient for Z-Score Fill */}
-            <linearGradient id="zFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.25" />
-              <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.0" />
-            </linearGradient>
           </defs>
 
           {/* Background Grid */}
-          <rect width={width} height={candleHeight + zScoreHeight} fill="url(#grid)" />
+          <rect width={width} height={candleHeight} fill="url(#grid)" />
 
-          {/* ================= PANE 1: CANDLESTICK & STATISTICAL BANDS ================= */}
           {/* Price Horizontal Grid & Labels */}
-          {[0.2, 0.5, 0.8].map((ratio, i) => {
+          {[0.2, 0.4, 0.6, 0.8].map((ratio, i) => {
             const priceVal = minPrice + ratio * (maxPrice - minPrice);
             const y = candleY(priceVal);
             return (
@@ -237,16 +158,17 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
             );
           })}
 
-          {/* Upper Threshold Band (Red dashed line) */}
-          {upperBandPath && <path d={upperBandPath} fill="none" stroke="#f43f5e" strokeWidth="1.2" strokeDasharray="4 3" opacity="0.8" />}
-          {/* Upper Entry Band (Amber dashed line) */}
-          {entryBandPath && <path d={entryBandPath} fill="none" stroke="#f59e0b" strokeWidth="1" strokeDasharray="2 2" opacity="0.85" />}
-          {/* Mean Line (Sky blue line) */}
-          {meanPath && <path d={meanPath} fill="none" stroke="#38bdf8" strokeWidth="1.5" opacity="0.9" />}
-          {/* Lower Entry Band (Teal dashed line) */}
-          {lowerEntryBandPath && <path d={lowerEntryBandPath} fill="none" stroke="#2dd4bf" strokeWidth="1" strokeDasharray="2 2" opacity="0.85" />}
-          {/* Lower Threshold Band (Emerald dashed line) */}
-          {lowerBandPath && <path d={lowerBandPath} fill="none" stroke="#10b981" strokeWidth="1.2" strokeDasharray="4 3" opacity="0.8" />}
+          {/* 5-Minute Contract Open Price Line (Price to Beat) */}
+          {openPricePath && (
+            <path
+              d={openPricePath}
+              fill="none"
+              stroke="#fbbf24"
+              strokeWidth="1.6"
+              strokeDasharray="4 3"
+              opacity="0.9"
+            />
+          )}
 
           {/* Candlesticks */}
           {visibleCandles.map((c, i) => {
@@ -263,10 +185,8 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
             const bodyWidth = Math.max(step * 0.65, 3);
 
             const metric = visibleMetrics[i];
-            const isShortEntry = metric?.signal === 'ENTRY_SHORT' || (metric?.signal === 'ENTRY' && metric?.direction !== 'LONG');
-            const isLongEntry = metric?.signal === 'ENTRY_LONG' || (metric?.signal === 'ENTRY' && metric?.direction === 'LONG');
-            const isArmedUpper = metric?.signal === 'ARMED_UPPER' || (metric?.signal === 'ARMED' && (metric?.zScore ?? 0) > 0);
-            const isArmedLower = metric?.signal === 'ARMED_LOWER' || (metric?.signal === 'ARMED' && (metric?.zScore ?? 0) < 0);
+            const isShortEntry = metric?.signal === 'ENTRY_SHORT';
+            const isLongEntry = metric?.signal === 'ENTRY_LONG';
 
             return (
               <g
@@ -289,9 +209,9 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
                 {/* Short / Down Entry Signal Marker */}
                 {isShortEntry && (
                   <g>
-                    <polygon points={`${x},${yHigh - 6} ${x - 5},${yHigh - 15} ${x + 5},${yHigh - 15}`} fill="#f59e0b" />
-                    <text x={x} y={yHigh - 18} fill="#f59e0b" fontSize="8.5" fontWeight="bold" textAnchor="middle" fontFamily="sans-serif">
-                      SHORT (▼)
+                    <polygon points={`${x},${yHigh - 6} ${x - 5},${yHigh - 15} ${x + 5},${yHigh - 15}`} fill="#f43f5e" />
+                    <text x={x} y={yHigh - 18} fill="#f43f5e" fontSize="8.5" fontWeight="bold" textAnchor="middle" fontFamily="sans-serif">
+                      DOWN (▼)
                     </text>
                   </g>
                 )}
@@ -301,147 +221,48 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
                   <g>
                     <polygon points={`${x},${yLow + 6} ${x - 5},${yLow + 15} ${x + 5},${yLow + 15}`} fill="#10b981" />
                     <text x={x} y={yLow + 25} fill="#10b981" fontSize="8.5" fontWeight="bold" textAnchor="middle" fontFamily="sans-serif">
-                      LONG (▲)
+                      UP (▲)
                     </text>
                   </g>
-                )}
-
-                {/* Armed state markers */}
-                {isArmedUpper && !isShortEntry && (
-                  <circle cx={x} cy={yHigh - 8} r="3" fill="#f43f5e" opacity="0.8" />
-                )}
-                {isArmedLower && !isLongEntry && (
-                  <circle cx={x} cy={yLow + 8} r="3" fill="#10b981" opacity="0.8" />
                 )}
               </g>
             );
           })}
 
-          {/* Pane Divider */}
-          <line
-            x1={padding.left}
-            y1={candleHeight}
-            x2={width - padding.right}
-            y2={candleHeight}
-            stroke="#1e293b"
-            strokeWidth="1.5"
-          />
-
-          {/* ================= PANE 2: Z-SCORE OSCILLATOR ================= */}
-          <g transform={`translate(0, ${candleHeight})`}>
-            {/* Title / Indicator Label */}
-            <text x={padding.left} y={16} fill="#94a3b8" fontSize="11" fontWeight="600">
-              {periods}-PERIOD BIDIRECTIONAL Z-SCORE OSCILLATOR (σ)
-            </text>
-
-            {/* Upper Entry Threshold Line (+2.40σ) */}
-            <line
-              x1={padding.left}
-              y1={zY(safeUpper)}
-              x2={width - padding.right}
-              y2={zY(safeUpper)}
-              stroke="#f43f5e"
-              strokeWidth="1.5"
-              strokeDasharray="4 2"
-              opacity="0.9"
-            />
-            <text x={width - padding.right + 8} y={zY(safeUpper) + 3} fill="#f43f5e" fontSize="9" fontWeight="bold" fontFamily="JetBrains Mono, monospace">
-              +{safeUpper.toFixed(2)}σ (Short Entry)
-            </text>
-
-            {/* Zero Baseline */}
-            <line
-              x1={padding.left}
-              y1={zY(0)}
-              x2={width - padding.right}
-              y2={zY(0)}
-              stroke="#475569"
-              strokeWidth="1"
-              opacity="0.5"
-            />
-            <text x={width - padding.right + 8} y={zY(0) + 3} fill="#64748b" fontSize="9" fontFamily="JetBrains Mono, monospace">
-              0.0σ Mean
-            </text>
-
-            {/* Lower Entry Threshold Line (-2.20σ) */}
-            <line
-              x1={padding.left}
-              y1={zY(safeLower)}
-              x2={width - padding.right}
-              y2={zY(safeLower)}
-              stroke="#10b981"
-              strokeWidth="1.5"
-              strokeDasharray="4 2"
-              opacity="0.9"
-            />
-            <text x={width - padding.right + 8} y={zY(safeLower) + 3} fill="#10b981" fontSize="9" fontWeight="bold" fontFamily="JetBrains Mono, monospace">
-              {safeLower.toFixed(2)}σ (Long Entry)
-            </text>
-
-            {/* Z-Score Curve */}
-            {zScorePath && <path d={zScorePath} fill="none" stroke="#38bdf8" strokeWidth="2" />}
-
-            {/* Active Points */}
-            {visibleMetrics.map((m, i) => {
-              const x = candleX(i);
-              const y = zY(m.zScore);
-              const isShortTrigger = m.signal === 'ENTRY_SHORT' || (m.signal === 'ENTRY' && m.direction !== 'LONG');
-              const isLongTrigger = m.signal === 'ENTRY_LONG' || (m.signal === 'ENTRY' && m.direction === 'LONG');
-              const isOverbought = m.zScore >= upperThreshold;
-              const isOversold = m.zScore <= lowerThreshold;
-
-              return (
-                <g key={i}>
-                  {isShortTrigger ? (
-                    <circle cx={x} cy={y} r="5" fill="#f59e0b" stroke="#fff" strokeWidth="1.5" />
-                  ) : isLongTrigger ? (
-                    <circle cx={x} cy={y} r="5" fill="#10b981" stroke="#fff" strokeWidth="1.5" />
-                  ) : isOverbought ? (
-                    <circle cx={x} cy={y} r="3.5" fill="#f43f5e" />
-                  ) : isOversold ? (
-                    <circle cx={x} cy={y} r="3.5" fill="#10b981" />
-                  ) : null}
-                </g>
-              );
-            })}
-          </g>
-
           {/* Hover Crosshair vertical bar */}
           {hoverIndex !== null && (
-            <g>
-              <line
-                x1={candleX(hoverIndex)}
-                y1={padding.top}
-                x2={candleX(hoverIndex)}
-                y2={candleHeight + zScoreHeight - 15}
-                stroke="#94a3b8"
-                strokeWidth="1"
-                strokeDasharray="3 3"
-                opacity="0.6"
-              />
-            </g>
+            <line
+              x1={candleX(hoverIndex)}
+              y1={padding.top}
+              x2={candleX(hoverIndex)}
+              y2={candleHeight - padding.bottom}
+              stroke="#94a3b8"
+              strokeWidth="1"
+              strokeDasharray="3 3"
+              opacity="0.6"
+            />
           )}
         </svg>
       </div>
 
       {/* Legend & Status */}
       <div className="flex flex-wrap items-center justify-between px-4 py-2.5 bg-slate-950/70 border-t border-slate-800 text-[11px] text-slate-400 gap-2">
-        <div className="flex flex-wrap items-center gap-3 md:gap-4">
+        <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-1.5">
-            <span className="w-3 h-0.5 bg-sky-400 inline-block"></span>
-            <span>SMA (Mean)</span>
+            <span className="w-3 h-0.5 bg-amber-400 inline-block border-b border-dashed border-amber-400"></span>
+            <span>سعر افتتاح عقد الـ 5 دقائق (5m Open Price / Price to Beat)</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-3 h-0.5 bg-rose-500 inline-block border-b border-dashed border-rose-500"></span>
-            <span>+{safeUpper.toFixed(2)}σ Direct Short Entry (▼)</span>
+            <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500 inline-block"></span>
+            <span>شمعة صاعدة (أعلى من الافتتاح = UP)</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-3 h-0.5 bg-emerald-500 inline-block border-b border-dashed border-emerald-500"></span>
-            <span>{safeLower.toFixed(2)}σ Direct Long Entry (▲)</span>
+            <span className="w-2.5 h-2.5 rounded-xs bg-rose-500 inline-block"></span>
+            <span>شمعة هابطة (أدنى من الافتتاح = DOWN)</span>
           </div>
         </div>
         <div className="text-emerald-400 font-mono font-semibold">
-          ⚡ Asymmetric Z-Score: Short +{safeUpper.toFixed(2)}σ / Long {safeLower.toFixed(2)}σ
+          ⚡ قنص الدقيقة الأخيرة (≤ 60s) · أمر FAK بدون سقف سعري · 10% من رأس المال
         </div>
       </div>
     </div>

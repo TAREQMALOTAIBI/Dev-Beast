@@ -267,9 +267,9 @@ export function calculateZScore(
 }
 
 /**
- * Calculates position sizing per Document 6:
- * Quarter-Kelly (0.25 * Kelly(Edge)) capped at 3-5% of bankroll per 15m contract,
- * with Hard Cap Max Entry Price 46¢ ($0.46) and FAK order execution.
+ * Calculates position sizing for 5-Minute Last-Minute Sniper Strategy:
+ * Fixed 10% of bankroll (0.10) per 5m contract,
+ * with FAK order execution and NO price cap (0.99 ceiling).
  */
 export function calculateKellySizing(
   balance: number,
@@ -277,23 +277,18 @@ export function calculateKellySizing(
 ): KellyMath {
   const { maxPriceCents, winProbability, maxRiskPercent } = config;
 
-  // Max Entry Price: $0.46 (46¢) per specification document
-  const price = Math.max(0.001, Math.min(0.999, maxPriceCents || 0.46));
+  // No Price Cap: defaults to 0.99 ($0.99) or live market price
+  const price = Math.max(0.001, Math.min(0.99, maxPriceCents || 0.99));
   const b = (1.00 - price) / price;
-  const p = Math.max(0.01, Math.min(0.99, winProbability || 0.55));
+  const p = Math.max(0.01, Math.min(0.99, winProbability || 0.90));
   const q = 1 - p;
 
-  // Specification: 0.25 * Kelly(Edge) where Edge = Model_Prob - 0.525
-  const edge = Math.max(0, p - 0.525);
-  const rawKelly = b > 0 ? (b * p - q) / b : 0;
-  const quarterKelly = Math.max(0, 0.25 * (edge > 0 ? rawKelly : 0));
+  const rawKelly = b > 0 ? (b * p - q) / b : 0.10;
 
-  // Cap between 3% and 5% of bankroll per trade (default 4%)
-  const userCap = Number(maxRiskPercent) || 0.04;
-  const cappedRisk = Math.min(0.05, Math.max(0.03, userCap));
-  const riskToTake = quarterKelly > 0 ? Math.min(quarterKelly, cappedRisk) : cappedRisk;
+  // Fixed 10% of capital per trade (or user-configured percentage)
+  const riskToTake = Math.min(1.0, Math.max(0.01, Number(maxRiskPercent) || 0.10));
 
-  // Exact dollar allocation
+  // Exact dollar allocation (10% of balance)
   const maxAllowedUsd = balance > 0 ? balance * riskToTake : 0;
   const positionSizeUsd = maxAllowedUsd;
 

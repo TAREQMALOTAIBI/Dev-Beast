@@ -11,11 +11,6 @@ import { formatUsd, formatPrice } from './utils/math';
 import {
   SlidersHorizontal,
   Globe,
-  Radio,
-  Zap,
-  Activity,
-  Layers,
-  FileCode,
   ShieldCheck,
   RefreshCw,
   Wallet,
@@ -25,7 +20,6 @@ import {
 } from 'lucide-react';
 
 export default function App() {
-  // Default to Arabic as requested by user
   const [lang, setLang] = useState<'ar' | 'en'>('ar');
   const [activeTab, setActiveTab] = useState<'terminal' | 'kelly' | 'code'>('terminal');
   const [isConfigOpen, setIsConfigOpen] = useState(false);
@@ -43,7 +37,6 @@ export default function App() {
     activeSignal,
     isEntrySignal,
     currentBalance,
-    liveUsdcBalance,
     threeFiltersStatus,
     advancedFiltersStatus,
     executionNotice,
@@ -88,15 +81,13 @@ export default function App() {
       {/* ================= 1. TOP BAR ================= */}
       <header className="border-b border-slate-800/80 bg-slate-950/90 backdrop-blur-md sticky top-0 z-40 px-4 md:px-8 py-3.5">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-8">
-          {/* Zone 1: Single Wordmark */}
           <div className="flex items-center gap-3 shrink-0">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
             <span className="text-base md:text-lg font-extrabold tracking-tight text-white whitespace-nowrap">
-              {isAr ? 'منصة التداول الحي المباشر · Limitless' : 'Limitless Live Trading Terminal'}
+              {isAr ? 'منصة التداول الحي المباشر · Limitless (عقود 5 دقائق)' : 'Limitless Live 5m Trading Terminal'}
             </span>
           </div>
 
-          {/* Zone 2: Navigation Links */}
           <nav className="hidden md:flex items-center gap-6 text-xs font-medium text-slate-400">
             <button
               onClick={() => setActiveTab('terminal')}
@@ -116,7 +107,7 @@ export default function App() {
                   : 'border-transparent'
               }`}
             >
-              {isAr ? 'إدارة المخاطر وحجم العقود (كيلي)' : 'Kelly Risk Management'}
+              {isAr ? 'إدارة رأس المال وحجم العقود (10%)' : 'Capital & Sizing (10%)'}
             </button>
             <button
               onClick={() => setActiveTab('code')}
@@ -130,9 +121,7 @@ export default function App() {
             </button>
           </nav>
 
-          {/* Zone 3: Primary Actions */}
           <div className="flex items-center gap-3 shrink-0">
-            {/* Primary Robot Start/Stop Button */}
             <button
               onClick={toggleBot}
               className={`flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer select-none whitespace-nowrap ${
@@ -140,11 +129,6 @@ export default function App() {
                   ? 'bg-emerald-950/70 hover:bg-emerald-900/80 text-emerald-300 border-emerald-500/60 shadow-sm shadow-emerald-950/60'
                   : 'bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-700 hover:border-slate-600 shadow-sm'
               }`}
-              title={
-                isAr
-                  ? (botActive ? 'الروبوت نشط - اضغط لإيقافه مؤقتاً' : 'الروبوت متوقف - اضغط للتشغيل الآن')
-                  : (botActive ? 'Bot is Active - Click to Pause' : 'Bot is Paused - Click to Start')
-              }
             >
               <span className="relative flex h-2 w-2">
                 {botActive && (
@@ -160,17 +144,14 @@ export default function App() {
               </span>
             </button>
 
-            {/* Language Switcher */}
             <button
               onClick={() => setLang(isAr ? 'en' : 'ar')}
               className="flex items-center gap-1 px-2.5 py-1 text-xs text-slate-400 hover:text-slate-100 bg-slate-900 border border-slate-800 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-              title="Toggle Language / تبديل اللغة"
             >
               <Globe className="w-3.5 h-3.5" />
               <span>{isAr ? 'English' : 'عربي'}</span>
             </button>
 
-            {/* Config Trigger */}
             <button
               onClick={() => setIsConfigOpen(true)}
               className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 border border-emerald-700/60 rounded-lg transition-colors whitespace-nowrap shrink-0 shadow-sm cursor-pointer"
@@ -178,22 +159,21 @@ export default function App() {
               <SlidersHorizontal className="w-3.5 h-3.5 text-emerald-400" />
               <span>{isAr ? 'إعدادات ومفاتيح التداول الحي' : 'Live Credentials & Config'}</span>
               {hasEnvCredentials && (
-                <span className="w-2 h-2 rounded-full bg-emerald-400 ring-2 ring-emerald-950 animate-pulse" title={isAr ? 'المفاتيح نشطة من .env' : 'Active from .env'}></span>
+                <span className="w-2 h-2 rounded-full bg-emerald-400 ring-2 ring-emerald-950 animate-pulse"></span>
               )}
             </button>
           </div>
         </div>
       </header>
 
-      {/* ================= 2. LIVE TELEMETRY STRIP (Clean Unboxed Metadata) ================= */}
+      {/* ================= 2. LIVE TELEMETRY STRIP ================= */}
       <section className="border-b border-slate-800/60 bg-slate-950/60 px-4 md:px-8 py-2.5 text-xs">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
-          {/* Pair & Price */}
           <div className="flex items-center gap-3">
             <span className="font-bold text-slate-100 tracking-wider">
               {config.symbol}
             </span>
-            <span className="text-slate-400 font-mono">{config.timeframe}</span>
+            <span className="text-slate-400 font-mono">5m Contract</span>
             <span className="text-slate-700">·</span>
             <span className="text-emerald-400 font-mono text-sm font-bold">
               ${latestCandle ? formatPrice(latestCandle.close) : 'Loading...'}
@@ -219,7 +199,6 @@ export default function App() {
                 onClick={() => refreshLiveBalance()}
                 disabled={isFetchingBalance}
                 className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs text-slate-200 hover:text-white bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 transition-colors cursor-pointer select-none shadow-xs disabled:opacity-70"
-                title={isAr ? 'اضغط هنا لتحديث الرصيد الحي يدوياً من البلوكشين' : 'Click to refresh balance manually from blockchain'}
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isFetchingBalance ? 'animate-spin text-emerald-400' : 'text-slate-300'}`} />
                 <span className="text-[11px] font-semibold">{isAr ? 'تحديث الرصيد' : 'Refresh'}</span>
@@ -244,11 +223,6 @@ export default function App() {
                     </span>
                     <ExternalLink className="w-2.5 h-2.5 opacity-70" />
                   </a>
-                  {Number(liveWallet.ethBalance) > 0 && (
-                    <span className="text-slate-500 text-[10px]">
-                      ({Number(liveWallet.ethBalance || 0).toFixed(4)} ETH gas)
-                    </span>
-                  )}
                 </div>
               </>
             ) : (
@@ -257,7 +231,6 @@ export default function App() {
                 <button
                   onClick={() => setIsConfigOpen(true)}
                   className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] bg-amber-950/70 text-amber-300 border border-amber-600/50 hover:bg-amber-900/80 cursor-pointer transition-colors"
-                  title={isAr ? 'اضغط لربط المحفظة الحية' : 'Click to configure live wallet'}
                 >
                   <AlertCircle className="w-3 h-3 text-amber-400" />
                   <span>{isAr ? 'المحفظة غير مربوطة (وضع المعاينة)' : 'Wallet Not Linked (Preview Mode)'}</span>
@@ -266,17 +239,10 @@ export default function App() {
             )}
           </div>
 
-          {/* Real Sockets Health */}
           <div className="flex items-center gap-4 text-[11px] text-slate-400 font-mono">
             <div>
               Binance Feed:{' '}
-              <span
-                className={
-                  binanceStatus === 'CONNECTED'
-                    ? 'text-emerald-400 font-bold'
-                    : 'text-amber-400'
-                }
-              >
+              <span className={binanceStatus === 'CONNECTED' ? 'text-emerald-400 font-bold' : 'text-amber-400'}>
                 {binanceStatus}
               </span>
             </div>
@@ -295,14 +261,14 @@ export default function App() {
             </div>
             <span className="text-slate-700">·</span>
             <div className="text-slate-300">
-              {isAr ? 'حجم ربع-كيلي (3-5%):' : '0.25×Kelly (3-5%):'}{' '}
+              {isAr ? 'حجم الصفقة (10% من رأس المال):' : '10% Capital Size:'}{' '}
               <span className="text-emerald-400 font-bold">{formatUsd(kelly.positionSizeUsd)}</span>
             </div>
             <span className="text-slate-700">·</span>
             <div className="flex items-center gap-1">
-              <span className="text-slate-400">{isAr ? 'نوع الأمر والسقف:' : 'Order & Cap:'}</span>
+              <span className="text-slate-400">{isAr ? 'نوع الأمر:' : 'Order:'}</span>
               <span className="text-emerald-300 font-bold bg-emerald-950/70 px-1.5 py-0.5 rounded border border-emerald-600/50">
-                {config.orderType} (≤ {(config.maxPriceCents * 100).toFixed(0)}¢ / {formatUsd(config.maxPriceCents)})
+                {isAr ? 'FAK (بدون سقف سعري)' : 'FAK (No Price Cap)'}
               </span>
             </div>
             {hasEnvCredentials && (
@@ -318,40 +284,11 @@ export default function App() {
         </div>
       </section>
 
-      {/* Mobile Nav Switcher */}
-      <div className="md:hidden flex border-b border-slate-800 bg-slate-950 px-4 overflow-x-auto text-xs py-2 gap-2">
-        <button
-          onClick={() => setActiveTab('terminal')}
-          className={`px-3 py-1 rounded-md whitespace-nowrap ${
-            activeTab === 'terminal' ? 'bg-emerald-600 text-white font-semibold' : 'text-slate-400'
-          }`}
-        >
-          {isAr ? 'التداول الحي' : 'Live Terminal'}
-        </button>
-        <button
-          onClick={() => setActiveTab('kelly')}
-          className={`px-3 py-1 rounded-md whitespace-nowrap ${
-            activeTab === 'kelly' ? 'bg-emerald-600 text-white font-semibold' : 'text-slate-400'
-          }`}
-        >
-          {isAr ? 'معيار كيلي' : 'Kelly Risk'}
-        </button>
-        <button
-          onClick={() => setActiveTab('code')}
-          className={`px-3 py-1 rounded-md whitespace-nowrap ${
-            activeTab === 'code' ? 'bg-emerald-600 text-white font-semibold' : 'text-slate-400'
-          }`}
-        >
-          {isAr ? 'تشغيل الكود' : 'Runner'}
-        </button>
-      </div>
-
       {/* ================= 3. WORKSPACE VIEWPORT ================= */}
       <main className="flex-1 max-w-7xl mx-auto w-full p-4 md:p-6 space-y-6">
-        {/* VIEW 1: LIVE TERMINAL */}
         {activeTab === 'terminal' && (
           <div className="space-y-6">
-            {/* Limitless 15-Minute Live Market Showcase Banner */}
+            {/* Limitless 5-Minute Live Market Banner */}
             <LimitlessMarketBanner
               market={activeLimitlessMarket}
               limitlessStatus={limitlessStatus}
@@ -363,24 +300,17 @@ export default function App() {
               lang={lang}
             />
 
-            {/* Top Row: Dual Visualizer Chart & State Machine */}
+            {/* Top Row: Candlestick Chart & Strategy Card */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-              {/* Left 2 Cols: Main Candlestick & Z-Score Chart */}
               <div className="lg:col-span-2">
                 <TerminalChart
                   candles={candles}
                   metrics={metrics}
                   symbol={config.symbol}
                   timeframe={config.timeframe}
-                  periods={config.periods}
-                  upperThreshold={config.zScoreUpper}
-                  entryThreshold={config.zScoreEntry}
-                  lowerThreshold={config.zScoreLower ?? -config.zScoreUpper}
-                  lowerEntryThreshold={config.zScoreLowerEntry ?? -config.zScoreEntry}
                 />
               </div>
 
-              {/* Right Col: Live Strategy State Machine */}
               <div className="space-y-6">
                 <StrategyStatusCard
                   currentZScore={currentZScore}
@@ -411,7 +341,7 @@ export default function App() {
                 <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/90 text-xs flex flex-col gap-3">
                   <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                     <span className="font-semibold text-slate-200">
-                      {isAr ? 'حجم الصفقة المحسوب (3-5% ربع-كيلي لكل عقد 15 دقيقة)' : 'Calculated Live Allocation (3-5% Quarter-Kelly per 15m)'}
+                      {isAr ? 'حجم الصفقة المحسوب (10% من رأس المال لكل عقد 5 دقائق)' : 'Calculated Live Allocation (10% Capital per 5m Contract)'}
                     </span>
                     <button
                       onClick={() => setActiveTab('kelly')}
@@ -422,9 +352,9 @@ export default function App() {
                   </div>
                   <div className="space-y-2 font-mono">
                     <div className="flex justify-between text-slate-400">
-                      <span>{isAr ? 'نسبة الدخول المعتمدة:' : 'Applied Bet Size:'}</span>
+                      <span>{isAr ? 'نسبة الدخول المعتمدة:' : 'Applied Capital Ratio:'}</span>
                       <span className="text-emerald-400 font-bold">
-                        {(Number(kelly.riskToTake || 0.04) * 100).toFixed(2)}% ({isAr ? 'ربع-كيلي 3-5%' : '0.25×Kelly 3-5%'})
+                        {((config.maxRiskPercent || 0.10) * 100).toFixed(0)}% ({isAr ? 'من رأس المال' : 'of Capital'})
                       </span>
                     </div>
                     <div className="flex justify-between text-slate-400">
@@ -434,22 +364,15 @@ export default function App() {
                       </span>
                     </div>
                     <div className="flex justify-between text-slate-400">
-                      <span>{isAr ? 'نوع الأمر وسقف الدخول:' : 'Order Type & Max Share Price:'}</span>
+                      <span>{isAr ? 'نوع الأمر وسقف الدخول:' : 'Order Type & Price Cap:'}</span>
                       <span className="text-sky-400 font-bold">
-                        {config.orderType} (≤ {(config.maxPriceCents * 100).toFixed(0)}¢ / {formatUsd(config.maxPriceCents)})
+                        {isAr ? 'FAK · بدون سقف سعري (تنفيذ فوري)' : 'FAK · No Price Cap (Instant Fill)'}
                       </span>
                     </div>
                     <div className="flex justify-between text-slate-400">
-                      <span>{isAr ? 'قفل الدخول لكل عقد 15m:' : '15m Market Entry Lock:'}</span>
-                      <span className="text-emerald-400 font-bold">
-                        {isAr ? 'صفقة واحدة فقط لكل عقد 15m (Single-Entry Lock)' : 'Single-Entry Lock per 15m Market'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center text-slate-400 pt-1.5 border-t border-slate-800/80 text-[11px]">
-                      <span>{isAr ? 'مصدر الرصيد المعتمد:' : 'Balance Source:'}</span>
-                      <span className="font-sans font-medium flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                        <span className="text-emerald-400 font-semibold">{isAr ? 'محفظة Base الحية (USDC)' : 'Live Base USDC Wallet'}</span>
+                      <span>{isAr ? 'توقيت وقفل الدخول:' : 'Entry Timing & Lock:'}</span>
+                      <span className="text-amber-400 font-bold">
+                        {isAr ? 'آخر دقيقة (≤ 60ث) · صفقة واحدة لكل عقد 5m' : 'Last Minute (≤ 60s) · 1 Trade / 5m'}
                       </span>
                     </div>
                   </div>
@@ -481,7 +404,6 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 2: KELLY LAB */}
         {activeTab === 'kelly' && (
           <div className="space-y-6">
             <KellyLab
@@ -492,26 +414,9 @@ export default function App() {
               lang={lang}
               isLiveBalance={isLiveBalance}
             />
-
-            <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-5 text-xs text-slate-300 space-y-3">
-              <h3 className="font-bold text-slate-100 text-sm">
-                {isAr
-                  ? 'منهجية إدارة رأس المال وتنفيذ الأوامر (ربع-كيلي 3-5% · أمر FAK بسقف صلب ≤ 46¢ · قفل دخول واحد لكل عقد 15m)'
-                  : 'Bankroll & Order Execution Methodology (Quarter-Kelly 3-5% · FAK ≤ 46¢ · Single-Entry Lock per 15m)'}
-              </h3>
-              <p className="leading-relaxed">
-                {isAr
-                  ? 'يعتمد الروبوت على حساب الإشارات والتقييم الدقيق فور إغلاق شمعة الدقيقة (1m Candle Close) عبر بث btcusdt@kline_1m، مع بناء مؤشر Z-Score على متوسط متحرك لـ 180 شمعة (180-period SMA - 3h). يتم الدخول بعتبات غير متماثلة (Long: -2.20σ / Short: +2.40σ) بشرط تحقق فلتر التقلب المحقق (10 bp < RV_3m < 60 bp) وفلتر الاتجاه (ADX(14, 1m) < 25)، مع إرسال أمر FAK فوري بسقف صلب 46¢ ($0.46) وبحجم ربع-كيلي (3-5% كحد أقصى) وقفل دخول واحد لكل عقد 15 دقيقة.'
-                  : 'The bot evaluates entry signals strictly upon 1m Candle Close via btcusdt@kline_1m across a 180-period SMA (3h). It executes via Asymmetric Z-Thresholds (Long: -2.20σ / Short: +2.40σ) guarded by RV_3m (10-60 bp) and ADX(14) < 25, submitting a FAK order with Hard Cap ≤ 46¢ ($0.46), Quarter-Kelly sizing (3-5% Max), and Single-Entry Lock per 15m Market.'}
-              </p>
-              <div className="p-3 bg-slate-950 font-mono text-emerald-400 rounded-lg border border-slate-800">
-                WS: btcusdt@kline_1m (1m Close) | SMA: 180-Period (3h) | Z: L -2.2σ / S +2.4σ | Filters: RV (10-60bp) + ADX&lt;25 | Order: FAK ≤ 46¢ | Size: 0.25×Kelly (3-5%) | Lock: 15m
-              </div>
-            </div>
           </div>
         )}
 
-        {/* VIEW 3: CODE RUNNER */}
         {activeTab === 'code' && (
           <CodeInspector config={config} lang={lang} />
         )}
@@ -521,11 +426,11 @@ export default function App() {
       <footer className="border-t border-slate-800/80 bg-slate-950/80 py-4 px-4 md:px-8 mt-auto text-xs text-slate-500">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-2">
-            <span>{isAr ? 'نظام التداول الكمي المباشر' : 'Live Quant Trading System'}</span>
+            <span>{isAr ? 'نظام التداول المباشر لعقود 5 دقائق' : 'Live 5m BTC Sniper System'}</span>
             <span>·</span>
-            <span>Binance 1m Live WS (180-SMA) · Z-Score (Long -2.2σ / Short +2.4σ)</span>
+            <span>{isAr ? 'الدخول في آخر دقيقة (≤ 60 ثانية) في العقد المضمون تقريباً' : 'Last-Minute Entry (≤ 60s) on Winning Contract'}</span>
             <span>·</span>
-            <span>Limitless 15m Contract (Quarter-Kelly 3-5% · FAK ≤ 46¢ · Single-Entry Lock)</span>
+            <span>{isAr ? 'أمر FAK بدون سقف سعري · 10% من رأس المال' : 'FAK No Price Cap · 10% Capital'}</span>
           </div>
           <div className="font-mono text-[11px] text-slate-500">
             Node.js / TypeScript WebSocket Architecture
@@ -533,7 +438,6 @@ export default function App() {
         </div>
       </footer>
 
-      {/* Configuration Drawer */}
       <ConfigModal
         config={config}
         isOpen={isConfigOpen}

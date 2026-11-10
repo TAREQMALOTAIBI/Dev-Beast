@@ -88,8 +88,8 @@ function loadTradeGuardFromDisk() {
       const raw = fs.readFileSync(TRADE_GUARD_FILE, 'utf8');
       const parsed = JSON.parse(raw);
       const ageMs = Date.now() - (Number(parsed?.timestamp) || 0);
-      if (ageMs >= 15 * 60 * 1000) {
-        console.log(`[VM Trade Guard] Previous 15m contract lock expired (${Math.round(ageMs / 60000)}m ago). Auto-clearing.`);
+      if (ageMs >= 5 * 60 * 1000) {
+        console.log(`[VM Trade Guard] Previous 5m contract lock expired (${Math.round(ageMs / 60000)}m ago). Auto-clearing.`);
         clearTradeGuardFromDisk();
         return null;
       }
@@ -134,16 +134,16 @@ function is15MinBtcMarket(m) {
   const title = (m.title || '').toLowerCase();
   const isBtc = slug.includes('btc') || title.includes('btc') || title.includes('bitcoin');
   if (!isBtc) return false;
-  const is15Min = /(^|[^0-9])15-min/i.test(slug) || /(^|[^0-9])15\s*min/i.test(title) || /(^|[^0-9])15m/i.test(slug);
+  const is5Min = /(^|[^0-9])5-min/i.test(slug) || /(^|[^0-9])5\s*min/i.test(title) || /(^|[^0-9])5m/i.test(slug);
   const isOther =
-    /(^|[^0-9])5-min/i.test(slug) ||
-    /(^|[^0-9])5\s*min/i.test(title) ||
+    /(^|[^0-9])15-min/i.test(slug) ||
+    /(^|[^0-9])15\s*min/i.test(title) ||
     /hourly/i.test(slug) ||
     /hourly/i.test(title) ||
     /(^|[^0-9])1-hour/i.test(slug) ||
     /(^|[^0-9])1\s*hour/i.test(title);
   if (slug.includes('daily') || slug.includes('weekly')) return false;
-  return is15Min && !isOther;
+  return is5Min && !isOther;
 }
 
 // Backward-compatible alias
@@ -165,14 +165,14 @@ async function fetchLive15MinBtcMarket() {
   try {
     const now = Date.now();
 
-    // 1. Deterministic 15-minute window slug lookup first:
-    // Strictly select the currently active, FUNDED 15m contract whose 15-minute window has started (openPriceCapturedAt <= now)
-    // and has not expired (expirationTimestamp > now). Never pick a premature future CREATED slot before its start time.
-    const currentSlotSec = Math.floor(now / 900000) * 900;
+    // 1. Deterministic 5-minute window slug lookup first:
+    // Strictly select the currently active, FUNDED 5m contract whose 5-minute window has started
+    // and has not expired (expirationTimestamp > now).
+    const currentSlotSec = Math.floor(now / 300000) * 300;
     const candidateSlugs = [
-      `btc-up-or-down-15-min-${currentSlotSec}`,
-      `btc-up-or-down-15-min-${currentSlotSec - 900}`,
-      `btc-up-or-down-15-min-${currentSlotSec + 900}`,
+      `btc-up-or-down-5-min-${currentSlotSec}`,
+      `btc-up-or-down-5-min-${currentSlotSec - 300}`,
+      `btc-up-or-down-5-min-${currentSlotSec + 300}`,
     ];
     for (const candidateSlug of candidateSlugs) {
       try {
@@ -201,8 +201,8 @@ async function fetchLive15MinBtcMarket() {
     if (response.ok) {
       const json = await response.json();
       const list = json?.data || [];
-      // Strictly require unexpired FUNDED 15-minute BTC market (expirationTimestamp > now)
-      const valid15mMkts = list.filter(
+      // Strictly require unexpired FUNDED 5-minute BTC market (expirationTimestamp > now)
+      const valid5mMkts = list.filter(
         (m) =>
           is15MinBtcMarket(m) &&
           m.status === 'FUNDED' &&
@@ -210,11 +210,10 @@ async function fetchLive15MinBtcMarket() {
           Number(m.expirationTimestamp) > now
       );
 
-      // Sort so the currently active (closing soonest, i.e., active right now) market is first
-      valid15mMkts.sort((a, b) => (Number(a.expirationTimestamp) || 0) - (Number(b.expirationTimestamp) || 0));
+      valid5mMkts.sort((a, b) => (Number(a.expirationTimestamp) || 0) - (Number(b.expirationTimestamp) || 0));
 
-      if (valid15mMkts[0]) {
-        const bestMatch = valid15mMkts[0];
+      if (valid5mMkts[0]) {
+        const bestMatch = valid5mMkts[0];
         if (!bestMatch?.metadata?.openPrice || !bestMatch?.tokens?.yes) {
           try {
             const fullRes = await fetch(`https://api.limitless.exchange/markets/${encodeURIComponent(bestMatch.slug)}`);
@@ -897,7 +896,7 @@ async function executeLimitlessOrderOnServer(params = {}) {
     let marketData = null;
     const now = Date.now();
 
-    // Fast-path: use in-memory cachedActiveBtc if it is the current unexpired 15m market and already has token IDs
+    // Fast-path: use in-memory cachedActiveBtc if it is the current unexpired 5m market and already has token IDs
     if (
       cachedActiveBtc &&
       cachedActiveBtc.slug &&
@@ -906,13 +905,13 @@ async function executeLimitlessOrderOnServer(params = {}) {
       cachedActiveBtc.tokens?.yes &&
       cachedActiveBtc.tokens?.no &&
       (!cachedActiveBtc.expirationTimestamp || Number(cachedActiveBtc.expirationTimestamp) > now + 2000) &&
-      (activeMarketSlug === 'btc-up-or-down-15-min' || activeMarketSlug === cachedActiveBtc.slug)
+      (activeMarketSlug === 'btc-up-or-down-5-min' || activeMarketSlug === 'btc-up-or-down-15-min' || activeMarketSlug === cachedActiveBtc.slug)
     ) {
       activeMarketSlug = cachedActiveBtc.slug;
       marketData = cachedActiveBtc;
     } else {
       let isExpiredOrResolved = false;
-      if (activeMarketSlug && activeMarketSlug !== 'btc-up-or-down-15-min' && is15MinBtcMarket({ slug: activeMarketSlug })) {
+      if (activeMarketSlug && activeMarketSlug !== 'btc-up-or-down-5-min' && activeMarketSlug !== 'btc-up-or-down-15-min' && is15MinBtcMarket({ slug: activeMarketSlug })) {
         try {
           const mRes = await fetch(`https://api.limitless.exchange/markets/${encodeURIComponent(activeMarketSlug)}`);
           if (mRes.ok) {
@@ -934,12 +933,12 @@ async function executeLimitlessOrderOnServer(params = {}) {
       }
 
       if (isExpiredOrResolved || !marketData) {
-        const live15m = await fetchLive15MinBtcMarket();
-        if (live15m) {
-          activeMarketSlug = live15m.slug;
-          marketData = live15m;
-          cachedActiveBtc = live15m;
-          console.log(`[ORDER ROUTER] Auto-routed to current live 15-minute BTC market: '${live15m.slug}'`);
+        const live5m = await fetchLive15MinBtcMarket();
+        if (live5m) {
+          activeMarketSlug = live5m.slug;
+          marketData = live5m;
+          cachedActiveBtc = live5m;
+          console.log(`[ORDER ROUTER] Auto-routed to current live 5-minute BTC market: '${live5m.slug}'`);
         }
       }
     }
@@ -949,16 +948,15 @@ async function executeLimitlessOrderOnServer(params = {}) {
         httpStatus: 400,
         body: {
           success: false,
-          error: `Safety Guard Blocked: No active, unexpired 15-minute BTC market was found on Limitless Exchange. Order aborted.`,
+          error: `Safety Guard Blocked: No active, unexpired 5-minute BTC market was found on Limitless Exchange. Order aborted.`,
         },
       };
     }
 
-    // Enforce max 1 bet per 15m contract
+    // Enforce max 1 bet per 5m contract
     const existingGuard = inMemoryTradeGuard || loadTradeGuardFromDisk();
     if (existingGuard && existingGuard.marketSlug === activeMarketSlug) {
       if (!params?.isManual) {
-        // Automated order from browser arrived right after server autonomous engine executed the same signal: return seamless success
         return {
           httpStatus: 200,
           body: {
@@ -980,7 +978,7 @@ async function executeLimitlessOrderOnServer(params = {}) {
         body: {
           success: false,
           mode: 'CONTRACT_LOCKED',
-          error: `🔒 تم بالفعل تنفيذ صفقة على عقد الـ 15 دقيقة الحالي (${activeMarketSlug}). ينتظر الروبوت بدء عقد الـ 15 دقيقة القادم.`,
+          error: `🔒 تم بالفعل تنفيذ صفقة على عقد الـ 5 دقائق الحالي (${activeMarketSlug}). ينتظر الروبوت بدء عقد الـ 5 دقائق القادم.`,
         },
       };
     }
@@ -1027,15 +1025,14 @@ async function executeLimitlessOrderOnServer(params = {}) {
       };
     }
 
-    // Document 6: Hard Cap at 46¢ (0.46). Never pay > 50¢. Target is 46¢.
-    const MAX_ENTRY_PRICE_CAP = 0.46;
+    // FAK Order WITHOUT Price Cap (up to 0.99 / 99¢ so the almost-guaranteed outcome fills immediately)
+    const MAX_ENTRY_PRICE_CAP = 0.99;
     const numericClientPrice = Number(price) > 1 ? Number(price) / 100 : Number(price);
     const desiredLimitPrice =
       numericClientPrice && numericClientPrice > 0 && numericClientPrice <= MAX_ENTRY_PRICE_CAP
         ? numericClientPrice
         : MAX_ENTRY_PRICE_CAP;
 
-    // Price must have max 3 decimal places for Limitless SDK tick alignment (0.001) and strictly <= 0.46
     const tickAlignedPrice = Math.max(0.001, Math.min(MAX_ENTRY_PRICE_CAP, parseFloat(Number(desiredLimitPrice).toFixed(3))));
 
     const { ethers } = await import('ethers');
@@ -1048,7 +1045,7 @@ async function executeLimitlessOrderOnServer(params = {}) {
     let rawSize = parseFloat(Number(size || 0).toFixed(2));
     if (isNaN(rawSize) || rawSize <= 0) rawSize = 0;
 
-    // Server-Side Quarter-Kelly Sizing Shield: 3-5% (0.25 * Kelly) per 15m contract based on live on-chain balance
+    // Server-Side 10% Bankroll Sizing Shield per 5m contract based on live on-chain balance
     let effectiveUsdcBalance = lastKnownUsdcBalance;
     try {
       const liveBal = await fetchLiveWalletAndBalance(wallet.address, true);
@@ -1061,7 +1058,7 @@ async function executeLimitlessOrderOnServer(params = {}) {
     }
 
     if (effectiveUsdcBalance > 0) {
-      const maxRiskBudgetUsd = effectiveUsdcBalance * 0.04; // 3-5% budget
+      const maxRiskBudgetUsd = effectiveUsdcBalance * 0.10; // 10% of capital
       let maxAllowedContracts = Math.floor((maxRiskBudgetUsd / tickAlignedPrice) * 100) / 100;
       while (maxAllowedContracts > 0.01 && maxAllowedContracts * tickAlignedPrice > maxRiskBudgetUsd) {
         maxAllowedContracts = Math.round((maxAllowedContracts - 0.01) * 100) / 100;
@@ -1087,7 +1084,6 @@ async function executeLimitlessOrderOnServer(params = {}) {
       },
     });
 
-    // Ensure account is in EOA trading mode once per session as required by Limitless EIP-712 specification
     if (!verifiedEoaWallets.has(wallet.address)) {
       try {
         const axiosClient = httpClient.http?.client;
@@ -1106,12 +1102,10 @@ async function executeLimitlessOrderOnServer(params = {}) {
       logger: new sdk.ConsoleLogger(),
     });
 
-    // Document 6: Order Type is FAK (Fill-And-Kill / IOC)
     const isGtc = params.type === 'GTC';
     const orderTypeEnum = isGtc ? sdk.OrderType.GTC : (sdk.OrderType.FAK || sdk.OrderType.IOC || 'FAK');
     const executedOrderType = isGtc ? 'GTC' : 'FAK';
 
-    // Execute order at <= 46¢ (0.46)
     const orderArgs = {
       marketSlug: activeMarketSlug,
       tokenId: String(targetTokenId),
@@ -1121,7 +1115,7 @@ async function executeLimitlessOrderOnServer(params = {}) {
       size: contractCount,
     };
 
-    console.log(`[Limitless LIVE ORDER] Sending ${executedOrderType} order via SDK...`, {
+    console.log(`[Limitless LIVE 5m ORDER] Sending ${executedOrderType} order via SDK (10% Capital, No Price Cap)...`, {
       account: wallet.address,
       slug: activeMarketSlug,
       outcome: isLong ? 'UP' : 'DOWN',
@@ -1199,139 +1193,18 @@ app.post('/api/limitless/order', async (req, res) => {
 });
 
 // ============================================================================
-// Autonomous Server-Side Live 1m WebSocket Z-Score Engine (180-Period SMA, Asymmetric Z: Short +2.4σ / Long -2.2σ, RV & ADX Filters)
-// Evaluates strictly upon 1m candle close using Contract Open Price (Price to Beat) as baseline
-// Guarantees trades execute 24/7 on the VM ONLY when serverBotActive === true
+// Autonomous Server-Side 5-Minute Last-Minute Sniper Engine
+// No indicators, no filters: enters in the last minute (<= 60s remaining)
+// into the almost-guaranteed winning outcome (UP or DOWN) via FAK with no price cap (0.99)
+// and 10% of capital per 5m contract.
 // ============================================================================
-let serverArmedUpper = false;
-let serverArmedLower = false;
 let serverLastEvaluatedEntrySignalTime = 0;
-let serverLastEvaluatedClosedCandleTime = 0;
-let serverLastFilterBlockLogTime = 0;
-let serverKlinesBuffer = []; // [{ time, close, isClosed }]
+let serverKlinesBuffer = [];
 let serverBinanceWs = null;
 let serverBinanceWsEndpointIdx = 0;
 let lastServerBinanceWsTickTime = 0;
 
-function computeServerRollingStats(windowPrices, contractOpenPrice = null) {
-  const n = windowPrices.length;
-  if (n === 0) return { mean: 0, stdDev: 0, zScore: 0 };
-  const smaMean = windowPrices.reduce((acc, val) => acc + val, 0) / n;
-  const variance = windowPrices.reduce((acc, val) => acc + Math.pow(val - smaMean, 2), 0) / n;
-  const stdDev = Math.sqrt(variance);
-  const currentPrice = windowPrices[n - 1];
-
-  const validOpenPrice =
-    contractOpenPrice !== null &&
-    contractOpenPrice !== undefined &&
-    Number.isFinite(Number(contractOpenPrice)) &&
-    Number(contractOpenPrice) > 0
-      ? Number(contractOpenPrice)
-      : smaMean;
-
-  const zScore = stdDev > 0 ? (currentPrice - validOpenPrice) / stdDev : 0;
-  return { mean: validOpenPrice, stdDev, zScore };
-}
-
-function computeServerRealizedVol3m(closePrices) {
-  const n = closePrices.length;
-  if (n < 4) return 25;
-  const r1 = Math.log(closePrices[n - 1] / closePrices[n - 2]);
-  const r2 = Math.log(closePrices[n - 2] / closePrices[n - 3]);
-  const r3 = Math.log(closePrices[n - 3] / closePrices[n - 4]);
-  const sumSq = r1 * r1 + r2 * r2 + r3 * r3;
-  const rv = Math.sqrt(sumSq);
-  return rv * 10000; // basis points
-}
-
-function computeServerAdx14(candles, period = 14) {
-  if (!candles || candles.length < period * 2) return 15;
-  const trList = [];
-  const plusDmList = [];
-  const minusDmList = [];
-
-  for (let i = 1; i < candles.length; i++) {
-    const cur = candles[i];
-    const prev = candles[i - 1];
-
-    const tr = Math.max(
-      (cur.high || cur.close) - (cur.low || cur.close),
-      Math.abs((cur.high || cur.close) - prev.close),
-      Math.abs((cur.low || cur.close) - prev.close)
-    );
-    trList.push(tr);
-
-    const upMove = (cur.high || cur.close) - (prev.high || prev.close);
-    const downMove = (prev.low || prev.close) - (cur.low || cur.close);
-
-    const plusDm = upMove > downMove && upMove > 0 ? upMove : 0;
-    const minusDm = downMove > upMove && downMove > 0 ? downMove : 0;
-
-    plusDmList.push(plusDm);
-    minusDmList.push(minusDm);
-  }
-
-  if (trList.length < period) return 15;
-
-  let trSmooth = trList.slice(0, period).reduce((a, b) => a + b, 0);
-  let plusDmSmooth = plusDmList.slice(0, period).reduce((a, b) => a + b, 0);
-  let minusDmSmooth = minusDmList.slice(0, period).reduce((a, b) => a + b, 0);
-
-  const dxList = [];
-  for (let i = period; i < trList.length; i++) {
-    trSmooth = trSmooth - trSmooth / period + trList[i];
-    plusDmSmooth = plusDmSmooth - plusDmSmooth / period + plusDmList[i];
-    minusDmSmooth = minusDmSmooth - minusDmSmooth / period + minusDmList[i];
-
-    const plusDi = trSmooth > 0 ? (plusDmSmooth / trSmooth) * 100 : 0;
-    const minusDi = trSmooth > 0 ? (minusDmSmooth / trSmooth) * 100 : 0;
-    const diSum = plusDi + minusDi;
-    const dx = diSum > 0 ? (Math.abs(plusDi - minusDi) / diSum) * 100 : 0;
-    dxList.push(dx);
-  }
-
-  if (dxList.length < period) return 15;
-
-  let adx = dxList.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  for (let i = period; i < dxList.length; i++) {
-    adx = (adx * (period - 1) + dxList[i]) / period;
-  }
-  return adx;
-}
-
-function evaluateServerDocumentFilters(closes, candles, nowMs = Date.now()) {
-  const rvBp = computeServerRealizedVol3m(closes);
-  const adxVal = computeServerAdx14(candles, 14);
-
-  // Current minute within the 15-minute round (0..14)
-  const currentMinute = Math.floor(nowMs / 60000) % 15;
-  const passedWindow = currentMinute >= 3 && currentMinute <= 10;
-
-  // Filters: 9 bp <= RV_3m <= 25 bp, ADX(14, 1m) < 20, and Round Minute 3..10
-  const passedRv = rvBp >= 9 && rvBp <= 25;
-  const passedAdx = adxVal < 20;
-  const canEnter = passedRv && passedAdx && passedWindow;
-
-  const blockReason = !passedWindow
-    ? `Round Minute ${currentMinute} outside [3..10] window`
-    : !passedRv
-    ? `RV_3m=${rvBp.toFixed(1)}bp outside 9-25bp`
-    : !passedAdx
-    ? `ADX=${adxVal.toFixed(1)} >= 20 (Trending)`
-    : null;
-
-  return {
-    rv3m: { valueBp: rvBp, passed: passedRv, minBp: 9, maxBp: 25 },
-    adx14: { value: adxVal, passed: passedAdx, threshold: 20 },
-    roundWindow: { currentMinute, startMin: 3, endMin: 10, passed: passedWindow },
-    canEnterShort: canEnter,
-    canEnterLong: canEnter,
-    blockReasonShort: blockReason,
-    blockReasonLong: blockReason,
-  };
-}
-
-async function fetchServerBinanceKlines(symbol = 'BTCUSDT', interval = '1m', limit = 250) {
+async function fetchServerBinanceKlines(symbol = 'BTCUSDT', interval = '1m', limit = 60) {
   const urls = [
     `https://data-api.binance.vision/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
     `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
@@ -1349,68 +1222,8 @@ async function fetchServerBinanceKlines(symbol = 'BTCUSDT', interval = '1m', lim
   return null;
 }
 
-function evaluateServerLiveWindow(closes, latestCandleTime, isHistoricalSeed = false, isCandleCloseEvent = false) {
-  if (!Array.isArray(closes) || closes.length < 30) return;
-
-  if (isHistoricalSeed) {
-    serverArmedUpper = false;
-    serverArmedLower = false;
-    return;
-  }
-
-  // Only evaluate upon 1m candle close
-  if (!isCandleCloseEvent) return;
-
-  // Use confirmed closed candles up to the newly closed candle
-  const closedCandles = serverKlinesBuffer.filter((c) => c.isClosed !== false);
-  const evalCandles = closedCandles.length >= 30 ? closedCandles : serverKlinesBuffer;
-  const evalCloses = evalCandles.map((c) => c.close);
-  const evalCandleTime = evalCandles[evalCandles.length - 1]?.time || latestCandleTime;
-
-  if (serverLastEvaluatedClosedCandleTime === evalCandleTime) return;
-  serverLastEvaluatedClosedCandleTime = evalCandleTime;
-
-  // Anchor baseline to the opening price of the current 15-minute round from the same Binance BTCUSDT feed
-  // to avoid the ~$90 USDT/USD basis spread between Binance BTCUSDT and Chainlink BTC/USD
-  const evalTimeMs = evalCandleTime > 1e11 ? evalCandleTime : evalCandleTime * 1000;
-  const currentRoundStartMs = Math.floor(evalTimeMs / 900000) * 900000;
-  const roundStartCandle = serverKlinesBuffer.find((c) => {
-    const tMs = c.time > 1e11 ? c.time : c.time * 1000;
-    return tMs >= currentRoundStartMs && tMs < currentRoundStartMs + 900000 && Number.isFinite(c.open) && c.open > 0;
-  });
-
-  const validContractOpenPrice = roundStartCandle ? roundStartCandle.open : null;
-
-  // 45-period historical candles (45 minutes)
-  const windowLength = Math.min(evalCloses.length, 45);
-  const liveWindow = evalCloses.slice(-windowLength);
-  const { mean, stdDev, zScore: liveZ } = computeServerRollingStats(liveWindow, validContractOpenPrice);
-
-  const docFilters = evaluateServerDocumentFilters(evalCloses, evalCandles);
-
-  let triggeredSignal = null;
-
-  // Entry Thresholds:
-  // Short: +2.00σ / Long: -2.00σ measured from Contract Open Price
-  if (liveZ >= 2.00) {
-    serverArmedUpper = true;
-    if (docFilters.canEnterShort) {
-      triggeredSignal = 'ENTRY_SHORT';
-    }
-  } else if (liveZ <= 0) {
-    serverArmedUpper = false;
-  }
-
-  if (liveZ <= -2.00) {
-    serverArmedLower = true;
-    if (docFilters.canEnterLong) {
-      triggeredSignal = 'ENTRY_LONG';
-    }
-  } else if (liveZ >= 0) {
-    serverArmedLower = false;
-  }
-
-  if (!serverBotActive) return;
+async function evaluateServerLastMinuteSniper() {
+  if (!serverBotActive || isServerExecutingOrder) return;
 
   const pk = (process.env.PRIVATE_KEY || '').trim();
   const tokenId = (process.env.LMTS_TOKEN_ID || '').trim();
@@ -1418,78 +1231,79 @@ function evaluateServerLiveWindow(closes, latestCandleTime, isHistoricalSeed = f
   if (!pk || !tokenId || !secret) return;
 
   const now = Date.now();
+  if (now - serverLastEvaluatedEntrySignalTime < 3000) return;
+
+  const liveMkt = cachedActiveBtc || (await fetchLive15MinBtcMarket());
+  if (!liveMkt || !liveMkt.slug || !is15MinBtcMarket(liveMkt)) return;
+
+  const expMs = Number(liveMkt.expirationTimestamp) || 0;
+  if (!expMs || expMs <= now) return;
+
+  const remainingSec = Math.floor((expMs - now) / 1000);
+  // Enter strictly in the last minute of the 5-minute contract (2s..60s remaining)
+  if (remainingSec > 60 || remainingSec < 2) return;
+
+  // Check Single-Entry Lock per 5-minute contract
+  const preGuard = inMemoryTradeGuard || loadTradeGuardFromDisk();
   if (
-    (triggeredSignal === 'ENTRY_SHORT' || triggeredSignal === 'ENTRY_LONG') &&
-    !isServerExecutingOrder &&
-    now - serverLastEvaluatedEntrySignalTime >= 4000
+    preGuard &&
+    preGuard.marketSlug === liveMkt.slug &&
+    now - (Number(preGuard.timestamp) || 0) < 5 * 60 * 1000
   ) {
-    // Check if the current active 15m market is already locked before dispatching
-    const preGuard = inMemoryTradeGuard || loadTradeGuardFromDisk();
-    if (
-      preGuard &&
-      cachedActiveBtc?.slug &&
-      preGuard.marketSlug === cachedActiveBtc.slug &&
-      now - (Number(preGuard.timestamp) || 0) < 15 * 60 * 1000
-    ) {
-      if (triggeredSignal === 'ENTRY_SHORT') serverArmedUpper = false;
-      else serverArmedLower = false;
-      return;
-    }
-
-    serverLastEvaluatedEntrySignalTime = now;
-    const direction = triggeredSignal === 'ENTRY_LONG' ? 'LONG' : 'SHORT';
-    const outcome = direction === 'LONG' ? 'UP' : 'DOWN';
-    console.log(
-      `[VM 1m CLOSE ENGINE] Signal reached for ${triggeredSignal} at Z=${liveZ.toFixed(2)}σ vs OpenPrice=$${mean.toFixed(2)} (RV=${docFilters.rv3m.valueBp.toFixed(1)}bp, ADX=${docFilters.adx14.value.toFixed(1)})! Dispatching FAK order @ <= $0.46 (46¢)...`
-    );
-
-    setTimeout(async () => {
-      if (!serverBotActive || isServerExecutingOrder) return;
-      const liveMkt = cachedActiveBtc || (await fetchLive15MinBtcMarket());
-      
-      const currentFilters = evaluateServerDocumentFilters(evalCloses, evalCandles);
-      if (direction === 'SHORT' && !currentFilters.canEnterShort) {
-        console.log(`[VM 1m CLOSE ENGINE] Blocked Short entry: ${currentFilters.blockReasonShort}`);
-        return;
-      }
-      if (direction === 'LONG' && !currentFilters.canEnterLong) {
-        console.log(`[VM 1m CLOSE ENGINE] Blocked Long entry: ${currentFilters.blockReasonLong}`);
-        return;
-      }
-
-      const guard = inMemoryTradeGuard || loadTradeGuardFromDisk();
-      if (guard && liveMkt?.slug && guard.marketSlug === liveMkt.slug) {
-        if (direction === 'SHORT') serverArmedUpper = false;
-        else serverArmedLower = false;
-        return;
-      }
-
-      // Document 6: Order Type FAK, Max Entry Price 46¢ (0.46)
-      const orderRes = await executeLimitlessOrderOnServer({
-        market: liveMkt?.slug || 'btc-up-or-down-15-min',
-        direction,
-        outcome,
-        type: 'FAK',
-        price: 0.46,
-        candleTime: evalCandleTime || now,
-      });
-      if (orderRes?.body?.success) {
-        if (direction === 'SHORT') serverArmedUpper = false;
-        else serverArmedLower = false;
-      }
-    }, 300);
+    return;
   }
+
+  // Determine the "almost guaranteed" winning contract (UP vs DOWN)
+  const yesPrice = Number(liveMkt.prices?.[0] ?? 0.5);
+  const noPrice = Number(liveMkt.prices?.[1] ?? 1 - yesPrice);
+
+  const rawOpenPrice = liveMkt.openPrice ?? liveMkt.metadata?.openPrice;
+  const parsedOpenPrice =
+    rawOpenPrice !== undefined && rawOpenPrice !== null
+      ? Number(String(rawOpenPrice).replace(/[^0-9.-]/g, ''))
+      : NaN;
+  const openPrice = Number.isFinite(parsedOpenPrice) && parsedOpenPrice > 0 ? parsedOpenPrice : null;
+
+  const latestBinanceClose =
+    serverKlinesBuffer.length > 0 ? serverKlinesBuffer[serverKlinesBuffer.length - 1].close : 0;
+  const liveSpotPrice = Number(latestOracleData?.value || latestBinanceClose || 0);
+
+  let winningDirection = null;
+  if (yesPrice > noPrice && yesPrice >= 0.52) {
+    winningDirection = 'LONG'; // UP is winning
+  } else if (noPrice > yesPrice && noPrice >= 0.52) {
+    winningDirection = 'SHORT'; // DOWN is winning
+  } else if (openPrice && liveSpotPrice > 0) {
+    winningDirection = liveSpotPrice >= openPrice ? 'LONG' : 'SHORT';
+  }
+
+  if (!winningDirection) return;
+
+  serverLastEvaluatedEntrySignalTime = now;
+  const outcome = winningDirection === 'LONG' ? 'UP' : 'DOWN';
+  const winningProb = winningDirection === 'LONG' ? (yesPrice * 100).toFixed(1) : (noPrice * 100).toFixed(1);
+
+  console.log(
+    `[VM 5m LAST-MINUTE SNIPER] ${remainingSec}s remaining on ${liveMkt.slug}! Almost-guaranteed outcome: ${outcome} (${winningProb}%). Dispatching FAK order (10% Capital, No Price Cap)...`
+  );
+
+  await executeLimitlessOrderOnServer({
+    market: liveMkt.slug,
+    direction: winningDirection,
+    outcome,
+    type: 'FAK',
+    price: 0.99,
+    candleTime: now,
+  });
 }
 
 async function syncServerBinanceCandles(isInitial = false) {
   try {
     const wsIsLive = !isInitial && lastServerBinanceWsTickTime > 0 && Date.now() - lastServerBinanceWsTickTime < 10000;
-    if (wsIsLive) {
-      return;
-    }
+    if (wsIsLive) return;
 
-    const rawKlines = await fetchServerBinanceKlines('BTCUSDT', '1m', 250);
-    if (!Array.isArray(rawKlines) || rawKlines.length < 30) return;
+    const rawKlines = await fetchServerBinanceKlines('BTCUSDT', '1m', 60);
+    if (!Array.isArray(rawKlines) || rawKlines.length < 5) return;
 
     const now = Date.now();
     serverKlinesBuffer = rawKlines.map((k, idx) => ({
@@ -1500,10 +1314,6 @@ async function syncServerBinanceCandles(isInitial = false) {
       close: parseFloat(k[4]),
       isClosed: Number(k[6]) > 0 ? Number(k[6]) <= now : idx < rawKlines.length - 1,
     }));
-
-    const closes = serverKlinesBuffer.map((c) => c.close);
-    const latestTime = serverKlinesBuffer[serverKlinesBuffer.length - 1]?.time || now;
-    evaluateServerLiveWindow(closes, latestTime, isInitial, !isInitial);
   } catch {
     // safe continuation
   }
@@ -1535,7 +1345,6 @@ async function initServerBinanceLiveWs() {
               const kLow = parseFloat(msg.k.l);
               const kClose = parseFloat(msg.k.c);
               const kClosed = Boolean(msg.k.x);
-              let isCandleCloseEvent = kClosed;
               if (serverKlinesBuffer.length > 0) {
                 const last = serverKlinesBuffer[serverKlinesBuffer.length - 1];
                 if (last.time === kTime) {
@@ -1546,7 +1355,6 @@ async function initServerBinanceLiveWs() {
                   last.isClosed = kClosed;
                 } else if (kTime > last.time) {
                   last.isClosed = true;
-                  isCandleCloseEvent = true;
                   serverKlinesBuffer.push({
                     time: kTime,
                     open: kOpen,
@@ -1555,10 +1363,8 @@ async function initServerBinanceLiveWs() {
                     close: kClose,
                     isClosed: kClosed,
                   });
-                  if (serverKlinesBuffer.length > 300) serverKlinesBuffer.shift();
+                  if (serverKlinesBuffer.length > 100) serverKlinesBuffer.shift();
                 }
-                const closes = serverKlinesBuffer.map((c) => c.close);
-                evaluateServerLiveWindow(closes, kTime, false, isCandleCloseEvent);
               }
             }
           } catch {}
@@ -1583,6 +1389,9 @@ async function initServerBinanceLiveWs() {
 
 initServerBinanceLiveWs();
 setInterval(() => syncServerBinanceCandles(false), 5000);
+setInterval(() => {
+  evaluateServerLastMinuteSniper().catch(() => {});
+}, 1000);
 
 // Binance Klines Proxy with global data-api.binance.vision failover for US Google Cloud VMs
 app.get('/api/binance/*', async (req, res) => {

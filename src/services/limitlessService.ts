@@ -30,7 +30,7 @@ export class LimitlessService {
   private currentOracle: OraclePriceData | null = null;
   private currentPositions: PositionItem[] = [];
   private isExplicitlyClosed = false;
-  private activeMarketSlug = 'btc-up-or-down-15-min';
+  private activeMarketSlug = 'btc-up-or-down-5-min';
   private pollingTimer: number | null = null;
   private liveStateTimer: number | null = null;
   private credentials?: { apiKey?: string; tokenId?: string; secret?: string };
@@ -272,14 +272,14 @@ export class LimitlessService {
    */
   public connect(
     url: string = 'wss://ws.limitless.exchange',
-    marketSlug: string = 'btc-up-or-down-15-min',
+    marketSlug: string = 'btc-up-or-down-5-min',
     credentials?: { apiKey?: string; tokenId?: string; secret?: string }
   ) {
     this.disconnect();
     this.isExplicitlyClosed = false;
     this.setStatus('CONNECTING');
     this.credentials = credentials;
-    this.activeMarketSlug = marketSlug || 'btc-up-or-down-15-min';
+    this.activeMarketSlug = marketSlug || 'btc-up-or-down-5-min';
 
     this.log('SYSTEM', `[LIMITLESS STREAM] Initializing live connection to Limitless Exchange Gateway...`);
     this.startLiveStateSync();
@@ -417,7 +417,7 @@ export class LimitlessService {
    * Subscribe to specific market prices
    */
   public subscribeMarket(slug: string) {
-    if (!slug || slug === 'btc-up-or-down-hourly' || slug === 'btc-up-or-down-15-min') return;
+    if (!slug || slug === 'btc-up-or-down-hourly' || slug === 'btc-up-or-down-15-min' || slug === 'btc-up-or-down-5-min') return;
     if (this.activeMarketSlug === slug) return;
     this.activeMarketSlug = slug;
     // Notify official backend SDK WebSocket to subscribe
@@ -431,7 +431,7 @@ export class LimitlessService {
   }
 
   /**
-   * Automatically discovers the active 15-Minute BTC prediction market from Limitless
+   * Automatically discovers the active 5-Minute BTC prediction market from Limitless
    */
   private async discoverAndSubscribeActiveBtcMarket() {
     try {
@@ -446,9 +446,9 @@ export class LimitlessService {
           const match = json.data.find(
             (m: { slug?: string; title?: string }) =>
               (m.slug?.toLowerCase().includes('btc') || m.title?.toLowerCase().includes('btc')) &&
-              (/(^|[^0-9])15-min/i.test(m.slug || '') || /(^|[^0-9])15\s*min/i.test(m.title || '') || /(^|[^0-9])15m/i.test(m.slug || '')) &&
-              !/(^|[^0-9])5-min/i.test(m.slug || '') &&
-              !/(^|[^0-9])5\s*min/i.test(m.title || '') &&
+              (/(^|[^0-9])5-min/i.test(m.slug || '') || /(^|[^0-9])5\s*min/i.test(m.title || '') || /(^|[^0-9])5m/i.test(m.slug || '')) &&
+              !/(^|[^0-9])15-min/i.test(m.slug || '') &&
+              !/(^|[^0-9])15\s*min/i.test(m.title || '') &&
               !/hourly/i.test(m.slug || '') &&
               !/(^|[^0-9])1-hour/i.test(m.slug || '')
           );
@@ -456,7 +456,7 @@ export class LimitlessService {
         }
 
         if (discoveredSlug && discoveredSlug !== this.activeMarketSlug) {
-          this.log('SYSTEM', `[LIMITLESS DISCOVERY] Active 15-Minute BTC prediction market found: ${discoveredSlug}`);
+          this.log('SYSTEM', `[LIMITLESS DISCOVERY] Active 5-Minute BTC prediction market found: ${discoveredSlug}`);
           this.subscribeMarket(discoveredSlug);
         }
       }
@@ -558,11 +558,11 @@ export class LimitlessService {
       this.log('SYSTEM', `[ORDER DISPATCH] WebSocket status is ${this.status}. Transmitting order via Limitless HTTP REST order execution proxy...`);
     }
 
-    const resolvedSlug = (targetMarketSlug || this.activeMarketSlug || 'btc-up-or-down-15-min').trim();
+    const resolvedSlug = (targetMarketSlug || this.activeMarketSlug || 'btc-up-or-down-5-min').trim();
 
-    // Strict safety check: Never permit 5-minute or 1-hour contracts when targeting 15m contracts
-    if (/(^|[^0-9])5-min/i.test(resolvedSlug) || /hourly/i.test(resolvedSlug) || /(^|[^0-9])1-hour/i.test(resolvedSlug)) {
-      const err = `Safety Guard Blocked: Execution rejected for '${resolvedSlug}'. The bot is restricted exclusively to 15-minute contracts (BTC 15m).`;
+    // Strict safety check: Never permit 15-minute or 1-hour contracts when targeting 5m contracts
+    if (/(^|[^0-9])15-min/i.test(resolvedSlug) || /hourly/i.test(resolvedSlug) || /(^|[^0-9])1-hour/i.test(resolvedSlug)) {
+      const err = `Safety Guard Blocked: Execution rejected for '${resolvedSlug}'. The bot is restricted exclusively to 5-minute contracts (BTC 5m).`;
       this.log('SYSTEM', `[ORDER BLOCKED] ${err}`);
       throw new Error(err);
     }
@@ -633,7 +633,7 @@ export class LimitlessService {
       onChunkUpdate({ ...chunkState });
       soundController.playChunkExecuted(0);
       console.log(
-        `🚀 Live Direct Order transmitted to Limitless: ${contractsToBuy} contracts @ $${priceCents} (${orderType}) [Quarter-Kelly 3-5% - FAK ≤ $0.46 (46¢)]`
+        `🚀 Live Direct 5m Order transmitted to Limitless: ${contractsToBuy} contracts @ $${priceCents} (${orderType}) [10% Capital - No Price Cap]`
       );
     } catch (err: any) {
       chunkState.status = 'FAILED';
