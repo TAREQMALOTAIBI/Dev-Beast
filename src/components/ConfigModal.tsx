@@ -36,7 +36,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
       zScoreEntry: 0,
       zScoreLower: 0,
       zScoreLowerEntry: 0,
-      maxPriceCents: 0.20,
+      maxPriceCents: 0.65,
       maxRiskPercent: 0.05,
       orderType: 'GTC',
       fractionChunks: 1,
@@ -66,7 +66,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
     onSave({
       ...draft,
       orderType: 'GTC',
-      maxPriceCents: 0.20,
+      maxPriceCents: 0.65,
       maxRiskPercent: 0.05,
       limitlessMarketSlug: 'btc-up-or-down-5-min',
       cooldownMinutes: 5,
@@ -84,13 +84,13 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
             <div>
               <h2 className="text-base font-bold text-slate-100">
                 {isAr
-                  ? 'إعدادات استراتيجية تحرك 80$ (أمر GTC عند 20% · إلغاء عند بقاء 1 دقيقة)'
-                  : '$80 Movement Strategy Configuration (GTC @ 20% · Cancel @ 1m)'}
+                  ? 'إعدادات استراتيجية تحرك 80$ (أمر GTC عند 65% · إلغاء عند بقاء 1 دقيقة)'
+                  : '$80 Movement Strategy Configuration (GTC @ 65% · Cancel @ 1m)'}
               </h2>
               <div className="text-[11px] text-slate-400">
                 {isAr
-                  ? 'تحرك ≥ 80$ من سعر الأساس · أمر GTC عند 0.20$ (20%) · إلغاء تلقائي عند بقاء ≤ 1 دقيقة'
-                  : '≥ $80 move from base · GTC order @ $0.20 (20%) · Auto-cancel at ≤ 1 min remaining'}
+                  ? 'تحرك ≥ 80$ من سعر الأساس · أمر GTC عند 0.65$ (65%) · إلغاء تلقائي عند بقاء ≤ 1 دقيقة'
+                  : '≥ $80 move from base · GTC order @ $0.65 (65%) · Auto-cancel at ≤ 1 min remaining'}
               </div>
             </div>
           </div>
@@ -234,8 +234,8 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
           <div className="border-t border-slate-800 pt-4 space-y-3">
             <h3 className="font-semibold text-slate-100 uppercase tracking-wider text-[11px] text-sky-400">
               {isAr
-                ? 'معايير الاستراتيجية: تحرك 80$ · أمر GTC عند 20% · تخصيص 5% من رأس المال · إلغاء عند بقاء 1 دقيقة'
-                : 'Strategy Parameters: $80 Move · GTC @ 20% · 5% Capital · Auto-Cancel @ 1 Min'}
+                ? 'معايير الاستراتيجية: تحرك 80$ · أمر GTC عند 65% · تخصيص 5% من رأس المال · إلغاء عند بقاء 1 دقيقة'
+                : 'Strategy Parameters: $80 Move · GTC @ 65% · 5% Capital · Auto-Cancel @ 1 Min'}
             </h3>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
@@ -258,7 +258,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
                 <input
                   type="text"
                   disabled
-                  value={isAr ? 'GTC @ 20% ($0.20)' : 'GTC @ 20% ($0.20)'}
+                  value={isAr ? 'GTC @ 65% ($0.65)' : 'GTC @ 65% ($0.65)'}
                   className="w-full bg-slate-950 border border-sky-600/60 rounded-lg px-2.5 py-2 text-sky-300 font-mono font-bold text-center"
                 />
               </div>
@@ -296,8 +296,8 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
               </div>
               <p className="text-slate-300 leading-relaxed">
                 {isAr
-                  ? 'يقيس الروبوت باستمرار بُعد السعر اللحظي للبيتكوين عن سعر الأساس (سعر افتتاح عقد الـ 5 دقائق). إذا تحرك السعر بمقدار 80 دولار صعوداً يتم وضع أمر شراء معلق (GTC) لعقد UP بسعر 20% ($0.20)، وإذا تحرك 80 دولار هبوطاً يتم وضع أمر GTC لعقد DOWN بسعر 20%. وفي حال لم يُنفذ الأمر بحلول الدقيقة الأخيرة (≤ 60 ثانية متبقية)، يقوم الروبوت بإلغاء الأمر تلقائياً لمنع أي مخاطر متأخرة.'
-                  : 'The bot continuously tracks BTC spot deviation from the 5m base price (contract open). Upon reaching an $80 upward movement, it submits a GTC buy limit order for UP at 20% ($0.20). For an $80 downward movement, it submits a GTC order for DOWN at 20%. If unfilled when the countdown reaches 1 minute (≤ 60s), the order is auto-cancelled.'}
+                  ? 'يقيس الروبوت باستمرار بُعد السعر اللحظي للبيتكوين عن سعر الأساس (سعر افتتاح عقد الـ 5 دقائق). إذا تحرك السعر بمقدار 80 دولار صعوداً يتم وضع أمر شراء معلق (GTC) لعقد UP بسعر 65% ($0.65)، وإذا تحرك 80 دولار هبوطاً يتم وضع أمر GTC لعقد DOWN بسعر 65%. وفي حال لم يُنفذ الأمر بحلول الدقيقة الأخيرة (≤ 60 ثانية متبقية)، يقوم الروبوت بإلغاء الأمر تلقائياً لمنع أي مخاطر متأخرة.'
+                  : 'The bot continuously tracks BTC spot deviation from the 5m base price (contract open). Upon reaching an $80 upward movement, it submits a GTC buy limit order for UP at 65% ($0.65). For an $80 downward movement, it submits a GTC order for DOWN at 65%. If unfilled when the countdown reaches 1 minute (≤ 60s), the order is auto-cancelled.'}
               </p>
             </div>
           </div>

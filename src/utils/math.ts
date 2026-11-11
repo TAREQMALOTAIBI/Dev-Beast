@@ -269,7 +269,7 @@ export function calculateZScore(
 /**
  * Calculates position sizing for 5-Minute Strategy:
  * Fixed 5% of bankroll (0.05) per 5m contract,
- * with GTC order execution @ 20% ($0.20).
+ * with GTC order execution @ 65% ($0.65).
  */
 export function calculateKellySizing(
   balance: number,
@@ -277,8 +277,8 @@ export function calculateKellySizing(
 ): KellyMath {
   const { maxPriceCents, winProbability, maxRiskPercent } = config;
 
-  // GTC Limit Price: defaults to 0.20 ($0.20)
-  const price = Math.max(0.001, Math.min(0.99, maxPriceCents || 0.20));
+  // GTC Limit Price: defaults to 0.65 ($0.65)
+  const price = Math.max(0.001, Math.min(0.99, maxPriceCents || 0.65));
   const b = (1.00 - price) / price;
   const p = Math.max(0.01, Math.min(0.99, winProbability || 0.90));
   const q = 1 - p;

@@ -1115,7 +1115,7 @@ async function executeLimitlessOrderOnServer(params = {}) {
       size: contractCount,
     };
 
-    console.log(`[Limitless LIVE 5m ORDER] Sending ${executedOrderType} order via SDK (5% Capital, GTC @ 20%)...`, {
+    console.log(`[Limitless LIVE 5m ORDER] Sending ${executedOrderType} order via SDK (5% Capital, GTC @ 65%)...`, {
       account: wallet.address,
       slug: activeMarketSlug,
       outcome: isLong ? 'UP' : 'DOWN',
@@ -1246,7 +1246,7 @@ app.post('/api/limitless/cancel-order', async (req, res) => {
 // ============================================================================
 // Autonomous Server-Side $80 Price Movement GTC Strategy Engine:
 // 1. Monitors BTC Spot vs 5-minute Contract Open Price (Price to Beat).
-// 2. When |Spot - OpenPrice| >= $80: places GTC BUY order on leading outcome @ $0.20 (20%).
+// 2. When |Spot - OpenPrice| >= $80: places GTC BUY order on leading outcome @ $0.65 (65%).
 // 3. If order not executed by the time 1 minute (<= 60s) remains on contract, cancels order automatically.
 // ============================================================================
 let serverLastEvaluatedEntrySignalTime = 0;
@@ -1339,7 +1339,7 @@ async function evaluateServerStrategy() {
 
     serverLastEvaluatedEntrySignalTime = now;
     console.log(
-      `🎯 [80$ MOVEMENT TRIGGER] Spot: $${liveSpotPrice.toFixed(2)} vs Open: $${openPrice.toFixed(2)} (Diff: ${priceDelta > 0 ? '+' : ''}$${priceDelta.toFixed(2)} >= $80). Submitting GTC order @ 20% ($0.20)...`
+      `🎯 [80$ MOVEMENT TRIGGER] Spot: $${liveSpotPrice.toFixed(2)} vs Open: $${openPrice.toFixed(2)} (Diff: ${priceDelta > 0 ? '+' : ''}$${priceDelta.toFixed(2)} >= $80). Submitting GTC order @ 65% ($0.65)...`
     );
 
     const execResult = await executeLimitlessOrderOnServer({
@@ -1347,7 +1347,7 @@ async function evaluateServerStrategy() {
       direction,
       outcome,
       type: 'GTC',
-      price: 0.20, // 20% Limit Order
+      price: 0.65, // 65% Limit Order
       candleTime: now,
     });
 
@@ -1356,7 +1356,7 @@ async function evaluateServerStrategy() {
         orderId: execResult.body.orderId,
         marketSlug: liveMkt.slug,
         placedAt: now,
-        price: 0.20,
+        price: 0.65,
       };
     }
   }

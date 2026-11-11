@@ -173,8 +173,8 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
               <ShieldCheck className="w-3.5 h-3.5 text-sky-400" />
               <span>
                 {isAr
-                  ? 'استراتيجية تحرك 80$ · أمر GTC عند 20% · إلغاء تلقائي عند بقاء 1 دقيقة'
-                  : '$80 Movement Strategy · GTC @ 20% · Auto-Cancel @ 1 Min'}
+                  ? 'استراتيجية تحرك 80$ · أمر GTC عند 65% · إلغاء تلقائي عند بقاء 1 دقيقة'
+                  : '$80 Movement Strategy · GTC @ 65% · Auto-Cancel @ 1 Min'}
               </span>
             </span>
           </div>
@@ -273,7 +273,7 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
           </div>
         </div>
 
-        {/* Column 2: Contract Prices & GTC @ 20% Target (5 cols) */}
+        {/* Column 2: Contract Prices & GTC @ 65% Target (5 cols) */}
         <div className="md:col-span-5 flex flex-col justify-between space-y-2">
           <div className="flex items-center justify-between text-[11px] px-1">
             <span className="flex items-center gap-1.5 text-slate-300 font-semibold">
@@ -281,7 +281,7 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
-              <span>{isAr ? 'أسعار العقود اللحظية (سعر تنفيذ أمر GTC المستهدف: 20¢ / 20%)' : 'Live Contracts (Target GTC Order Price: 20¢ / 20%)'}</span>
+              <span>{isAr ? 'أسعار العقود اللحظية (سعر تنفيذ أمر GTC المستهدف: 65¢ / 65%)' : 'Live Contracts (Target GTC Order Price: 65¢ / 65%)'}</span>
             </span>
             {lastTick.direction ? (
               <span
@@ -454,11 +454,11 @@ export const LimitlessMarketBanner: React.FC<LimitlessMarketBannerProps> = ({
           <span>
             {isAr ? (
               <>
-                <strong className="text-slate-200">الاستراتيجية المعتمدة:</strong> إذا تحرك السعر <strong className="text-amber-300">80 دولار صعوداً أو هبوطاً</strong> من سعر الأساس، يتم وضع <strong className="text-sky-300">أمر شراء معلق GTC عند 20% (0.20$)</strong>، ويتم <strong className="text-rose-400">إلغاؤه تلقائياً في حال عدم التنفيذ</strong> فور وصول الوقت المتبقي إلى <strong className="text-rose-400">1 دقيقة (≤ 60 ثانية)</strong> على نهاية العقد!
+                <strong className="text-slate-200">الاستراتيجية المعتمدة:</strong> إذا تحرك السعر <strong className="text-amber-300">80 دولار صعوداً أو هبوطاً</strong> من سعر الأساس، يتم وضع <strong className="text-sky-300">أمر شراء معلق GTC عند 65% (0.65$)</strong>، ويتم <strong className="text-rose-400">إلغاؤه تلقائياً في حال عدم التنفيذ</strong> فور وصول الوقت المتبقي إلى <strong className="text-rose-400">1 دقيقة (≤ 60 ثانية)</strong> على نهاية العقد!
               </>
             ) : (
               <>
-                <strong className="text-slate-200">Active Strategy:</strong> If price moves <strong className="text-amber-300">≥ $80 up or down</strong> from base price, a <strong className="text-sky-300">GTC limit order @ 20% ($0.20)</strong> is placed, and <strong className="text-rose-400">auto-cancelled if unfilled</strong> once <strong className="text-rose-400">1 minute (≤ 60s)</strong> remains!
+                <strong className="text-slate-200">Active Strategy:</strong> If price moves <strong className="text-amber-300">≥ $80 up or down</strong> from base price, a <strong className="text-sky-300">GTC limit order @ 65% ($0.65)</strong> is placed, and <strong className="text-rose-400">auto-cancelled if unfilled</strong> once <strong className="text-rose-400">1 minute (≤ 60s)</strong> remains!
               </>
             )}
           </span>

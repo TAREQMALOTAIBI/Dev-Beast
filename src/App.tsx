@@ -110,7 +110,7 @@ export default function App() {
                   : 'border-transparent'
               }`}
             >
-              {isAr ? 'إدارة رأس المال وحجم العقود (GTC @ 20%)' : 'Capital & Sizing (GTC @ 20%)'}
+              {isAr ? 'إدارة رأس المال وحجم العقود (GTC @ 65%)' : 'Capital & Sizing (GTC @ 65%)'}
             </button>
             <button
               onClick={() => setActiveTab('code')}
@@ -266,7 +266,7 @@ export default function App() {
             <div className="flex items-center gap-1">
               <span className="text-slate-400">{isAr ? 'نوع الأمر المستهدف:' : 'Order:'}</span>
               <span className="text-sky-300 font-bold bg-sky-950/70 px-1.5 py-0.5 rounded border border-sky-600/50">
-                GTC @ 20% ($0.20)
+                GTC @ 65% ($0.65)
               </span>
             </div>
             <span className="text-slate-700">·</span>
@@ -349,7 +349,7 @@ export default function App() {
                 <div className="p-4 rounded-xl border border-slate-800 bg-slate-900/90 text-xs flex flex-col gap-3">
                   <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                     <span className="font-semibold text-slate-200">
-                      {isAr ? 'حجم الصفقة وأمر GTC عند 20% ($0.20)' : 'Order Sizing (GTC Limit @ 20%)'}
+                      {isAr ? 'حجم الصفقة وأمر GTC عند 65% ($0.65)' : 'Order Sizing (GTC Limit @ 65%)'}
                     </span>
                     <button
                       onClick={() => setActiveTab('kelly')}
@@ -368,7 +368,7 @@ export default function App() {
                     <div className="flex justify-between text-slate-400">
                       <span>{isAr ? 'نوع الأمر وسعر التنفيذ:' : 'Order Type & Price:'}</span>
                       <span className="text-sky-300 font-bold">
-                        GTC @ 20% ($0.20)
+                        GTC @ 65% ($0.65)
                       </span>
                     </div>
                     <div className="flex justify-between text-slate-400">
@@ -436,7 +436,7 @@ export default function App() {
           <div className="flex items-center gap-2">
             <span>{isAr ? 'استراتيجية تحرك 80$' : '$80 Movement Strategy'}</span>
             <span>·</span>
-            <span>{isAr ? 'أمر شراء معلق GTC عند 20% (0.20$)' : 'GTC Buy Limit Order @ 20% ($0.20)'}</span>
+            <span>{isAr ? 'أمر شراء معلق GTC عند 65% (0.65$)' : 'GTC Buy Limit Order @ 65% ($0.65)'}</span>
             <span>·</span>
             <span>{isAr ? 'إلغاء تلقائي في حال عدم التنفيذ عند بقاء 1 دقيقة' : 'Auto-Cancel at 1 Min Remaining'}</span>
           </div>

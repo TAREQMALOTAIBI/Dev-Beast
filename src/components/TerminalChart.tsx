@@ -119,7 +119,7 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
           </div>
           <span className="text-slate-600">·</span>
           <span className="text-emerald-400 text-[11px] font-medium hidden sm:inline">
-            → عتبات تحرك السعر ±80$ من سعر الأساس (وضع أمر GTC عند 20%)
+            → عتبات تحرك السعر ±80$ من سعر الأساس (وضع أمر GTC عند 65%)
           </span>
         </div>
 
@@ -283,7 +283,7 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
                   <g>
                     <polygon points={`${x},${yHigh - 6} ${x - 5},${yHigh - 15} ${x + 5},${yHigh - 15}`} fill="#f43f5e" />
                     <text x={x} y={yHigh - 18} fill="#f43f5e" fontSize="8.5" fontWeight="bold" textAnchor="middle" fontFamily="sans-serif">
-                      GTC DOWN (20%)
+                      GTC DOWN (65%)
                     </text>
                   </g>
                 )}
@@ -292,7 +292,7 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
                   <g>
                     <polygon points={`${x},${yLow + 6} ${x - 5},${yLow + 15} ${x + 5},${yLow + 15}`} fill="#10b981" />
                     <text x={x} y={yLow + 25} fill="#10b981" fontSize="8.5" fontWeight="bold" textAnchor="middle" fontFamily="sans-serif">
-                      GTC UP (20%)
+                      GTC UP (65%)
                     </text>
                   </g>
                 )}
@@ -325,15 +325,15 @@ export const TerminalChart: React.FC<TerminalChartProps> = ({
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-3 h-0.5 bg-emerald-500 inline-block border-b border-dashed border-emerald-500"></span>
-            <span>+80$ صعود (تفعيل أمر GTC صعود عند 20%)</span>
+            <span>+80$ صعود (تفعيل أمر GTC صعود عند 65%)</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-3 h-0.5 bg-rose-500 inline-block border-b border-dashed border-rose-500"></span>
-            <span>-80$ هبوط (تفعيل أمر GTC هبوط عند 20%)</span>
+            <span>-80$ هبوط (تفعيل أمر GTC هبوط عند 65%)</span>
           </div>
         </div>
         <div className="text-sky-300 font-mono font-semibold">
-          ⚡ أمر معلق GTC @ 20% · إلغاء تلقائي عند بقاء 1 دقيقة
+          ⚡ أمر معلق GTC @ 65% · إلغاء تلقائي عند بقاء 1 دقيقة
         </div>
       </div>
     </div>

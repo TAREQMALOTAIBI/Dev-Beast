@@ -1110,7 +1110,7 @@ function setupApiMiddlewares(middlewares: any) {
           size: contractCount,
         };
 
-        console.log(`[Limitless LIVE 5m ORDER] Sending ${orderTypeEnum} order via SDK (5% Bankroll, GTC @ 20%)...`, {
+        console.log(`[Limitless LIVE 5m ORDER] Sending ${orderTypeEnum} order via SDK (5% Bankroll, GTC @ 65%)...`, {
           account: wallet.address,
           slug: activeMarketSlug,
           outcome: isLong ? 'UP' : 'DOWN',

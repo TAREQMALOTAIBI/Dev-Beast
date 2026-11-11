@@ -96,15 +96,15 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
           <h3 className="font-bold text-slate-100 text-xs tracking-wider uppercase flex items-center gap-1.5">
             <span>
               {isAr
-                ? 'استراتيجية تحرك 80$ · أمر GTC عند 20% · إلغاء عند بقاء 1 دقيقة'
-                : '$80 Movement Strategy · GTC @ 20% · Cancel @ 1m'}
+                ? 'استراتيجية تحرك 80$ · أمر GTC عند 65% · إلغاء عند بقاء 1 دقيقة'
+                : '$80 Movement Strategy · GTC @ 65% · Cancel @ 1m'}
             </span>
           </h3>
         </div>
 
         <div className="flex items-center gap-2">
           <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-sky-950 text-sky-300 border border-sky-700/60">
-            {isAr ? 'أمر GTC @ 20%' : 'GTC @ 20%'}
+            {isAr ? 'أمر GTC @ 65%' : 'GTC @ 65%'}
           </span>
 
           <button
@@ -165,7 +165,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             <span className="w-2.5 h-2.5 rounded-full bg-sky-400 animate-ping"></span>
             <div>
               <div className="font-bold text-sky-300 flex items-center gap-2">
-                <span>🎯 {isAr ? `يوجد أمر GTC معلق عند 20% ($0.20)` : `Pending GTC Order @ 20% ($0.20)`}</span>
+                <span>🎯 {isAr ? `يوجد أمر GTC معلق عند ${(pendingGtcOrder.price * 100).toFixed(0)}% ($${pendingGtcOrder.price.toFixed(2)})` : `Pending GTC Order @ ${(pendingGtcOrder.price * 100).toFixed(0)}% ($${pendingGtcOrder.price.toFixed(2)})`}</span>
                 <span className="text-[10px] bg-sky-900 text-sky-200 px-1.5 py-0.5 rounded font-mono">
                   {pendingGtcOrder.outcome}
                 </span>
@@ -196,7 +196,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
             <span>
               {isAr
-                ? '⚠️ تنبيه: الروبوت متوقف حالياً. اضغط "تشغيل الآن" ليقوم بوضع أمر GTC عند 20% تلقائياً عند تحرك السعر 80$.'
+                ? '⚠️ تنبيه: الروبوت متوقف حالياً. اضغط "تشغيل الآن" ليقوم بوضع أمر GTC عند 65% تلقائياً عند تحرك السعر 80$.'
                 : '⚠️ Notice: Bot is paused. Click Start Now to enable automatic GTC orders upon $80 price movement.'}
             </span>
           </div>
@@ -293,10 +293,10 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             <span>
               {isAr
                 ? (botActive
-                    ? '⚡ الروبوت يراقب حركة السعر: عند وصول الفارق إلى ≥ 80$ صعوداً أو هبوطاً يضع أمر GTC عند 20%، ويلغيه تلقائياً إذا بقي دقيقة واحدة دون تنفيذ.'
+                    ? '⚡ الروبوت يراقب حركة السعر: عند وصول الفارق إلى ≥ 80$ صعوداً أو هبوطاً يضع أمر GTC عند 65%، ويلغيه تلقائياً إذا بقي دقيقة واحدة دون تنفيذ.'
                     : 'التنفيذ التلقائي متوقف حالياً. اضغط الزر أعلاه لتشغيل الروبوت.')
                 : (botActive
-                    ? '⚡ Bot is monitoring: When price moves ≥ $80 up/down, places GTC @ 20% and cancels at 1 min remaining if unfilled.'
+                    ? '⚡ Bot is monitoring: When price moves ≥ $80 up/down, places GTC @ 65% and cancels at 1 min remaining if unfilled.'
                     : 'Automated execution is paused. Click above to start.')}
             </span>
           </div>
@@ -308,7 +308,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
             <div className="text-[11px] text-slate-300 font-semibold mb-2 flex items-center justify-between">
               <span className="flex items-center gap-1.5">
                 <Zap className="w-3.5 h-3.5 text-amber-400" />
-                <span>{isAr ? 'تجربة إرسال أمر GTC فوري عند 20% (0.20$):' : 'Test Instant GTC Order @ 20% ($0.20):'}</span>
+                <span>{isAr ? 'تجربة إرسال أمر GTC فوري عند 65% (0.65$):' : 'Test Instant GTC Order @ 65% ($0.65):'}</span>
               </span>
               <span className="text-[10px] text-sky-400 font-mono">GTC Limit</span>
             </div>
@@ -319,7 +319,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
                 className="py-2 px-3 rounded-lg font-bold text-xs bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <TrendingUp className="w-3.5 h-3.5" />
-                <span>{isAr ? 'أمر GTC صعود (UP @ 20%)' : 'GTC BUY UP @ 20%'}</span>
+                <span>{isAr ? 'أمر GTC صعود (UP @ 65%)' : 'GTC BUY UP @ 65%'}</span>
               </button>
               <button
                 onClick={() => onTriggerManualTrade('SHORT')}
@@ -327,7 +327,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
                 className="py-2 px-3 rounded-lg font-bold text-xs bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <TrendingDown className="w-3.5 h-3.5" />
-                <span>{isAr ? 'أمر GTC هبوط (DOWN @ 20%)' : 'GTC BUY DOWN @ 20%'}</span>
+                <span>{isAr ? 'أمر GTC هبوط (DOWN @ 65%)' : 'GTC BUY DOWN @ 65%'}</span>
               </button>
             </div>
           </div>
@@ -386,7 +386,7 @@ export const StrategyStatusCard: React.FC<StrategyStatusCardProps> = ({
           </div>
           <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col gap-0.5">
             <span className="text-slate-400 text-[10px]">{isAr ? 'نوع الأمر وسعر التنفيذ:' : 'Order Type & Price:'}</span>
-            <span className="text-sky-300 font-bold">GTC @ 20% ($0.20)</span>
+            <span className="text-sky-300 font-bold">GTC @ 65% ($0.65)</span>
           </div>
           <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 flex flex-col gap-0.5">
             <span className="text-slate-400 text-[10px]">{isAr ? 'شرط الإلغاء:' : 'Cancel Condition:'}</span>
